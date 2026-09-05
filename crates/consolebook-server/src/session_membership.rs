@@ -13,6 +13,7 @@ use time::OffsetDateTime;
 
 use crate::audit::{self, EventKind, Subject};
 use crate::capabilities::{self, Capability};
+use crate::storage;
 use crate::training_sessions::SessionRefusal;
 
 /// One trainer on a session.
@@ -138,14 +139,16 @@ pub async fn add_trainer(
     if !may_work(pool, actor_user_id, session_id).await? {
         return Ok(Err(SessionRefusal::CapabilityRequired));
     }
-    let mut tx = pool.begin().await.context("starting trainer add")?;
+    let mut tx = storage::write_tx(pool)
+        .await
+        .context("starting trainer add")?;
     let exists: Option<i64> = sqlx::query_scalar("SELECT 1 FROM training_session WHERE id = ?1")
         .bind(session_id)
         .fetch_optional(&mut *tx)
         .await
         .context("checking session")?;
     if exists.is_none() {
-        return Ok(Err(SessionRefusal::NoSuchSession));
+        return storage::refuse(tx, SessionRefusal::NoSuchSession).await;
     }
     let user_exists: Option<i64> = sqlx::query_scalar("SELECT 1 FROM user WHERE id = ?1")
         .bind(trainer_user_id)
@@ -153,7 +156,7 @@ pub async fn add_trainer(
         .await
         .context("checking trainer")?;
     if user_exists.is_none() {
-        return Ok(Err(SessionRefusal::NoSuchUser));
+        return storage::refuse(tx, SessionRefusal::NoSuchUser).await;
     }
     let can_author: Option<i64> =
         sqlx::query_scalar("SELECT 1 FROM capability_grant WHERE user_id = ?1 AND capability = ?2")
@@ -163,7 +166,7 @@ pub async fn add_trainer(
             .await
             .context("checking trainer capability")?;
     if can_author.is_none() {
-        return Ok(Err(SessionRefusal::TrainerLacksCapability));
+        return storage::refuse(tx, SessionRefusal::TrainerLacksCapability).await;
     }
     let member: Option<i64> = sqlx::query_scalar(
         "SELECT 1 FROM session_trainer WHERE session_id = ?1 AND trainer_user_id = ?2",
@@ -174,7 +177,7 @@ pub async fn add_trainer(
     .await
     .context("checking membership")?;
     if member.is_some() {
-        return Ok(Err(SessionRefusal::AlreadyMember));
+        return storage::refuse(tx, SessionRefusal::AlreadyMember).await;
     }
     let now = OffsetDateTime::now_utc().unix_timestamp();
     insert_member(&mut tx, session_id, trainer_user_id, actor_user_id, now).await?;
@@ -193,7 +196,9 @@ pub async fn remove_trainer(
     if !capabilities::user_has(pool, actor_user_id, Capability::AssignTraining).await? {
         return Ok(Err(SessionRefusal::CapabilityRequired));
     }
-    let mut tx = pool.begin().await.context("starting trainer removal")?;
+    let mut tx = storage::write_tx(pool)
+        .await
+        .context("starting trainer removal")?;
     let member: Option<i64> = sqlx::query_scalar(
         "SELECT 1 FROM session_trainer WHERE session_id = ?1 AND trainer_user_id = ?2",
     )
@@ -203,7 +208,7 @@ pub async fn remove_trainer(
     .await
     .context("checking membership")?;
     if member.is_none() {
-        return Ok(Err(SessionRefusal::NotMember));
+        return storage::refuse(tx, SessionRefusal::NotMember).await;
     }
     let count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM session_trainer WHERE session_id = ?1")
@@ -212,7 +217,7 @@ pub async fn remove_trainer(
             .await
             .context("counting trainers")?;
     if count <= 1 {
-        return Ok(Err(SessionRefusal::LastTrainer));
+        return storage::refuse(tx, SessionRefusal::LastTrainer).await;
     }
     sqlx::query("DELETE FROM session_trainer WHERE session_id = ?1 AND trainer_user_id = ?2")
         .bind(session_id)

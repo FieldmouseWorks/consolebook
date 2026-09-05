@@ -25,6 +25,7 @@ use crate::capabilities::{self, Capability};
 use crate::lifecycle::{self, EnrollmentStatus};
 use crate::session_membership::{self, SessionTrainerRow};
 use crate::session_time::{self, TimeRefusal};
+use crate::storage;
 
 /// Session dispositions: a closed set, like scale kinds (ADR 0007's
 /// pattern). Completed and interrupted training occupied their interval;
@@ -261,12 +262,12 @@ pub async fn create(
         Err(refusal) => return Ok(Err(refusal.into())),
     };
 
-    let mut tx = pool.begin().await.context("starting session")?;
+    let mut tx = storage::write_tx(pool).await.context("starting session")?;
     let Some(status) = lifecycle::status(&mut tx, enrollment_id).await? else {
-        return Ok(Err(SessionRefusal::NoSuchEnrollment));
+        return storage::refuse(tx, SessionRefusal::NoSuchEnrollment).await;
     };
     if status != EnrollmentStatus::Active {
-        return Ok(Err(SessionRefusal::EnrollmentInactive));
+        return storage::refuse(tx, SessionRefusal::EnrollmentInactive).await;
     }
     // The session stamps the pin at creation (migration 0007), so its
     // program and phase context stay historic across version changes.
@@ -284,7 +285,7 @@ pub async fn create(
                 .await
                 .context("checking session phase")?;
         if in_version.is_none() {
-            return Ok(Err(SessionRefusal::NoSuchPhase));
+            return storage::refuse(tx, SessionRefusal::NoSuchPhase).await;
         }
     }
     let trainers = match session_membership::validate_trainers(
@@ -295,10 +296,10 @@ pub async fn create(
     .await?
     {
         Ok(trainers) => trainers,
-        Err(refusal) => return Ok(Err(refusal)),
+        Err(refusal) => return storage::refuse(tx, refusal).await,
     };
     if overlaps(&mut tx, enrollment_id, times.utc_start, times.utc_end, 0).await? {
-        return Ok(Err(SessionRefusal::Overlap));
+        return storage::refuse(tx, SessionRefusal::Overlap).await;
     }
 
     let now = OffsetDateTime::now_utc().unix_timestamp();
@@ -386,7 +387,9 @@ pub async fn update_open(
         Ok(times) => times,
         Err(refusal) => return Ok(Err(refusal.into())),
     };
-    let mut tx = pool.begin().await.context("starting session update")?;
+    let mut tx = storage::write_tx(pool)
+        .await
+        .context("starting session update")?;
     let Some(row) = sqlx::query(
         "SELECT enrollment_id, disposition, phase_id FROM training_session WHERE id = ?1",
     )
@@ -395,11 +398,11 @@ pub async fn update_open(
     .await
     .context("reading session")?
     else {
-        return Ok(Err(SessionRefusal::NoSuchSession));
+        return storage::refuse(tx, SessionRefusal::NoSuchSession).await;
     };
     let disposition: Option<String> = row.get("disposition");
     if disposition.is_some() {
-        return Ok(Err(SessionRefusal::SessionClosed));
+        return storage::refuse(tx, SessionRefusal::SessionClosed).await;
     }
     let enrollment_id: i64 = row.get("enrollment_id");
     // A session's phase context comes from the version it was recorded
@@ -420,11 +423,11 @@ pub async fn update_open(
         .await
         .context("checking session phase")?;
         if in_version.is_none() {
-            return Ok(Err(SessionRefusal::NoSuchPhase));
+            return storage::refuse(tx, SessionRefusal::NoSuchPhase).await;
         }
     }
     if overlaps(&mut tx, enrollment_id, times.utc_start, None, session_id).await? {
-        return Ok(Err(SessionRefusal::Overlap));
+        return storage::refuse(tx, SessionRefusal::Overlap).await;
     }
     sqlx::query(
         "UPDATE training_session
@@ -466,7 +469,9 @@ pub async fn close(
     if !session_membership::may_work(pool, actor_user_id, session_id).await? {
         return Ok(Err(SessionRefusal::CapabilityRequired));
     }
-    let mut tx = pool.begin().await.context("starting session close")?;
+    let mut tx = storage::write_tx(pool)
+        .await
+        .context("starting session close")?;
     let Some(row) =
         sqlx::query("SELECT timezone, utc_start, disposition FROM training_session WHERE id = ?1")
             .bind(session_id)
@@ -474,11 +479,11 @@ pub async fn close(
             .await
             .context("reading session")?
     else {
-        return Ok(Err(SessionRefusal::NoSuchSession));
+        return storage::refuse(tx, SessionRefusal::NoSuchSession).await;
     };
     let already: Option<String> = row.get("disposition");
     if already.is_some() {
-        return Ok(Err(SessionRefusal::SessionClosed));
+        return storage::refuse(tx, SessionRefusal::SessionClosed).await;
     }
 
     let local_end = local_end.map(str::trim).filter(|value| !value.is_empty());
@@ -494,22 +499,22 @@ pub async fn close(
             .await
             .context("checking coverage")?;
             if covered.is_some() {
-                return Ok(Err(SessionRefusal::SessionDocumented));
+                return storage::refuse(tx, SessionRefusal::SessionDocumented).await;
             }
             if local_end.is_some() {
-                return Ok(Err(SessionRefusal::EndNotAllowed));
+                return storage::refuse(tx, SessionRefusal::EndNotAllowed).await;
             }
             (None, None)
         }
         Disposition::Completed | Disposition::Interrupted => {
             let Some(value) = local_end else {
-                return Ok(Err(SessionRefusal::EndRequired));
+                return storage::refuse(tx, SessionRefusal::EndRequired).await;
             };
             let timezone: String = row.get("timezone");
             let utc_start: i64 = row.get("utc_start");
             match session_time::resolve_end(&timezone, value, utc_start) {
                 Ok(instant) => (Some(value.to_owned()), Some(instant)),
-                Err(refusal) => return Ok(Err(refusal.into())),
+                Err(refusal) => return storage::refuse(tx, refusal.into()).await,
             }
         }
     };

@@ -20,23 +20,17 @@ use uuid::Uuid;
 /// Busy timeout applied to every connection.
 pub const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Begins an immediate (write) transaction: the write lock is taken up
-/// front, so a check-then-write path validates against the committed
-/// state and a concurrent writer waits out the busy timeout instead of
-/// failing its read snapshot mid-transaction — typed refusals stay typed
-/// under concurrency. New write paths use this; #27 tracks retrofitting
-/// the earlier deferred ones.
+/// Begins an immediate write transaction before transactional validation.
+/// All application-owned write transactions use this reservation (ADR 0019).
+/// A concurrent writer waits up to the connection's busy timeout, then checks
+/// committed state; exceeding that timeout remains an operational error.
 pub async fn write_tx(pool: &SqlitePool) -> sqlx::Result<sqlx::Transaction<'static, sqlx::Sqlite>> {
     pool.begin_with("BEGIN IMMEDIATE").await
 }
 
-/// Ends a write transaction on a refusal path with the rollback awaited,
-/// so the write lock never outlives the decision. A dropped transaction
-/// only queues its rollback on the connection's worker thread; until that
-/// runs, the lock lingers — and a deferred writer elsewhere meets it as
-/// an immediate `SQLITE_BUSY`, because `SQLite` does not consult the busy
-/// timeout when promoting an open read transaction to a write (#27 tracks
-/// converting those deferred paths themselves).
+/// Ends a write transaction on a typed refusal with rollback awaited, so
+/// the write lock is released before the refusal returns. Dropping a `SQLx`
+/// transaction only queues rollback on its connection's worker (ADR 0019).
 pub async fn refuse<T, E>(
     tx: sqlx::Transaction<'static, sqlx::Sqlite>,
     refusal: E,

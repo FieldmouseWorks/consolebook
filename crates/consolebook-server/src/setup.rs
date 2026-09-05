@@ -12,6 +12,7 @@ use time::OffsetDateTime;
 use crate::audit::{self, EventKind};
 use crate::capabilities::{self, ADMINISTRATOR_BUNDLE};
 use crate::secrets::{self, OpaqueSecret};
+use crate::storage;
 use crate::users;
 
 /// Whether the installation has completed first-run setup.
@@ -32,10 +33,17 @@ pub async fn agency_name(pool: &SqlitePool) -> Result<Option<String>> {
 /// initialized. The raw code is shown once (server log or command output)
 /// and only its digest is stored.
 pub async fn issue_setup_code(pool: &SqlitePool) -> Result<Option<(OpaqueSecret, i64)>> {
-    if is_initialized(pool).await? {
+    let code = secrets::generate_one_time_code()?;
+    let mut tx = storage::write_tx(pool).await?;
+    let initialized: Option<i64> = sqlx::query_scalar("SELECT 1 FROM agency WHERE id = 1")
+        .fetch_optional(&mut *tx)
+        .await?;
+    if initialized.is_some() {
+        tx.rollback()
+            .await
+            .context("rolling back setup-code refusal")?;
         return Ok(None);
     }
-    let code = secrets::generate_one_time_code()?;
     let expires_at = OffsetDateTime::now_utc().unix_timestamp() + users::CODE_TTL_SECONDS;
     sqlx::query(
         "INSERT INTO setup_code (id, code_hash, expires_at) VALUES (1, ?1, ?2)
@@ -43,9 +51,10 @@ pub async fn issue_setup_code(pool: &SqlitePool) -> Result<Option<(OpaqueSecret,
     )
     .bind(&code.digest_hex)
     .bind(expires_at)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .context("storing setup code")?;
+    tx.commit().await.context("committing setup code")?;
     Ok(Some((code, expires_at)))
 }
 
@@ -89,12 +98,12 @@ pub async fn initialize(
     let password_hash = secrets::hash_password(password)?;
     let now = OffsetDateTime::now_utc().unix_timestamp();
 
-    let mut tx = pool.begin().await?;
+    let mut tx = storage::write_tx(pool).await?;
     let initialized: Option<i64> = sqlx::query_scalar("SELECT 1 FROM agency WHERE id = 1")
         .fetch_optional(&mut *tx)
         .await?;
     if initialized.is_some() {
-        return Ok(Err(SetupRefusal::AlreadyInitialized));
+        return storage::refuse(tx, SetupRefusal::AlreadyInitialized).await;
     }
     let valid: Option<i64> = sqlx::query_scalar(
         "SELECT 1 FROM setup_code WHERE id = 1 AND code_hash = ?1 AND expires_at > ?2",
@@ -104,7 +113,7 @@ pub async fn initialize(
     .fetch_optional(&mut *tx)
     .await?;
     if valid.is_none() {
-        return Ok(Err(SetupRefusal::InvalidCode));
+        return storage::refuse(tx, SetupRefusal::InvalidCode).await;
     }
 
     sqlx::query("INSERT INTO agency (id, name, created_at) VALUES (1, ?1, ?2)")

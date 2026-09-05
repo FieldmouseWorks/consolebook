@@ -16,6 +16,7 @@ use crate::audit::{self, EventKind, Subject};
 use crate::capabilities::{self, Capability};
 use crate::lifecycle::{self, EnrollmentStatus};
 use crate::notices::{self, NoticeKind};
+use crate::storage;
 
 /// One assignment on an enrollment, with the trainer resolved.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -101,12 +102,14 @@ pub async fn create(
     if !capabilities::user_has(pool, actor_user_id, Capability::AssignTraining).await? {
         return Ok(Err(AssignRefusal::CapabilityRequired));
     }
-    let mut tx = pool.begin().await.context("starting assignment")?;
+    let mut tx = storage::write_tx(pool)
+        .await
+        .context("starting assignment")?;
     let Some(status) = lifecycle::status(&mut tx, enrollment_id).await? else {
-        return Ok(Err(AssignRefusal::NoSuchEnrollment));
+        return storage::refuse(tx, AssignRefusal::NoSuchEnrollment).await;
     };
     if status != EnrollmentStatus::Active {
-        return Ok(Err(AssignRefusal::EnrollmentInactive));
+        return storage::refuse(tx, AssignRefusal::EnrollmentInactive).await;
     }
     let trainer_exists: Option<i64> = sqlx::query_scalar("SELECT 1 FROM user WHERE id = ?1")
         .bind(trainer_user_id)
@@ -114,7 +117,7 @@ pub async fn create(
         .await
         .context("checking trainer")?;
     if trainer_exists.is_none() {
-        return Ok(Err(AssignRefusal::NoSuchUser));
+        return storage::refuse(tx, AssignRefusal::NoSuchUser).await;
     }
     let can_view: Option<i64> =
         sqlx::query_scalar("SELECT 1 FROM capability_grant WHERE user_id = ?1 AND capability = ?2")
@@ -124,7 +127,7 @@ pub async fn create(
             .await
             .context("checking trainer capability")?;
     if can_view.is_none() {
-        return Ok(Err(AssignRefusal::TrainerLacksCapability));
+        return storage::refuse(tx, AssignRefusal::TrainerLacksCapability).await;
     }
     let duplicate: Option<i64> = sqlx::query_scalar(
         "SELECT 1 FROM training_assignment
@@ -136,7 +139,7 @@ pub async fn create(
     .await
     .context("checking duplicate assignment")?;
     if duplicate.is_some() {
-        return Ok(Err(AssignRefusal::AlreadyAssigned));
+        return storage::refuse(tx, AssignRefusal::AlreadyAssigned).await;
     }
 
     let result = sqlx::query(
@@ -195,7 +198,9 @@ pub async fn end(
     if !capabilities::user_has(pool, actor_user_id, Capability::AssignTraining).await? {
         return Ok(Err(AssignRefusal::CapabilityRequired));
     }
-    let mut tx = pool.begin().await.context("starting assignment end")?;
+    let mut tx = storage::write_tx(pool)
+        .await
+        .context("starting assignment end")?;
     let ended_at: Option<Option<i64>> =
         sqlx::query_scalar("SELECT ended_at FROM training_assignment WHERE id = ?1")
             .bind(assignment_id)
@@ -203,8 +208,8 @@ pub async fn end(
             .await
             .context("checking assignment")?;
     match ended_at {
-        None => return Ok(Err(AssignRefusal::NoSuchAssignment)),
-        Some(Some(_)) => return Ok(Err(AssignRefusal::AlreadyEnded)),
+        None => return storage::refuse(tx, AssignRefusal::NoSuchAssignment).await,
+        Some(Some(_)) => return storage::refuse(tx, AssignRefusal::AlreadyEnded).await,
         Some(None) => {}
     }
     sqlx::query("UPDATE training_assignment SET ended_at = ?1, ended_by = ?2 WHERE id = ?3")

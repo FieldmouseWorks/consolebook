@@ -17,6 +17,7 @@ use sqlx::SqlitePool;
 use crate::audit::EventKind;
 use crate::capabilities::{self, Capability};
 use crate::programs::{self, VersionContent};
+use crate::storage;
 
 /// Envelope discriminator for this document family.
 pub const FORMAT: &str = "consolebook-program-version";
@@ -105,7 +106,7 @@ pub async fn import_version(
         return Ok(Err(ImportRefusal::Invalid(problems)));
     }
 
-    let mut tx = pool.begin().await.context("starting import")?;
+    let mut tx = storage::write_tx(pool).await.context("starting import")?;
     let program_id = match target {
         ImportTarget::NewProgram => {
             let name = envelope.content.name.trim();
@@ -116,7 +117,7 @@ pub async fn import_version(
                     .await
                     .context("checking program name")?;
             if taken.is_some() {
-                return Ok(Err(ImportRefusal::ProgramNameTaken));
+                return storage::refuse(tx, ImportRefusal::ProgramNameTaken).await;
             }
             programs::insert_program(&mut tx, name, actor_user_id).await?
         }
@@ -127,7 +128,7 @@ pub async fn import_version(
                 .await
                 .context("checking program")?;
             if exists.is_none() {
-                return Ok(Err(ImportRefusal::NoSuchProgram));
+                return storage::refuse(tx, ImportRefusal::NoSuchProgram).await;
             }
             program_id
         }

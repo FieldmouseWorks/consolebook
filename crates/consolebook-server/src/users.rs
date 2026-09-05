@@ -12,6 +12,7 @@ use crate::audit::{self, EventKind};
 use crate::capabilities::{self, Capability};
 use crate::secrets::{self, OpaqueSecret};
 use crate::sessions;
+use crate::storage;
 
 /// Lifetime of setup and password-reset codes.
 pub const CODE_TTL_SECONDS: i64 = 15 * 60;
@@ -197,7 +198,18 @@ pub async fn create_with_reset_code(
     let unusable = secrets::generate_one_time_code()?;
     let password_hash = secrets::hash_password(&unusable.raw)?;
 
-    let mut tx = pool.begin().await?;
+    let mut tx = storage::write_tx(pool).await?;
+    // The early lookup saves hashing for an existing name; only this
+    // reserved-transaction check can decide uniqueness under concurrency.
+    let taken: Option<i64> =
+        sqlx::query_scalar("SELECT 1 FROM user WHERE username = ?1 COLLATE NOCASE")
+            .bind(username)
+            .fetch_optional(&mut *tx)
+            .await
+            .context("checking username in write transaction")?;
+    if taken.is_some() {
+        return storage::refuse(tx, CreateUserRefusal::UsernameTaken).await;
+    }
     let user_id = create(
         &mut tx,
         username,
@@ -291,7 +303,7 @@ pub async fn issue_reset_code(
         ResetOrigin::Recovery => ("recovery", None, EventKind::RecoveryCodeIssued),
     };
 
-    let mut tx = pool.begin().await?;
+    let mut tx = storage::write_tx(pool).await?;
     sqlx::query(
         "INSERT INTO password_reset_code
          (user_id, code_hash, issued_via, issued_by, issued_at, expires_at)
@@ -346,7 +358,7 @@ pub async fn use_reset_code(
     // transaction open.
     let password_hash = secrets::hash_password(new_password)?;
 
-    let mut tx = pool.begin().await?;
+    let mut tx = storage::write_tx(pool).await?;
     let code_id: Option<i64> = sqlx::query_scalar(
         "SELECT id FROM password_reset_code
          WHERE user_id = ?1 AND code_hash = ?2 AND used_at IS NULL AND expires_at > ?3",
@@ -358,6 +370,7 @@ pub async fn use_reset_code(
     .await
     .context("looking up reset code")?;
     let Some(code_id) = code_id else {
+        tx.rollback().await.context("rolling back invalid reset")?;
         return Ok(ResetOutcome::Invalid);
     };
     sqlx::query("UPDATE password_reset_code SET used_at = ?1 WHERE id = ?2")

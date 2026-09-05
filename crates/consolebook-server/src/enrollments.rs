@@ -13,6 +13,7 @@ use time::OffsetDateTime;
 
 use crate::audit::{self, EventKind, Subject};
 use crate::capabilities::{self, Capability, TRAINEE_BUNDLE};
+use crate::storage;
 
 /// One enrollee of a program version, with presentation fields resolved.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -50,18 +51,20 @@ pub async fn enroll(
     if !holds_assign_training(pool, actor_user_id).await? {
         return Ok(Err(EnrollRefusal::CapabilityRequired));
     }
-    let mut tx = pool.begin().await.context("starting enrollment")?;
+    let mut tx = storage::write_tx(pool)
+        .await
+        .context("starting enrollment")?;
     let version = sqlx::query("SELECT published_at FROM program_version WHERE id = ?1")
         .bind(version_id)
         .fetch_optional(&mut *tx)
         .await
         .context("checking version")?;
     match version {
-        None => return Ok(Err(EnrollRefusal::NoSuchVersion)),
+        None => return storage::refuse(tx, EnrollRefusal::NoSuchVersion).await,
         Some(row) => {
             let published_at: Option<i64> = row.get("published_at");
             if published_at.is_none() {
-                return Ok(Err(EnrollRefusal::NotPublished));
+                return storage::refuse(tx, EnrollRefusal::NotPublished).await;
             }
         }
     }
@@ -71,7 +74,7 @@ pub async fn enroll(
         .await
         .context("checking user")?;
     if user_exists.is_none() {
-        return Ok(Err(EnrollRefusal::NoSuchUser));
+        return storage::refuse(tx, EnrollRefusal::NoSuchUser).await;
     }
     let duplicate: Option<i64> = sqlx::query_scalar(
         "SELECT 1 FROM enrollment WHERE user_id = ?1 AND program_version_id = ?2",
@@ -82,7 +85,7 @@ pub async fn enroll(
     .await
     .context("checking enrollment")?;
     if duplicate.is_some() {
-        return Ok(Err(EnrollRefusal::AlreadyEnrolled));
+        return storage::refuse(tx, EnrollRefusal::AlreadyEnrolled).await;
     }
     let now = OffsetDateTime::now_utc().unix_timestamp();
     let result = sqlx::query(
