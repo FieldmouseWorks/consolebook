@@ -50,3 +50,6 @@ pub mod zip_container;
 
 /// Version of the running build, as reported by `/api/health` and `doctor`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+pub mod retention;
+pub mod retention_http;

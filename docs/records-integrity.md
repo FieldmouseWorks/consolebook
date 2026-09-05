@@ -95,7 +95,8 @@ An amendment never inherits acknowledgment silently.
 
 Immutability governs records while they are retained. It does not overrule an approved records-retention schedule or authorize keeping personal data forever.
 
-The next Milestone 5 slice implements retention as this explicit workflow:
+Policy and hold administration is implemented in ADR 0020. The complete
+disposition workflow remains [#64](https://github.com/FieldmouseWorks/consolebook/issues/64):
 
 1. a versioned policy identifies the record class, disposition authority, trigger, retention period, and action;
 2. the service checks for litigation, anticipated-litigation, audit, investigation, public-records-request, and other configured holds;

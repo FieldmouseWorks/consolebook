@@ -13,6 +13,7 @@ use time::OffsetDateTime;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Capability {
     ManageUsers,
+    ManageRetention,
     ManagePrograms,
     AssignTraining,
     ExportRecords,
@@ -27,6 +28,7 @@ impl Capability {
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::ManageRetention => "manage_retention",
             Self::ManageUsers => "manage_users",
             Self::ManagePrograms => "manage_programs",
             Self::AssignTraining => "assign_training",

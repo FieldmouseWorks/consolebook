@@ -1,7 +1,7 @@
 # Domain Model
 
 Consolebook uses a training domain with versioned agency configuration. These
-are domain concepts, not a table inventory. Retention/disposition, attachments,
+are domain concepts, not a table inventory. Disposition execution, attachments,
 and PDF presentation remain design targets; see [roadmap.md](roadmap.md).
 
 ## Configuration
@@ -154,9 +154,11 @@ A RecordExport is an archive of finalized EvaluationVersions as stored: each ver
 
 A TraineePacket is everything retained about one enrollment as one archive (`docs/formats/trainee-packet.md`, ADR 0015): the record export's units for every retained version of every record, plus typed documents for the enrollment's lifecycle and phase history, every acknowledgment, every amendment, and the full task signoff history, named with hashes by one packet manifest. The trainee may produce their own; so may whoever reads the enrollment's training history and `export_records` holders. It verifies with the same verifier as a record export.
 
-## Retention and disposition (planned)
+## Retention and disposition
 
 ### RetentionPolicy
+
+Policy and hold administration is implemented under [ADR 0020](decisions/0020-retention-policy-and-hold-administration.md). Disposition execution remains #64 work.
 
 A versioned RetentionPolicy maps record classes to an approved disposition authority, trigger, minimum retention period, action, and rules for any destruction log. Installations configure policy; Consolebook does not pretend one jurisdiction's schedule is universal.
 
@@ -164,7 +166,7 @@ A versioned RetentionPolicy maps record classes to an approved disposition autho
 
 A RecordHold suspends disposition for an explicit scope. Holds may represent litigation, anticipated litigation, audit, investigation, public-records request, or another configured authority. Creating, changing, and releasing a hold requires attribution and a reason.
 
-### DispositionEvent
+### DispositionEvent (planned)
 
 A DispositionEvent records an authorized disposition attempt and its result. Where policy permits or requires a retained tombstone, it may contain only the minimum approved fields, such as:
 
@@ -185,9 +187,9 @@ The event does not preserve destroyed narratives, attachments, presentation snap
 Security- and record-sensitive actions produce append-only audit events. The
 implemented vocabulary covers authentication and recovery, assignments and
 enrollment lifecycle, draft and review workflow, finalization,
-acknowledgments, amendments, exports, and backup or restore operations. Hold
-and disposition events join that vocabulary with the Milestone 5 retention
-slice.
+acknowledgments, amendments, exports, backup or restore operations, retention
+authority and policy changes, and hold creation/replacement/release. Disposition
+events remain part of the later execution stage.
 
 An audit event supplements the immutable domain record. It is not a substitute for version history.
 

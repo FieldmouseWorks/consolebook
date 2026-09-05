@@ -15,6 +15,9 @@
 			<nav class="primary" aria-label="Primary">
 				<a href="/">Home</a>
 				<a href="/programs">Programs</a>
+				{#if data.session.capabilities.includes("manage_retention") || data.session.capabilities.includes("manage_users")}
+					<a href="/retention">Retention</a>
+				{/if}
 				{#if data.session.capabilities.includes('view_own_records')}
 					<a href="/records">My records</a>
 				{/if}

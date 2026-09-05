@@ -24,7 +24,7 @@ tests show what is implemented. [Roadmap](roadmap.md) owns milestone status.
 | Summaries and signoffs | `summaries.rs`, `task_signoffs.rs` | [ADR 0013](decisions/0013-weekly-summaries-and-task-signoffs.md) |
 | Record exports | `record_export.rs`, `export_verify.rs`, `zip_container.rs` | [ADR 0014](decisions/0014-record-export-format.md), [Export format](formats/record-export.md) |
 | Trainee packets | `trainee_packet.rs`, `packet_verify.rs` | [ADR 0015](decisions/0015-trainee-packet.md), [ADR 0017](decisions/0017-packet-pin-timeline-verification.md), [Packet format](formats/trainee-packet.md) |
-| Retention, holds, disposition (planned) | No implemented service yet | [Integrity](records-integrity.md), [Milestone 5 decisions](https://github.com/FieldmouseWorks/consolebook/issues/44) |
+| Retention policy and holds | `retention.rs`, `retention/`, `retention_http.rs` | [ADR 0020](decisions/0020-retention-policy-and-hold-administration.md), [Operator guide](retention.md); disposition execution remains [#64](https://github.com/FieldmouseWorks/consolebook/issues/64) |
 | Web shell and HTTP | `http.rs`, `web_assets.rs`, `notices.rs`, domain `*_http.rs` modules | [ADR 0005](decisions/0005-embedded-web-interface.md), web map below |
 | Preview operations | Separate host installation | [Preview runbook](preview.md) |
 
@@ -77,7 +77,10 @@ snapshot; check where the decision is evaluated. See the
 
 The UI is a client-routed SPA. `web/src/routes/+layout.ts` guards setup and
 authentication; `+layout.svelte` owns navigation and shared styling.
-`web/src/lib/api.ts` owns typed same-origin HTTP calls.
+`web/src/lib/api/transport.ts` owns shared same-origin requests and typed errors.
+`web/src/lib/api.ts` keeps compatible legacy imports and domain calls;
+`web/src/lib/api/retention.ts` owns retention contracts.
+`web/src/lib/retention/` owns policy editing, hold editing, and authority controls.
 `web/src/lib/editor/` contains program-authoring components.
 
 `web/e2e/fixtures.ts` supplies each scenario's server, base URL, and setup code.
@@ -93,6 +96,7 @@ and assertions in their own specs.
 | `/enrollments/[id]` | Lifecycle, assignments, sessions, summaries, signoffs, exports |
 | `/drafts/[id]` | Authoring, review, finalized presentation, acknowledgment, amendments |
 | `/records` | Trainee's own timeline and packet downloads |
+| `/retention` | Explicit authority, versioned policies, and attributed holds; no disposition execution |
 
 ## Local workflow
 

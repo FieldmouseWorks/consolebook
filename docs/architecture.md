@@ -21,7 +21,7 @@ HTTP API and application services
   +-- sessions and evaluation workflow
   +-- immutable record versions
   +-- acknowledgments and amendments
-  +-- holds, retention, and lawful disposition (planned)
+  +-- retention policy and holds (disposition execution planned)
   +-- authorization and audit
   +-- in-app notifications
   +-- exports and recovery
@@ -99,7 +99,8 @@ data/
 
 `DataDir` owns these paths. SQLite and application state live under this one
 root; runtime services do not require an external database, queue, cache, or
-object store. Retention policies for records remain Milestone 5 work.
+object store. Retention policies and holds are configurable; disposition execution remains
+Milestone 5 work.
 
 ## Backups
 
@@ -159,12 +160,11 @@ SMTP may be added later as an optional delivery adapter. It mirrors an in-app no
 
 ## Retention and disposition
 
-Retention policy, record holds, and lawful disposition are the next Milestone 5
-slice. They belong to application services with explicit capabilities and
-audit events. Normal service methods and database triggers already reject
-mutation or deletion of finalized content. The separate disposition path will
-check applicable policy and holds, preview scope, record authority, and remove
-only the approved material.
+Versioned retention policies and attributed holds are administered through
+explicit `manage_retention` grants and the operator interface (ADR 0020).
+The separate confirmed-disposition workflow remains #64 work. Normal service
+methods and database triggers still reject mutation or deletion of finalized
+content. Policy configuration and hold lookup do not authorize destruction.
 
 Disposition records have retention rules of their own. The architecture must not keep personal metadata forever merely to make an integrity chain convenient.
 
