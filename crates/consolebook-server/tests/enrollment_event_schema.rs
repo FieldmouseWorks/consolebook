@@ -270,13 +270,18 @@ async fn upgrade_preserves_history_references_schema_objects_and_packet_bytes() 
     let mut connection = pool.acquire().await.expect("inspect upgraded storage");
     assert_eq!(before, history(&mut connection).await);
     let after_schema = schema(&mut connection).await;
-    let retained_schema: Vec<_> = after_schema
-        .into_iter()
-        .filter(|(_, name, _, _)| name != "enrollment_event_version_reference_shape")
-        .collect();
-    assert_eq!(
-        before_schema, retained_schema,
-        "existing tables, indexes, and triggers stay intact"
+    // Later forward migrations may add owners. Every pre-upgrade schema
+    // object must still be present with exactly the same definition.
+    for object in before_schema {
+        assert!(
+            after_schema.contains(&object),
+            "existing schema object changed: {object:?}"
+        );
+    }
+    assert!(
+        after_schema
+            .iter()
+            .any(|(_, name, _, _)| name == "enrollment_event_version_reference_shape")
     );
     let foreign_keys: i64 = sqlx::query_scalar("PRAGMA foreign_keys")
         .fetch_one(&mut *connection)

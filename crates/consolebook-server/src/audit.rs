@@ -12,6 +12,12 @@ use time::OffsetDateTime;
 /// milestones extend this with record-lifecycle kinds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventKind {
+    RetentionAuthorityGranted,
+    RetentionAuthorityRevoked,
+    RetentionPolicyCreated,
+    RecordHoldCreated,
+    RecordHoldReplaced,
+    RecordHoldReleased,
     SetupCompleted,
     LoginSucceeded,
     LoginFailed,
@@ -56,6 +62,12 @@ impl EventKind {
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::RetentionAuthorityGranted => "retention_authority_granted",
+            Self::RetentionAuthorityRevoked => "retention_authority_revoked",
+            Self::RetentionPolicyCreated => "retention_policy_created",
+            Self::RecordHoldCreated => "record_hold_created",
+            Self::RecordHoldReplaced => "record_hold_replaced",
+            Self::RecordHoldReleased => "record_hold_released",
             Self::SetupCompleted => "setup_completed",
             Self::LoginSucceeded => "login_succeeded",
             Self::LoginFailed => "login_failed",
@@ -103,6 +115,8 @@ impl EventKind {
 /// append-only and must never block lawful disposition of its subjects.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Subject {
+    RetentionPolicy(i64),
+    RecordHold(i64),
     Program(i64),
     ProgramVersion(i64),
     Enrollment(i64),
@@ -115,6 +129,8 @@ impl Subject {
     #[must_use]
     pub fn kind_str(self) -> &'static str {
         match self {
+            Self::RetentionPolicy(_) => "retention_policy",
+            Self::RecordHold(_) => "record_hold",
             Self::Program(_) => "program",
             Self::ProgramVersion(_) => "program_version",
             Self::Enrollment(_) => "enrollment",
@@ -127,7 +143,9 @@ impl Subject {
     #[must_use]
     pub fn id(self) -> i64 {
         match self {
-            Self::Program(id)
+            Self::RetentionPolicy(id)
+            | Self::RecordHold(id)
+            | Self::Program(id)
             | Self::ProgramVersion(id)
             | Self::Enrollment(id)
             | Self::Assignment(id)

@@ -12,7 +12,11 @@ and the trainee timeline, amendments and successor versions
 schema 2). Milestone 5 is in progress under #44. Its first two slices are
 complete: file-verifiable structured record exports (#46, ADR 0014) and
 complete trainee packets (#50, ADR 0015). Slice 3 — retention policy,
-holds, lawful disposition, tombstones, and explicit authority — is next.
+holds, lawful disposition, tombstones, and explicit authority — is tracked in
+[#64](https://github.com/FieldmouseWorks/consolebook/issues/64). Its administration
+stage (#65, ADR 0020) provides policy versions, holds, and explicit administration
+authority. Confirmed disposition, backup/restore scope, tombstones, and portable
+policy-boundary evidence remain next.
 
 For continuation, start with the approved design in
 [#44](https://github.com/FieldmouseWorks/consolebook/issues/44) and check the
