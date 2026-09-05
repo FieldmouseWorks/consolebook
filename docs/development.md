@@ -16,7 +16,7 @@ tests show what is implemented. [Roadmap](roadmap.md) owns milestone status.
 | Backups and restore | `backup.rs`, `scheduler.rs`, `restore.rs`, `serve_lock.rs` | [ADR 0006](decisions/0006-backup-scheduling-and-restore.md) |
 | Setup, login, recovery | `setup.rs`, `users.rs`, `sessions.rs`, `secrets.rs` | [ADR 0004](decisions/0004-local-authentication.md) |
 | Capabilities and assignments | `capabilities.rs`, `assignments.rs`, `draft_access.rs` | [ADR 0010](decisions/0010-service-owned-authorization-boundary.md), [Domain model](domain-model.md) |
-| Program configuration | `programs.rs`, `program_export.rs` | [ADR 0007](decisions/0007-program-version-configuration-model.md), [Program format](formats/program-version-export.md) |
+| Program configuration | `programs.rs`, `programs/content.rs`, `programs/persistence.rs`, `program_export.rs` | [ADR 0007](decisions/0007-program-version-configuration-model.md), [Program format](formats/program-version-export.md) |
 | Enrollment and training sessions | `enrollments.rs`, `lifecycle.rs`, `training_sessions.rs`, `session_membership.rs`, `session_time.rs` | [ADR 0008](decisions/0008-session-draft-and-attribution-model.md), [ADR 0009](decisions/0009-session-local-time-resolution.md), [ADR 0018](decisions/0018-enrollment-event-reference-shape.md) |
 | Drafts and review | `evaluation_drafts.rs`, `draft_content.rs`, `draft_review.rs` | [ADR 0008](decisions/0008-session-draft-and-attribution-model.md), [ADR 0010](decisions/0010-service-owned-authorization-boundary.md) |
 | Finalization and canonical bytes | `finalization.rs`, `canonical.rs`, `record_envelope.rs` | [Integrity](records-integrity.md), [ADR 0011](decisions/0011-canonical-record-format-and-finalization.md) |
@@ -59,9 +59,16 @@ Policy belongs in services; persisted constraints also have database backstops.
 `sessions.rs` owns login sessions; `training_sessions.rs` owns periods of
 training. Do not infer policy from a role name or a UI guard.
 
-New write paths use `storage::write_tx` and await rollback on refusal through
-`storage::refuse`. Earlier deferred write transactions still need the
-[#27 retrofit](https://github.com/FieldmouseWorks/consolebook/issues/27).
+Application-owned write transactions use `storage::write_tx` and await rollback
+on refusal through `storage::refuse` (or directly for outcome/optional returns).
+Read-only snapshots remain deferred. [ADR 0019](decisions/0019-immediate-write-transactions.md)
+owns the transaction discipline and contention limits; `tests/write_transactions.rs`
+and its domain child modules own concurrency proof.
+
+`programs.rs` owns policy and transaction orchestration; `programs/content.rs`
+owns configuration vocabulary and validation; `programs/persistence.rs` owns
+content persistence and caller-transaction inserts. Public imports remain under
+`programs`.
 A transaction's presence alone does not prove authorization shares its
 snapshot; check where the decision is evaluated. See the
 [domain-model qualification](domain-model.md#application-service-invariants).

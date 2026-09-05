@@ -24,6 +24,7 @@ use time::OffsetDateTime;
 use crate::assignments;
 use crate::audit::{self, EventKind, Subject};
 use crate::capabilities::{self, Capability};
+use crate::storage;
 
 /// Enrollment status, derived from the event stream and never stored
 /// beside it.
@@ -347,19 +348,21 @@ pub async fn record_enrollment_event(
         return Ok(Err(LifecycleRefusal::ReasonRequired));
     }
 
-    let mut tx = pool.begin().await.context("starting lifecycle event")?;
+    let mut tx = storage::write_tx(pool)
+        .await
+        .context("starting lifecycle event")?;
     let Some(current_status) = status(&mut tx, enrollment_id).await? else {
-        return Ok(Err(LifecycleRefusal::NoSuchEnrollment));
+        return storage::refuse(tx, LifecycleRefusal::NoSuchEnrollment).await;
     };
     match kind {
         EnrollmentEventKind::Reinstate => {
             if current_status == EnrollmentStatus::Active {
-                return Ok(Err(LifecycleRefusal::AlreadyActive));
+                return storage::refuse(tx, LifecycleRefusal::AlreadyActive).await;
             }
         }
         _ => {
             if current_status != EnrollmentStatus::Active {
-                return Ok(Err(LifecycleRefusal::NotActive));
+                return storage::refuse(tx, LifecycleRefusal::NotActive).await;
             }
         }
     }
@@ -380,12 +383,12 @@ pub async fn record_enrollment_event(
                     .await
                     .context("reading enrollment pin")?;
             let Some(to) = to_version_id else {
-                return Ok(Err(LifecycleRefusal::NoSuchVersion));
+                return storage::refuse(tx, LifecycleRefusal::NoSuchVersion).await;
             };
             if let Some(refusal) =
                 version_change_refusal(&mut tx, enrollment_id, trainee, from, to).await?
             {
-                return Ok(Err(refusal));
+                return storage::refuse(tx, refusal).await;
             }
             (Some(from), Some(to), EventKind::EnrollmentVersionChanged)
         }
@@ -464,12 +467,14 @@ pub async fn record_phase_event(
         return Ok(Err(LifecycleRefusal::EffectiveInFuture));
     }
 
-    let mut tx = pool.begin().await.context("starting phase event")?;
+    let mut tx = storage::write_tx(pool)
+        .await
+        .context("starting phase event")?;
     let Some(current_status) = status(&mut tx, enrollment_id).await? else {
-        return Ok(Err(LifecycleRefusal::NoSuchEnrollment));
+        return storage::refuse(tx, LifecycleRefusal::NoSuchEnrollment).await;
     };
     if current_status != EnrollmentStatus::Active {
-        return Ok(Err(LifecycleRefusal::NotActive));
+        return storage::refuse(tx, LifecycleRefusal::NotActive).await;
     }
     let latest_effective: Option<i64> =
         sqlx::query_scalar("SELECT MAX(effective_at) FROM phase_event WHERE enrollment_id = ?1")
@@ -478,7 +483,7 @@ pub async fn record_phase_event(
             .await
             .context("reading latest effective instant")?;
     if latest_effective.is_some_and(|latest| effective < latest) {
-        return Ok(Err(LifecycleRefusal::OutOfOrder));
+        return storage::refuse(tx, LifecycleRefusal::OutOfOrder).await;
     }
     // The version-change event that opened the current epoch is recorded
     // history too: a phase event cannot take effect before its epoch
@@ -494,7 +499,7 @@ pub async fn record_phase_event(
     .await
     .context("reading epoch boundary")?;
     if epoch_opened.is_some_and(|opened| effective < opened) {
-        return Ok(Err(LifecycleRefusal::OutOfOrder));
+        return storage::refuse(tx, LifecycleRefusal::OutOfOrder).await;
     }
 
     let pinned: i64 = sqlx::query_scalar("SELECT program_version_id FROM enrollment WHERE id = ?1")
@@ -508,10 +513,10 @@ pub async fn record_phase_event(
     let (from_phase, to_phase) = match kind {
         PhaseEventKind::Advance | PhaseEventKind::Return | PhaseEventKind::Restart => {
             if paused {
-                return Ok(Err(LifecycleRefusal::Paused));
+                return storage::refuse(tx, LifecycleRefusal::Paused).await;
             }
             let Some(to) = to_phase_id else {
-                return Ok(Err(LifecycleRefusal::NoSuchPhase));
+                return storage::refuse(tx, LifecycleRefusal::NoSuchPhase).await;
             };
             let target_in_version: Option<i64> =
                 sqlx::query_scalar("SELECT 1 FROM phase WHERE id = ?1 AND program_version_id = ?2")
@@ -521,14 +526,14 @@ pub async fn record_phase_event(
                     .await
                     .context("checking target phase")?;
             if target_in_version.is_none() {
-                return Ok(Err(LifecycleRefusal::NoSuchPhase));
+                return storage::refuse(tx, LifecycleRefusal::NoSuchPhase).await;
             }
             match &current {
                 // Entry: no current phase, any phase of the pinned
                 // version; return and restart need somewhere to come from.
                 None if matches!(kind, PhaseEventKind::Advance) => (None, Some(to)),
                 None => {
-                    return Ok(Err(LifecycleRefusal::NoCurrentPhase));
+                    return storage::refuse(tx, LifecycleRefusal::NoCurrentPhase).await;
                 }
                 Some((from, _)) => {
                     let edge_kind: Option<String> = sqlx::query_scalar(
@@ -549,7 +554,7 @@ pub async fn record_phase_event(
                         _ => edge_kind.as_deref() == Some("restart"),
                     };
                     if !allowed {
-                        return Ok(Err(LifecycleRefusal::TransitionNotAllowed));
+                        return storage::refuse(tx, LifecycleRefusal::TransitionNotAllowed).await;
                     }
                     (Some(*from), Some(to))
                 }
@@ -557,17 +562,17 @@ pub async fn record_phase_event(
         }
         PhaseEventKind::Pause | PhaseEventKind::Resume | PhaseEventKind::Complete => {
             let Some((from, _)) = current else {
-                return Ok(Err(LifecycleRefusal::NoCurrentPhase));
+                return storage::refuse(tx, LifecycleRefusal::NoCurrentPhase).await;
             };
             match kind {
                 PhaseEventKind::Pause if paused => {
-                    return Ok(Err(LifecycleRefusal::AlreadyPaused));
+                    return storage::refuse(tx, LifecycleRefusal::AlreadyPaused).await;
                 }
                 PhaseEventKind::Resume if !paused => {
-                    return Ok(Err(LifecycleRefusal::NotPaused));
+                    return storage::refuse(tx, LifecycleRefusal::NotPaused).await;
                 }
                 PhaseEventKind::Complete if paused => {
-                    return Ok(Err(LifecycleRefusal::Paused));
+                    return storage::refuse(tx, LifecycleRefusal::Paused).await;
                 }
                 _ => {}
             }

@@ -4,6 +4,8 @@
 - **Date:** 2026-08-28
 - **Amended by:** [ADR 0016](0016-read-only-diagnostics.md), which separates
   diagnostic connection options and defines WAL-sidecar and PRAGMA scope.
+- **Amended by:** [ADR 0019](0019-immediate-write-transactions.md), which
+  completes immediate write reservations and awaited refusal rollback.
 
 ## Context
 
