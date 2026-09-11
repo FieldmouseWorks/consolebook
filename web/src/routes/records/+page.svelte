@@ -9,6 +9,7 @@
 		type OwnEnrollment,
 		type TimelineRecord
 	} from '$lib/api';
+	import SignoffHistoryPanel from '$lib/signoffs/SignoffHistoryPanel.svelte';
 	import { instant } from '$lib/format';
 	import type { ShellData } from '../+layout';
 
@@ -174,6 +175,31 @@
 			<p class="error" role="alert">{packetError}</p>
 		{/if}
 	</section>
+
+	<section class="panel">
+		<h2>My task signoffs</h2>
+		<p class="quiet">
+			What was signed off for each task of your enrollment, by whom and
+			when, including everything recorded under an earlier program
+			version. This is a read-only view; recording a signoff is not
+			something a trainee does.
+		</p>
+		{#if !enrollmentsLoaded}
+			<p class="quiet" role="status">Loading…</p>
+		{:else if enrollmentsError}
+			<p class="error" role="alert">{enrollmentsError}</p>
+		{:else if enrollments.length === 0}
+			<p class="quiet">No enrollments, so no signoff history.</p>
+		{:else}
+			{#each enrollments as enrollment (enrollment.enrollment_id)}
+				<h3>
+					{enrollment.program_name} — v{enrollment.version_number}
+					<span class="quiet-inline">{statusLabel(enrollment.status)}</span>
+				</h3>
+				<SignoffHistoryPanel enrollmentId={enrollment.enrollment_id} />
+			{/each}
+		{/if}
+	</section>
 {/if}
 
 {#if !canViewOwn}
@@ -228,6 +254,11 @@
 	.quiet {
 		opacity: 0.7;
 		margin: 0;
+	}
+	.quiet-inline {
+		opacity: 0.7;
+		font-size: 0.85rem;
+		font-weight: 400;
 	}
 	.pill.pending {
 		background: light-dark(#fdf1d7, #3b301e);
