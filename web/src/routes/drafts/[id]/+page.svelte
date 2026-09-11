@@ -36,6 +36,14 @@
 		type Verification,
 		type VersionHistoryRow
 	} from '$lib/api';
+	import {
+		DraftEditorController,
+		divergentBuffer,
+		openForEditing,
+		type EditorSnapshot,
+		type SaveResult
+	} from '$lib/drafts/editor.svelte';
+	import RefusedTextPanel from '$lib/drafts/RefusedTextPanel.svelte';
 	import { instant } from '$lib/format';
 	import type { ShellData } from '../../+layout';
 
@@ -65,14 +73,27 @@
 	let error = $state('');
 	let busy = $state(false);
 
-	// The working copy under edit, keyed by the pinned vocabulary ids,
-	// and the revision it was based on — every save carries it, so a
-	// concurrent contributor's work is never silently overwritten.
-	let revision = $state(0);
-	let values: Record<number, number | null> = $state({});
-	let notObserved: Record<number, boolean> = $state({});
-	let modifiers: Record<number, Record<number, boolean>> = $state({});
-	let narratives: Record<number, string> = $state({});
+	// One owner of the editable working copy, the autosave chain, and the
+	// refused-save recovery buffer (#34; #59 ownership boundary). The page
+	// supplies the session-derived editing rule and otherwise reads the
+	// controller; it never mirrors an editable value beside it.
+	//
+	// The instance is deliberately not derived from the view: a reload
+	// replaces the working copy many times over one draft's life, and a
+	// fresh controller per reload would drop an in-flight save's identity
+	// and any refused text. One instance per draft identity, replaced only
+	// when the route addresses a different draft.
+	// Created once, then replaced only when the route addresses a different
+	// draft. It is never undefined: the first render reads it before any
+	// effect has run, and an effect-assigned binding would leave that
+	// render without one. The class carries its own fine-grained rune
+	// state, so replacing the instance is visible where it matters.
+	let editor: DraftEditorController = $state(
+		new DraftEditorController(
+			() => view,
+			() => canAssign || canAuthor
+		)
+	);
 
 	// The sealed record, fetched when the draft is finalized: the page
 	// then presents from the stored envelope, never from live rows
@@ -110,70 +131,86 @@
 	let linkable: SummaryLink[] = $state([]);
 	let linkChoice: number | '' = $state('');
 
-	async function load() {
+	/**
+	 * Loads the draft the route addresses and adopts it as the working
+	 * copy. Returns the working copy that adopt replaced — text typed while
+	 * this reload was in flight is only there — or `null` when the load
+	 * failed or the route moved to another draft or version while it ran.
+	 */
+	async function load(): Promise<EditorSnapshot | null> {
+		const wanted = requestedVersion;
+		const wantedDraft = draftId;
 		try {
-			const wanted = requestedVersion;
-			const fetched = await getDraft(draftId);
+			const fetched = await getDraft(wantedDraft);
+			let nextSealed: FinalizedView | null = null;
+			let nextAck: Acknowledgment | null = null;
+			let nextVersions: VersionHistoryRow[] = [];
+			// A draft that is no longer finalized has nothing to verify.
+			let clearVerification = false;
 			if (fetched.status === 'finalized') {
 				// The envelope is the only permitted presentation of a
 				// finalized record (ADR 0011): if it cannot load, the page
 				// fails closed and presents nothing from live joins.
-				sealed =
+				nextSealed =
 					wanted === null
-						? await finalizedVersion(draftId)
-						: await finalizedVersionAt(draftId, wanted);
-				ack = (await getAcknowledgment(draftId)).acknowledgment;
-				versions = (await versionHistory(draftId)).versions;
+						? await finalizedVersion(wantedDraft)
+						: await finalizedVersionAt(wantedDraft, wanted);
+				nextAck = (await getAcknowledgment(wantedDraft)).acknowledgment;
+				nextVersions = (await versionHistory(wantedDraft)).versions;
 			} else {
-				sealed = null;
-				verification = null;
-				ack = null;
-				versions = [];
+				clearVerification = true;
 			}
-			if (
-				fetched.record_type === 'weekly_summary' &&
-				fetched.status !== 'finalized'
-			) {
-				linkable = (await linkableDailies(draftId)).dailies;
-			} else {
-				linkable = [];
+			let nextLinkable: SummaryLink[] = [];
+			if (fetched.record_type === 'weekly_summary' && fetched.status !== 'finalized') {
+				nextLinkable = (await linkableDailies(wantedDraft)).dailies;
+			}
+			if (draftId !== wantedDraft || requestedVersion !== wanted) {
+				// The route moved on while this draft was loading: its
+				// answer belongs to a page that is gone, and publishing it
+				// would put one draft's content on another's route.
+				return null;
 			}
 			view = fetched;
-			const nextValues: Record<number, number | null> = {};
-			const nextObserved: Record<number, boolean> = {};
-			const nextModifiers: Record<number, Record<number, boolean>> = {};
-			for (const competency of fetched.form.competencies) {
-				nextValues[competency.form_competency_id] = null;
-				nextObserved[competency.form_competency_id] = false;
-				nextModifiers[competency.form_competency_id] = {};
+			sealed = nextSealed;
+			ack = nextAck;
+			versions = nextVersions;
+			linkable = nextLinkable;
+			if (clearVerification) {
+				verification = null;
 			}
-			for (const rating of fetched.content.ratings) {
-				nextValues[rating.form_competency_id] = rating.value;
-				nextObserved[rating.form_competency_id] = rating.not_observed;
-				const picked: Record<number, boolean> = {};
-				for (const id of rating.modifier_ids) {
-					picked[id] = true;
-				}
-				nextModifiers[rating.form_competency_id] = picked;
-			}
-			const nextNarratives: Record<number, string> = {};
-			for (const narrative of fetched.form.narratives) {
-				nextNarratives[narrative.form_narrative_id] = '';
-			}
-			for (const entry of fetched.content.narratives) {
-				nextNarratives[entry.form_narrative_id] = entry.text;
-			}
-			values = nextValues;
-			notObserved = nextObserved;
-			modifiers = nextModifiers;
-			narratives = nextNarratives;
-			revision = fetched.revision;
 		} catch (err) {
+			if (draftId !== wantedDraft || requestedVersion !== wanted) {
+				return null;
+			}
 			view = null;
 			sealed = null;
 			error = err instanceof ApiError ? err.message : 'the server could not be reached';
+			return null;
 		}
+		return editor.adopt(view);
 	}
+
+	// The refused buffer belongs to one draft identity: a new draft gets a
+	// new controller (and the old one clears its text), so a client-side
+	// navigation that reuses this route never carries text across drafts.
+	$effect(() => {
+		void draftId;
+		// Every settled save reports here, whichever path started it.
+		editor.onSettled = received;
+		// The route component is destroyed on navigation and on logout
+		// (client-side navigation to another draft included), which is
+		// where the refused text stops existing.
+		return () => {
+			editor.destroy();
+			// A different draft must not inherit this one's working copy or
+			// its refused text.
+			editor = new DraftEditorController(
+				() => view,
+				() => canAssign || canAuthor
+			);
+			editor.onSettled = received;
+		};
+	});
 
 	$effect(() => {
 		void [draftId, requestedVersion];
@@ -186,144 +223,100 @@
 		return status === 'draft' || status === 'changes_requested' || status === 'returned';
 	}
 
-	let editable = $derived.by(() => {
-		const current = view;
-		return current !== null && openStatus(current.status) && (canAssign || canAuthor);
-	});
+	let editable = $derived(
+		view !== null && openForEditing(view) && (canAssign || canAuthor)
+	);
 	let mayRoute = $derived.by(() => {
 		const current = view;
 		return current !== null && (canAssign || myUserId === current.owner_user_id);
 	});
 
-	function buildContent(): DraftContent {
-		const current = view;
-		if (current === null) {
-			return { ratings: [], narratives: [] };
+	/**
+	 * Whether a workflow act must wait, and why. The refusal state lives in
+	 * the controller — set the moment a refusal is recorded, before the
+	 * reload starts — so a draft identity change takes it away with the
+	 * buffers instead of leaving this page blocked with nothing to dismiss.
+	 * It is never cleared by the act it refuses: only the writer's own save
+	 * carrying the text, or their discard, lifts it.
+	 */
+	function heldByRefusal(act: string): boolean {
+		if (editor.saveState === 'failed') {
+			error = `The draft did not save; ${act} waits until it does.`;
+			return true;
 		}
-		const ratings = [];
-		for (const competency of current.form.competencies) {
-			const id = competency.form_competency_id;
-			const marked = notObserved[id] ?? false;
-			const value = marked ? null : (values[id] ?? null);
-			const picked = Object.entries(modifiers[id] ?? {})
-				.filter(([, on]) => on)
-				.map(([modifierId]) => Number(modifierId));
-			if (value !== null || marked || picked.length > 0) {
-				ratings.push({
-					form_competency_id: id,
-					value,
-					not_observed: marked,
-					modifier_ids: picked
-				});
-			}
+		if (editor.unresolved) {
+			error = `Your refused text is still here and is not in the draft; copy anything you need into the reloaded fields and save, or discard it, before ${act}.`;
+			return true;
 		}
-		const texts = [];
-		for (const narrative of current.form.narratives) {
-			const id = narrative.form_narrative_id;
-			const text = narratives[id] ?? '';
-			if (text !== '') {
-				texts.push({ form_narrative_id: id, text });
-			}
-		}
-		return { ratings, narratives: texts };
+		return false;
 	}
 
-	// Autosave: debounced, with the save state visible so collaboration
-	// never depends on a submit button.
-	let saveState: 'idle' | 'pending' | 'saving' | 'saved' | 'failed' = $state('idle');
-	let saveTimer: ReturnType<typeof setTimeout> | null = null;
-	let inFlight: Promise<void> | null = null;
-	let staleReloaded = false;
+	// An edit: the controller debounces and saves it, and the page renders
+	// the settled save state. A refused save reloads the winner and then
+	// keeps the refused text readable (#34).
+	function editNow(): void {
+		editor.scheduleSave();
+	}
 
-	function scheduleSave() {
-		if (!editable) {
+	// Everything the controller settled, including a real failure.
+	function received(result: SaveResult): void {
+		if (result.status === 'stale') {
+			void recoverFromRefusal(result);
 			return;
 		}
-		saveState = 'pending';
-		if (saveTimer !== null) {
-			clearTimeout(saveTimer);
+		if (result.status === 'failed') {
+			error = `The draft did not save: ${result.message}`;
 		}
-		saveTimer = setTimeout(() => void saveNow(), 600);
 	}
 
-	// Saves are serialized into one chain: a new edit while a request is
-	// in flight marks the chain dirty, and the chain re-sends the latest
-	// state with the revision the previous save returned — overlapping
-	// requests never race each other into a false conflict.
-	let dirtyAgain = false;
-
-	function saveNow(): Promise<void> {
-		saveTimer = null;
-		if (inFlight !== null) {
-			dirtyAgain = true;
-			return inFlight;
-		}
-		saveState = 'saving';
-		const run = (async () => {
-			try {
-				// The metadata refresh stays inside the loop: an edit made
-				// while it is awaited marks the chain dirty and re-runs the
-				// save, so nothing typed during any await is dropped.
-				do {
-					dirtyAgain = false;
-					saveState = 'saving';
-					const saved = await saveDraftContent(draftId, revision, buildContent());
-					revision = saved.revision;
-					saveState = 'saved';
-					await refreshMeta();
-				} while (dirtyAgain);
-			} catch (err) {
-				if (err instanceof ApiError && err.code === 'stale_save') {
-					// Another contributor saved first: their copy wins and
-					// the page says so, rather than overwriting it.
-					staleReloaded = true;
-					await load();
-					saveState = 'idle';
-					error =
-						'Another contributor saved first; the draft reloaded with their latest content.';
-					return;
-				}
-				saveState = 'failed';
-				error = err instanceof ApiError ? err.message : 'the server could not be reached';
-			} finally {
-				inFlight = null;
-			}
-		})();
-		inFlight = run;
-		return run;
-	}
-
-	// Nothing workflow-shaped runs over unsaved edits: a pending or
-	// in-flight save lands first.
-	async function flushSaves() {
-		if (saveTimer !== null) {
-			clearTimeout(saveTimer);
-			await saveNow();
+	/**
+	 * Another contributor saved first. Their copy wins and the page
+	 * reloads it, so rather than overwriting it. The text this save
+	 * carried is computed against the reloaded winner and kept in the
+	 * controller as the read-only recovery buffer (#34).
+	 */
+	async function recoverFromRefusal(result: SaveResult): Promise<void> {
+		// The controller this refusal belongs to, captured before the reload
+		// awaits: a route change replaces the controller, and this
+		// continuation must then touch nothing at all — not its buffers, not
+		// this page's error, not the guard of the draft now on screen.
+		const origin = editor;
+		const originDraft = draftId;
+		const originVersion = requestedVersion;
+		const refused = result.status === 'stale' ? result.refused : null;
+		// The reload hands back the working copy it replaced, so an edit
+		// made while it was in flight is still in the comparison instead of
+		// being overwritten unseen.
+		const replaced = await load();
+		if (editor !== origin || draftId !== originDraft || requestedVersion !== originVersion) {
+			// The page moved to another draft while this reload was in
+			// flight: an obsolete answer, not a failed reload.
 			return;
 		}
-		if (inFlight !== null) {
-			await inFlight;
+		const reloaded = replaced !== null;
+		if (refused !== null) {
+			// With no reloaded copy to compare against, everything the
+			// refusal carried stays recoverable: a failed reload must never
+			// be the reason text disappears.
+			origin.keepRefused(
+				divergentBuffer(refused, replaced ?? origin.snapshot(), reloaded ? view : null)
+			);
 		}
-	}
-
-	// Refresh attribution and workflow state without clobbering what the
-	// contributor is typing.
-	async function refreshMeta() {
-		const current = view;
-		if (current === null) {
+		if (reloaded) {
+			origin.markReloaded();
+		} else {
+			origin.markReloadFailed();
+		}
+		if (!reloaded) {
+			// A failed reload is not a successful refresh: the refused
+			// text stays available above, and the load failure is what the
+			// page reports.
+			error =
+				'The draft reloaded unsuccessfully after another contributor saved first; your unsaved text is kept below.';
 			return;
 		}
-		try {
-			const fetched = await getDraft(draftId);
-			current.status = fetched.status;
-			current.owner_user_id = fetched.owner_user_id;
-			current.owner_display_name = fetched.owner_display_name;
-			current.events = fetched.events;
-			current.snapshots = fetched.snapshots;
-			current.eligible_recipients = fetched.eligible_recipients;
-		} catch {
-			// The next save or reload surfaces the problem.
-		}
+		error =
+			'Another contributor saved first; the draft reloaded with their latest content.';
 	}
 
 	let transferTo: number | '' = $state('');
@@ -336,7 +329,7 @@
 		try {
 			await transferDraft(draftId, transferTo);
 			transferTo = '';
-			await refreshMeta();
+			await editor.refreshMeta(draftId);
 		} catch (err) {
 			error = err instanceof ApiError ? err.message : 'the server could not be reached';
 		} finally {
@@ -348,14 +341,14 @@
 		busy = true;
 		error = '';
 		try {
-			await flushSaves();
-			if (saveState === 'failed' || staleReloaded) {
-				// A failed save or a reload from another contributor's copy
-				// is not something to submit sight unseen.
-				staleReloaded = false;
+			await editor.flush();
+			if (heldByRefusal('submitting')) {
+				// A failed save, or text of the writer's own that the
+				// reloaded copy does not carry, is not something to submit
+				// sight unseen.
 				return;
 			}
-			await submitDraft(draftId, revision);
+			await submitDraft(draftId, editor.revision);
 			await load();
 		} catch (err) {
 			if (err instanceof ApiError && err.code === 'stale_save') {
@@ -415,12 +408,11 @@
 		busy = true;
 		error = '';
 		try {
-			await flushSaves();
-			if (saveState === 'failed' || staleReloaded) {
-				staleReloaded = false;
+			await editor.flush();
+			if (heldByRefusal('finalizing')) {
 				return;
 			}
-			await finalizeDraft(draftId, revision);
+			await finalizeDraft(draftId, editor.revision);
 			await load();
 		} catch (err) {
 			if (err instanceof ApiError && err.code === 'stale_save') {
@@ -533,9 +525,9 @@
 		busy = true;
 		error = '';
 		try {
-			await flushSaves();
-			const saved = await addSummaryLink(draftId, Number(linkChoice), revision);
-			revision = saved.revision;
+			await editor.flush();
+			const saved = await addSummaryLink(draftId, Number(linkChoice), editor.revision);
+			editor.revision = saved.revision;
 			const picked = linkable.find((row) => row.daily_version_id === linkChoice);
 			if (picked) {
 				current.summary_links = [...current.summary_links, picked];
@@ -562,9 +554,9 @@
 		busy = true;
 		error = '';
 		try {
-			await flushSaves();
-			const saved = await removeSummaryLink(draftId, link.daily_version_id, revision);
-			revision = saved.revision;
+			await editor.flush();
+			const saved = await removeSummaryLink(draftId, link.daily_version_id, editor.revision);
+			editor.revision = saved.revision;
 			current.summary_links = current.summary_links.filter(
 				(row) => row.daily_version_id !== link.daily_version_id
 			);
@@ -684,6 +676,18 @@
 	<title>Daily draft — Consolebook</title>
 </svelte:head>
 
+{#if editor.refused.length > 0}
+	<!-- The refused save kept in memory, read-only and copyable. It sits
+	     outside the loaded-copy block on purpose: a reload that failed
+	     empties that block, and this text must survive it (#34). -->
+	<section class="panel">
+		<RefusedTextPanel
+			buffers={editor.refused}
+			onDiscard={(index) => editor.discardRefused(index)}
+		/>
+	</section>
+{/if}
+
 {#if view === null}
 	{#if error}
 		<p class="error" role="alert">{error}</p>
@@ -744,11 +748,11 @@
 				</span>
 				{#if openStatus(view.status)}
 					<span class="savestate" role="status">
-						{#if saveState === 'pending' || saveState === 'saving'}
+						{#if editor.saveState === 'pending' || editor.saveState === 'saving'}
 							Saving…
-						{:else if saveState === 'saved'}
+						{:else if editor.saveState === 'saved'}
 							Saved
-						{:else if saveState === 'failed'}
+						{:else if editor.saveState === 'failed'}
 							Save failed
 						{/if}
 					</span>
@@ -1214,9 +1218,9 @@
 									<select
 										aria-label={`Rate ${competency.name}`}
 										disabled={!editable ||
-											notObserved[competency.form_competency_id]}
-										bind:value={values[competency.form_competency_id]}
-										onchange={scheduleSave}
+											editor.notObserved[competency.form_competency_id]}
+										bind:value={editor.values[competency.form_competency_id]}
+										onchange={editNow}
 									>
 										<option value={null}>—</option>
 										{#each competency.anchors as anchor (anchor.value)}
@@ -1230,17 +1234,17 @@
 										min={competency.min_value}
 										max={competency.max_value}
 										disabled={!editable ||
-											notObserved[competency.form_competency_id]}
-										bind:value={values[competency.form_competency_id]}
-										oninput={scheduleSave}
+											editor.notObserved[competency.form_competency_id]}
+										bind:value={editor.values[competency.form_competency_id]}
+										oninput={editNow}
 									/>
 								{:else}
 									<select
 										aria-label={`Rate ${competency.name}`}
 										disabled={!editable ||
-											notObserved[competency.form_competency_id]}
-										bind:value={values[competency.form_competency_id]}
-										onchange={scheduleSave}
+											editor.notObserved[competency.form_competency_id]}
+										bind:value={editor.values[competency.form_competency_id]}
+										onchange={editNow}
 									>
 										<option value={null}>—</option>
 										{#each numericValues(competency) as value (value)}
@@ -1257,13 +1261,13 @@
 											type="checkbox"
 											disabled={!editable}
 											bind:checked={
-												notObserved[competency.form_competency_id]
+												editor.notObserved[competency.form_competency_id]
 											}
 											onchange={() => {
-												if (notObserved[competency.form_competency_id]) {
-													values[competency.form_competency_id] = null;
+												if (editor.notObserved[competency.form_competency_id]) {
+													editor.values[competency.form_competency_id] = null;
 												}
-												scheduleSave();
+												editNow();
 											}}
 										/>
 										Not observed
@@ -1278,11 +1282,11 @@
 												type="checkbox"
 												disabled={!editable}
 												bind:checked={
-													modifiers[competency.form_competency_id][
+													editor.modifiers[competency.form_competency_id][
 														modifier.rating_modifier_id
 													]
 												}
-												onchange={scheduleSave}
+												onchange={editNow}
 											/>
 											{modifier.code}
 										</label>
@@ -1313,8 +1317,8 @@
 						id={`narrative-${narrative.form_narrative_id}`}
 						rows="4"
 						disabled={!editable}
-						bind:value={narratives[narrative.form_narrative_id]}
-						oninput={scheduleSave}
+						bind:value={editor.narratives[narrative.form_narrative_id]}
+						oninput={editNow}
 					></textarea>
 				</div>
 			{/each}
