@@ -601,7 +601,7 @@ pub async fn export_at(
             })
             .collect(),
     };
-    let mut writer = ArchiveWriter::new(exported_at)?;
+    let mut writer = ArchiveWriter::in_memory(exported_at)?;
     writer.add(ARCHIVE_MANIFEST_PATH, &canonical_json(&manifest)?)?;
     writer.add_units(&installation_id, exported_at, rows, &manifest.units)?;
     for (kind, bytes) in &documents {

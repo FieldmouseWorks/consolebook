@@ -11,6 +11,13 @@ anyhow = "1"
 argon2 = "0.5"
 axum = "0.8"
 axum-extra = { version = "0.10", features = ["cookie"] }
+# Streaming the export reads rows one at a time (`TryStreamExt::try_next`)
+# so a unit's bytes are released as it is written (#47).
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+# The streamed export's response body: an incremental body over a bounded
+# channel, so delivery never buffers the archive.
+http-body = "1"
+
 clap = { version = "4", features = ["derive", "env"] }
 getrandom = "0.3"
 mime_guess = "2"

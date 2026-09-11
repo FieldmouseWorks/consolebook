@@ -122,9 +122,33 @@ may export, and what verification claims (#45; Milestone 5 slice 1).
   hash but cannot prove the predecessor's bytes — reported as *not in
   export*, never inferred; and
 - on-demand exports mean nothing on disk to dispose of and nothing to
-  resume: an installation export is one response, assembled in memory
-  while it is produced, so a very large history costs memory in
-  proportion until exports stream (tracked separately).
+  resume: an export is one response, and it is now streamed — written to
+  the response as it is produced (#47). What still scales with an
+  installation is its unit count, not its bytes: the unit metadata the
+  archive manifest lists, the serialized manifest, and the container's
+  central directory are each O(units), and the database driver buffers a
+  bounded number of rows per query. The corpus of stored payloads is
+  never held, one unit's bytes are held at a time, and the browser's own
+  download helper buffers the response it saves, separately;
+- the delivery and its failure share one bounded channel between the
+  producer and the response. A client that stops reading stops the
+  producer instead of growing a queue, and a client that stops reading
+  for longer than the stall bound loses the transfer. Whether a transfer
+  was complete is an explicit fact the producer records only when the
+  archive was produced and its tail flushed — not the channel closing,
+  which a client that outlasted the failure signal would otherwise read
+  as success. Anything else ends the body in an error: an incomplete
+  download the verifier refuses, never a complete export;
+- the export holds one pooled connection at a time. Its audit event is
+  written in its own short write transaction, committed before the read
+  snapshot the manifest and payloads share, and that snapshot is a reader
+  only (ADR 0019). Exports sharing a connection pool therefore never hold
+  one connection while waiting for another, and an export never reserves
+  the writer for the length of a download;
+- the audit event records the export the installation produced from the
+  state at its recorded instant, not the operator's receipt: a delivery
+  that fails part way leaves the record, and a scope that holds nothing to
+  export is refused before any record is written.
 
 ## Rejected alternatives
 
