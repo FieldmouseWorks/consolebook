@@ -45,6 +45,13 @@ pub(crate) fn routes() -> Router<AppState> {
             "/api/enrollments/{id}/signoffs",
             get(signoff_matrix).post(record_signoff),
         )
+        // The complete retained history, beside the pinned-version matrix:
+        // a trainee reads their own, and history readers are unchanged
+        // (#49; ADR 0021).
+        .route(
+            "/api/enrollments/{id}/signoff-history",
+            get(signoff_history),
+        )
         .route("/api/sessions/{id}/trainers", post(add_session_trainer))
         .route(
             "/api/sessions/{id}/trainers/{user_id}",
@@ -653,6 +660,20 @@ async fn record_signoff(
     .await?
     {
         Ok(()) => Ok(StatusCode::NO_CONTENT.into_response()),
+        Err(refusal) => Err(signoff_refusal(refusal)),
+    }
+}
+
+/// The complete retained signoff history of one enrollment. The service
+/// owns the authorization and the shape; the handler only translates the
+/// typed refusal (ADR 0010).
+async fn signoff_history(
+    State(state): State<AppState>,
+    current: CurrentUser,
+    Path(enrollment_id): Path<i64>,
+) -> Result<Response, ApiError> {
+    match task_signoffs::history(&state.pool, current.user.id, enrollment_id).await? {
+        Ok(history) => Ok(Json(history).into_response()),
         Err(refusal) => Err(signoff_refusal(refusal)),
     }
 }

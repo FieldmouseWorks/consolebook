@@ -21,7 +21,7 @@ tests show what is implemented. [Roadmap](roadmap.md) owns milestone status.
 | Drafts and review | `evaluation_drafts.rs`, `draft_content.rs`, `draft_review.rs` | [ADR 0008](decisions/0008-session-draft-and-attribution-model.md), [ADR 0010](decisions/0010-service-owned-authorization-boundary.md) |
 | Finalization and canonical bytes | `finalization.rs`, `canonical.rs`, `record_envelope.rs` | [Integrity](records-integrity.md), [ADR 0011](decisions/0011-canonical-record-format-and-finalization.md) |
 | Acknowledgments and amendments | `acknowledgments.rs`, `amendments.rs` | [Domain model](domain-model.md), [ADR 0012](decisions/0012-amendment-reopening-state-machine.md) |
-| Summaries and signoffs | `summaries.rs`, `task_signoffs.rs` | [ADR 0013](decisions/0013-weekly-summaries-and-task-signoffs.md) |
+| Summaries and signoffs | `summaries.rs`, `task_signoffs.rs` | [ADR 0013](decisions/0013-weekly-summaries-and-task-signoffs.md), [ADR 0021](decisions/0021-trainee-signoff-history-read.md) |
 | Record exports | `record_export.rs`, `export_verify.rs`, `zip_container.rs` | [ADR 0014](decisions/0014-record-export-format.md), [Export format](formats/record-export.md) |
 | Trainee packets | `trainee_packet.rs`, `packet_verify.rs` | [ADR 0015](decisions/0015-trainee-packet.md), [ADR 0017](decisions/0017-packet-pin-timeline-verification.md), [Packet format](formats/trainee-packet.md) |
 | Retention policy and holds | `retention.rs`, `retention/`, `retention_http.rs` | [ADR 0020](decisions/0020-retention-policy-and-hold-administration.md), [Operator guide](retention.md); disposition execution remains [#64](https://github.com/FieldmouseWorks/consolebook/issues/64) |
@@ -81,6 +81,8 @@ authentication; `+layout.svelte` owns navigation and shared styling.
 `web/src/lib/api.ts` keeps compatible legacy imports and domain calls;
 `web/src/lib/api/retention.ts` owns retention contracts.
 `web/src/lib/retention/` owns policy editing, hold editing, and authority controls.
+`web/src/lib/api/signoffs.ts` owns the task-signoff read contract (#49) and
+`web/src/lib/signoffs/` its read-only presentation.
 `web/src/lib/editor/` contains program-authoring components.
 
 `web/e2e/fixtures.ts` supplies each scenario's server, base URL, and setup code.
@@ -95,7 +97,7 @@ and assertions in their own specs.
 | `/programs/**` | Program authoring, comparison, publishing, enrollment |
 | `/enrollments/[id]` | Lifecycle, assignments, sessions, summaries, signoffs, exports |
 | `/drafts/[id]` | Authoring, review, finalized presentation, acknowledgment, amendments |
-| `/records` | Trainee's own timeline and packet downloads |
+| `/records` | Trainee's own timeline, packet downloads, and their own complete task-signoff history |
 | `/retention` | Explicit authority, versioned policies, and attributed holds; no disposition execution |
 
 ## Local workflow
