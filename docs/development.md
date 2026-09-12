@@ -22,7 +22,7 @@ tests show what is implemented. [Roadmap](roadmap.md) owns milestone status.
 | Finalization and canonical bytes | `finalization.rs`, `canonical.rs`, `record_envelope.rs` | [Integrity](records-integrity.md), [ADR 0011](decisions/0011-canonical-record-format-and-finalization.md) |
 | Acknowledgments and amendments | `acknowledgments.rs`, `amendments.rs` | [Domain model](domain-model.md), [ADR 0012](decisions/0012-amendment-reopening-state-machine.md) |
 | Summaries and signoffs | `summaries.rs`, `task_signoffs.rs` | [ADR 0013](decisions/0013-weekly-summaries-and-task-signoffs.md), [ADR 0021](decisions/0021-trainee-signoff-history-read.md) |
-| Record exports | `record_export.rs`, `export_verify.rs`, `zip_container.rs` | [ADR 0014](decisions/0014-record-export-format.md), [Export format](formats/record-export.md) |
+| Record exports | `record_export.rs`, `export_stream.rs`, `export_verify.rs`, `zip_container.rs` | [ADR 0014](decisions/0014-record-export-format.md), [Export format](formats/record-export.md) |
 | Trainee packets | `trainee_packet.rs`, `packet_verify.rs` | [ADR 0015](decisions/0015-trainee-packet.md), [ADR 0017](decisions/0017-packet-pin-timeline-verification.md), [Packet format](formats/trainee-packet.md) |
 | Retention policy and holds | `retention.rs`, `retention/`, `retention_http.rs` | [ADR 0020](decisions/0020-retention-policy-and-hold-administration.md), [Operator guide](retention.md); disposition execution remains [#64](https://github.com/FieldmouseWorks/consolebook/issues/64) |
 | Web shell and HTTP | `http.rs`, `web_assets.rs`, `notices.rs`, domain `*_http.rs` modules | [ADR 0005](decisions/0005-embedded-web-interface.md), web map below |

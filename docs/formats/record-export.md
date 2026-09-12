@@ -245,6 +245,21 @@ export after a tool has repacked it, which is what an operator asking
 byte-identical to a fresh export is a byte comparison, not a
 verification finding.
 
+The container is unchanged by how an installation delivers it. A
+producing installation writes the archive into the response as it is
+produced, so a transfer that ends early leaves an incomplete file: it
+lacks the central directory, the verifier reports it as unreadable rather
+than as a smaller valid export, and the transfer ends in an error rather
+than in the terminal chunk that would have made it look complete. A
+complete transfer is an explicit fact the producer records only when the
+whole archive was produced and its tail flushed; every other ending — a
+production failure, a producer that panicked, a client that stopped
+reading long enough to lose the failure signal — fails the body. The audit event
+records the export the installation produced from the state at its
+recorded instant; it is not a receipt for a completed download, so a
+failed delivery is a transfer the operator repeats rather than a record
+the installation un-writes.
+
 ## What the archive does not carry
 
 - **Drafts.** An unfinalized record is not a record; scopes contain
