@@ -63,7 +63,7 @@ Inputs: issue, files, revision, and other source records
 Acceptance: observable condition and check
 State: pending | ready | active | blocked | verified
 Evidence: exact revision, receipt, review, or —
-Effort: inherited policy or explicit bound
+Effort: owner-set budget and source, if any; carry across children/resumptions
 
 Next action: one concrete action for the whole graph
 ```
@@ -73,8 +73,8 @@ observed results. Maintain one next action in the issue. Comments may append
 dated receipts; preserve failures. Before another outcome, archive and read
 back the completed graph snapshot.
 
-Graph edits record progress; they do not change acceptance, authority, or the
-effort budget. Missing evidence is a specific blocker, not a completed check.
+Graph edits record progress; they do not change acceptance, authority, or an
+owner-set budget. Missing evidence is a specific blocker, not a completed check.
 
 ## Model routes and ownership
 
@@ -90,8 +90,8 @@ reasoning level accurately. The project routes work as follows:
 The primary owner maintains the graph, scope, and acceptance; reviews
 contributions and independently verifies results. Astra selects only ready
 nodes whose dependencies are verified. Delegated owners get a narrow outcome,
-explicit file or responsibility ownership, inputs, acceptance, and the
-inherited effort bound. Preserve others' changes. Run work concurrently only
+explicit file or responsibility ownership, inputs, acceptance, and any
+owner-set budget. Preserve others' changes. Run work concurrently only
 with independent inputs and ownership; inspect every result, including failures.
 
 Record requested routing separately from runtime evidence. A configuration
@@ -104,20 +104,19 @@ under the current supervised-use instructions. Record substantive results
 and independent checks in the issue or existing evaluation record. Editing an
 instruction file does not change an already running conversation's model.
 
-## Effort and repair limits
+## Effort and continuation
 
-E1 is the chosen standing default for this setup; no prior unlimited-repair
-grant was found. Unless the task owner sets another explicit bound, it allows
-at most two scoped investigate/repair cycles per failed acceptance node. A
-cycle starts with an observed failure, investigates its cause, makes one
-bounded repair, and rechecks acceptance. Tool calls inside it are not separate
-cycles.
+Honor any explicit effort budget set by the task owner and record its source.
+It persists across delegated children and resumptions; changing the graph,
+branch, or session does not reset it. If an explicit budget is exhausted,
+honor it and report the blocker; an extension requires the owner's decision.
 
-The bound is shared across children and resumptions. Splitting or renaming a
-node, editing the graph, changing branches, or starting a session does not
-reset it. Preserve failures and repair receipts. At the bound, stop that node,
-finish independent preparation, then ask only for the blocking scope or effort
-decision. Do not run speculative retries or seek an unlimited waiver.
+There is no default repair-cycle cap. Without an owner-set budget, continue
+scoped investigation until acceptance is met or a concrete blocker prevents
+it. Repeated failures are evidence: revisit the hypothesis or method when results
+undermine the current approach. Preserve each failure and repair receipt; do
+not repeat speculative actions unchanged. At a blocker, record what is missing,
+finish independent preparation, and ask only for the decision needed to proceed.
 
 ## Execution and evidence loop
 
@@ -127,9 +126,9 @@ decision. Do not run speculative retries or seek an unlimited waiver.
    only the project context needed for the task, starting with the routes in
    AGENTS.md and the task's linked records.
 2. **Set the boundary.** State the intended outcome, exclusions, authorized
-   actions, source records, acceptance checks, and effort limit. For nontrivial
-   work, use one primary issue, an issue-linked branch, and a PR as required by
-   CONTRIBUTING.md. Search existing issues before creating a new one.
+   actions, source records, acceptance checks, and any owner-set effort budget.
+   For nontrivial work, use one primary issue, an issue-linked branch, and a PR
+   as required by CONTRIBUTING.md. Search existing issues before creating one.
 3. **Plan and assign.** Use a short plan for simple work or the issue graph
    template above for dependent work. Give each child clear ownership and
    acceptance. Keep one shared next action. Do not start roadmap work merely
@@ -138,16 +137,18 @@ decision. Do not run speculative retries or seek an unlimited waiver.
    outcome. Check the cheapest relevant existing proof first. Any new
    correctness check needs a meaningful negative control that rejects a known
    wrong behavior; do not restate the implementation as its own test.
-5. **React to observed failures.** Read the actual output before retrying.
-   Preserve the failure, inspect all settled parallel work, and identify a
-   cause before a scoped repair. Count the repair against the node's shared
-   effort bound. If a required local tool is missing and installation is
-   within the task's authority, try that local prerequisite; otherwise record
-   the precise limitation and continue independent preparation.
+5. **React to observed failures.** Read the output and inspect all settled
+   parallel work. Identify a cause before repairing; when a failure repeats,
+   change the hypothesis or method based on what the evidence shows. Do not
+   repeat unchanged speculative retries. Continue in scope toward acceptance.
+   If blocked by missing evidence, unavailable authority, or an owner decision,
+   record the precise blocker and finish independent preparation. Install a
+   missing local tool when authorized; otherwise record that limitation.
 6. **Freeze the candidate.** Review the diff, then record the reviewed
    candidate's SHA, tree state, relevant dirty diff, and gate inputs before
    expensive checks. Run checks against that candidate. An edit affecting a
-   gate's inputs invalidates its receipt; rerun it within the repair bound.
+   gate's inputs makes its receipt stale; rerun the affected check on the new
+   candidate and preserve both receipts.
 7. **Run and distinguish gates.** Follow the complete current sequence and
    prerequisites in CONTRIBUTING.md. Focused checks support iteration; they
    do not replace required gates. Record local results separately from hosted
@@ -169,7 +170,7 @@ decision. Do not run speculative retries or seek an unlimited waiver.
 For parallel local and hosted checks, first freeze the same candidate and
 ensure builds, browser profiles, databases, ports, and output paths cannot
 collide. Parallel checks may then proceed when the PR has been authorized and
-published. If a check fails, preserve its receipt and follow the bounded
+published. If a check fails, preserve its receipt and follow the evidence-driven
 failure loop; a later green run does not erase an earlier failure.
 
 ## Receipts and resuming
@@ -195,9 +196,9 @@ comparable completed measurements for the same scope and inputs.
 On resume, inspect the current issue graph, branch and revision, owned
 processes, working tree, and freshness of each receipt before continuing.
 Reuse evidence only when its inputs still match. Reconcile the graph with
-observed results, preserve the existing effort count, and state one next
-action. Stale evidence or an agent's completion claim alone does not satisfy
-acceptance.
+observed results, carry forward any owner-set budget and its usage without
+inventing a counter, and state one next action. Stale evidence or an agent's
+completion claim alone does not satisfy acceptance.
 
 ## Instruction loading and workflow changes
 
@@ -217,5 +218,6 @@ the already running session.
 Improve this procedure only from a specific observed problem. Record the
 problem and proposed scope in the existing issue, make a small reviewable
 change, and check its links and instructions. Preserve the current issue/PR
-lifecycle, authority boundary, effort limit, and required gates. This document
-does not create new CI, a linter, a workflow framework, or an approval system.
+lifecycle, authority boundary, continuation policy, and required gates. This
+document does not create new CI, a linter, a workflow framework, or an approval
+system.

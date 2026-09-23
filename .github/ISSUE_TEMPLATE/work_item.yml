@@ -58,7 +58,7 @@ body:
       description: For dependent work, this issue body owns the canonical graph described in docs/workflow.md. A simple change needs only a short plan. Link receipts in comments; do not duplicate the live graph in the PR.
       placeholder: |
         Authority and source:
-        Effort policy and source (default two scoped repair cycles per failed node):
+        Owner-set effort budget and source (if any; carries across children and resumptions):
         Continuation boundary:
         Nodes: ID | outcome | dependencies | model/owner | inputs | acceptance | state | evidence
         Next action:

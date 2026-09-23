@@ -20,7 +20,7 @@ pull request. Never push repository changes directly to `main`.
 - Security reports use private advisories per [SECURITY.md](SECURITY.md).
 
 Use [the evidence-driven workflow](docs/workflow.md) for outcome definition,
-model ownership, task graphs, evidence, repair limits, and authorized continuation.
+model ownership, task graphs, evidence-driven continuation, and authorization.
 The primary issue body owns the live graph; issue comments archive completed
 snapshots and receipts. PRs link that record. Simple changes use a short plan.
 The [roadmap](docs/roadmap.md) is the current-state entry point, not a second tracker.
