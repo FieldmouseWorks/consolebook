@@ -55,8 +55,9 @@ all acceptance criteria are satisfied; otherwise use `Refs #...`.
 Define an observable outcome and acceptance check before editing. Keep one
 canonical task graph in the primary issue for substantive dependent work;
 simple changes need only a short plan. Record ownership, dependencies, inputs,
-effort, state, exact-revision evidence, and one next action. Verified results
-unlock dependencies; failed checks produce scoped repairs under the same limit.
+effort policy, state, exact-revision evidence, and one next action. Verified
+results unlock dependencies; failures trigger investigation and scoped repairs,
+with the approach changed when evidence calls for it.
 
 Use `gpt-6-astra` / `max` for planning, architecture, review, and integration;
 `gpt-6-sol` / `max` for complex implementation; `gpt-6-luna` / `max` for bounded
@@ -64,11 +65,13 @@ exploration, documentation, and checks. Delegate only useful work with explicit
 ownership, then verify the artifacts. Report unavailable routes; instructions
 do not change a running model. DeepSeek remains paused pending explicit re-enable.
 
-Carry forward task authorization without asking again. Record its source and
-the effort policy in the issue; credentials and graph edits grant no authority.
-The default repair limit is two scoped cycles per failed node, shared across
-children and resumes; see `docs/workflow.md` for the boundary and continuation.
-Finish independent preparation before requesting any missing decision.
+Carry task authorization forward without asking again. Record its source and
+any owner-set effort budget in the issue; preserve that budget across children
+and resumes. Credentials and graph edits grant no authority. There is no
+default repair-cycle cap. Without an owner-set budget, continue in scope until
+acceptance or a concrete blocker; revise the approach when failures repeat,
+preserve evidence, and finish independent work before asking for a decision.
+See `docs/workflow.md`.
 
 Build `web/` before Rust when UI or embedding matters. The command sequence and
 browser prerequisites are in `CONTRIBUTING.md`. Required checks: `npm ci`,
