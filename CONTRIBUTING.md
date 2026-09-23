@@ -19,6 +19,12 @@ pull request. Never push repository changes directly to `main`.
   `storage(backup): validate snapshot before fsync`.
 - Security reports use private advisories per [SECURITY.md](SECURITY.md).
 
+Use [the evidence-driven workflow](docs/workflow.md) for outcome definition,
+model ownership, task graphs, evidence, repair limits, and authorized continuation.
+The primary issue body owns the live graph; issue comments archive completed
+snapshots and receipts. PRs link that record. Simple changes use a short plan.
+The [roadmap](docs/roadmap.md) is the current-state entry point, not a second tracker.
+
 ## Engineering discipline
 
 Fix causes and prove the contract, including in-scope defects and duplicated
@@ -87,6 +93,14 @@ the owning specification or decision instead of duplicating it. Update the
 roadmap when milestone state changes and the development map when ownership
 moves. Do not put session transcripts, transient branch inventories, or
 verification claims without a named revision into agent entrypoints.
+
+For documentation changes, review the diff, run `git diff --check`, check changed
+relative links and heading anchors, and validate any edited issue-template YAML.
+Compare documented commands with package scripts and the existing PR gate.
+When changing agent instructions, inspect the applicable global/project chain
+including `AGENTS.override.md`, and check a fresh session when the host supports
+it; otherwise record that limitation. These checks supplement the required
+build and browser gates above; there is no documentation-only exemption.
 
 All fixtures, screenshots, examples, and seed data use invented agencies,
 people, incidents, identifiers, narratives, and schedules. Real operational

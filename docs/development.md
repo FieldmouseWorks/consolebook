@@ -2,7 +2,9 @@
 
 This map routes contributors and agents to the implementation and its
 authorities. [AGENTS.md](../AGENTS.md) owns repository rules;
-[CONTRIBUTING.md](../CONTRIBUTING.md) owns build gates and contribution workflow.
+[CONTRIBUTING.md](../CONTRIBUTING.md) owns build gates and contribution rules.
+[Workflow](workflow.md) owns task graphs, evidence, authority, and continuation;
+[roadmap](roadmap.md) is the current-state entry point.
 
 ## Choose context by task
 
