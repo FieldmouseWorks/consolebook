@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { beforeNavigate } from '$app/navigation';
 	import { page } from '$app/state';
 	import { untrack } from 'svelte';
 	import {
@@ -98,6 +99,22 @@
 			() => !workflowRequest && (canAssign || canAuthor)
 		)
 	);
+
+	// A full document unload cannot wait for fetch to finish. SvelteKit
+	// supplies the native confirmation for refresh/tab close; an outside
+	// link stays here with a plain reason. Client-side routes still use the
+	// controller's ordered teardown save, except after a failed save.
+	beforeNavigate((navigation) => {
+		if (navigation.willUnload && editor.hasUnsavedOrdinaryEdits) {
+			navigation.cancel();
+			if (navigation.type !== 'leave') {
+				error = 'The draft has unsaved changes. Wait for the save to finish before leaving.';
+			}
+		} else if (!navigation.willUnload && editor.hasFailedOrdinarySave) {
+			navigation.cancel();
+			error = 'The draft did not save. Stay on this draft and save again before leaving.';
+		}
+	});
 
 	// The sealed record, fetched when the draft is finalized: the page
 	// then presents from the stored envelope, never from live rows

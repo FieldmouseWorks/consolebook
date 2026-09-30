@@ -32,14 +32,13 @@
 			{/if}
 		</summary>
 		<p class="quiet small-note">
-			Another contributor saved first, so their copy is what this page now
-			edits. Your save was refused and never applied. The text or deletion below is
-			yours and was not saved anywhere — copy text or clear a field in
-			the reloaded copy, then save again through the normal revision
+			Another contributor saved first. Your save was refused and never
+			applied. Once the latest draft loads, copy the text or repeat the
+			deletion below in its fields, then save through the normal revision
 			check. Nothing here is merged or resubmitted for you.
 		</p>
 		{#if narrativeCount > 0}
-			<h3>Narratives that differed</h3>
+			<h3>Narratives to recover</h3>
 			{#each refused.narratives as narrative (narrative.form_narrative_id)}
 				<div class="narrative">
 					<p class="label">
@@ -53,7 +52,7 @@
 					</p>
 					{#if narrative.text === ''}
 						<p class="refused-text">
-							Clear this narrative. Leave the reloaded field empty and save to apply the deletion.
+							Clear this narrative. After the latest draft loads, leave its field empty and save to apply the deletion.
 						</p>
 					{:else}
 						<!-- Read-only and copyable; never an editor. -->
@@ -63,7 +62,7 @@
 			{/each}
 		{/if}
 		{#if ratingCount > 0}
-			<h3>Ratings that differed</h3>
+			<h3>Ratings to recover</h3>
 			<table class="grid">
 				<thead>
 					<tr>

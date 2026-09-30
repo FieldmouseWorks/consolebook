@@ -60,8 +60,8 @@ export interface RefusedRating {
  * A save the revision contract refused (`stale_save`) and the text it
  * carried, still readable after the workspace reloaded the winner.
  *
- * `narratives` and `ratings` hold only what actually differed from the
- * reloaded content, so the page shows the author's divergent text and
+ * `narratives` and `ratings` hold what differed from the reloaded content,
+ * or the full captured snapshot when the winning reload failed. The page
  * never invents a merge (issue #34; ADR 0008: one working copy).
  */
 export interface RefusedBuffer {
@@ -165,6 +165,20 @@ export class DraftEditorController {
 		);
 	}
 
+	/** Ordinary edits whose save has not settled, including teardown work. */
+	get hasUnsavedOrdinaryEdits(): boolean {
+		return (
+			this.#teardownPending ||
+			this.#inFlight !== null ||
+			(!this.#destroyed && (this.#timer !== null || this.saveState === 'failed'))
+		);
+	}
+
+	/** A failed ordinary save cannot be carried across a client-side route. */
+	get hasFailedOrdinarySave(): boolean {
+		return !this.#destroyed && this.saveState === 'failed';
+	}
+
 	/**
 	 * Every settled save reports here, whichever path started it: the
 	 * debounce, an explicit save, or a flush before a workflow act. The
@@ -182,6 +196,14 @@ export class DraftEditorController {
 	#release: (() => void) | null = null;
 	#dirty = false;
 	#destroyed = false;
+	#teardownPending = false;
+	#unloadListening = false;
+	#beforeUnload = (event: BeforeUnloadEvent): void => {
+		if (this.hasUnsavedOrdinaryEdits) {
+			event.preventDefault();
+			event.returnValue = '';
+		}
+	};
 	/**
 	 * A refusal the page has not answered with a reload yet. A later save
 	 * that the same stale revision also refuses reports nothing new: it
@@ -203,6 +225,29 @@ export class DraftEditorController {
 		this.#mayEdit = mayEdit;
 	}
 
+	#ensureUnloadListener(): void {
+		if (!this.#unloadListening && typeof window !== 'undefined') {
+			window.addEventListener('beforeunload', this.#beforeUnload);
+			this.#unloadListening = true;
+		}
+	}
+
+	#removeUnloadListener(): void {
+		if (this.#unloadListening && typeof window !== 'undefined') {
+			window.removeEventListener('beforeunload', this.#beforeUnload);
+			this.#unloadListening = false;
+		}
+	}
+
+	/** A refusal owns these edits now; a timer must not resubmit them. */
+	#retirePendingEdit(): void {
+		if (this.#timer !== null) {
+			clearTimeout(this.#timer);
+			this.#timer = null;
+		}
+		this.#dirty = false;
+	}
+
 	/** Whether the author may edit the loaded draft right now. */
 	get editable(): boolean {
 		const view = this.#view();
@@ -216,6 +261,7 @@ export class DraftEditorController {
 		if (this.#destroyed || !this.editable) {
 			return;
 		}
+		this.#ensureUnloadListener();
 		this.saveState = 'pending';
 		if (this.#inFlight !== null) {
 			// A workflow act awaiting the running chain must see this edit,
@@ -269,6 +315,7 @@ export class DraftEditorController {
 			this.saveState = 'idle';
 			return Promise.resolve();
 		}
+		this.#ensureUnloadListener();
 		const run: SaveRun = { draft_id, refused: null };
 		this.#settled = { status: 'saved' };
 		const reported = new Promise<void>((resolve) => {
@@ -381,6 +428,7 @@ export class DraftEditorController {
 	 * discard.
 	 */
 	markReloaded(): void {
+		this.#retirePendingEdit();
 		this.#reported_stale = false;
 		this.#reloadFailed = false;
 	}
@@ -390,6 +438,7 @@ export class DraftEditorController {
 	 * has not seen, whatever the buffers hold.
 	 */
 	markReloadFailed(): void {
+		this.#retirePendingEdit();
 		this.#reloadFailed = true;
 	}
 
@@ -455,15 +504,23 @@ export class DraftEditorController {
 		const draft = this.#draftView;
 		const pending = (this.#timer !== null || this.#dirty) && !this.#reported_stale;
 		const content = pending && draft !== null ? this.#buildContent(draft) : null;
+		const inflight = this.#inFlight;
 		this.#destroyed = true;
-		if (this.#timer !== null) {
-			clearTimeout(this.#timer);
-			this.#timer = null;
-		}
-		this.#dirty = false;
+		this.#retirePendingEdit();
 		this.refused = [];
 		if (content !== null && draft !== null) {
-			void this.#saveOnTeardown(draft.id, content);
+			this.#teardownPending = true;
+			void this.#saveOnTeardown(draft.id, content).finally(() => {
+				this.#teardownPending = false;
+				this.#removeUnloadListener();
+			});
+		} else if (inflight !== null) {
+			void inflight.then(
+				() => this.#removeUnloadListener(),
+				() => this.#removeUnloadListener()
+			);
+		} else {
+			this.#removeUnloadListener();
 		}
 	}
 
@@ -588,6 +645,7 @@ export class DraftEditorController {
 						// text readable (#34). One report per refusal: any
 						// later attempt is refused by the same stale
 						// revision and carries nothing new.
+						this.#retirePendingEdit();
 						this.saveState = 'idle';
 						if (!this.#reported_stale) {
 							this.#reported_stale = true;
@@ -766,7 +824,7 @@ export function divergentBuffer(
 		// server: a save refused at request time never carried an edit made
 		// after it was sent, so that text is newer than the refusal.
 		const text = current;
-		if (text === (winning_narratives.get(id) ?? '') || (winner === null && text === '')) {
+		if (winner !== null && text === (winning_narratives.get(id) ?? '')) {
 			continue;
 		}
 		narratives.push({
@@ -796,10 +854,9 @@ export function divergentBuffer(
 	}
 	// The competencies to consider: the winner's form, and — when there is
 	// no winner to compare against, because the reload failed — the ones
-	// the refused save itself named. A rating the writer never touched is
-	// not a difference, and a competency the winner has no stored row for
-	// reads as the form's default state, so an untouched competency is
-	// never shown as divergent (issue #34).
+	// the refused save itself named. When the winner is available, an
+	// untouched competency matches the form's default state and is not
+	// shown as divergent. A failed reload keeps the captured state whole.
 	const competency_ids = new Set<number>();
 	for (const competency of winner?.form.competencies ?? []) {
 		competency_ids.add(competency.form_competency_id);
@@ -824,7 +881,7 @@ export function divergentBuffer(
 		};
 		const sent = state(refused);
 		const current = state(latest);
-		// No stored row is the form's default, not a divergence.
+		// A winner with no stored row has the form's default state.
 		const winning = winner_ratings.get(id) ?? {
 			value: null,
 			not_observed: false,
@@ -834,7 +891,7 @@ export function divergentBuffer(
 			winning.not_observed === current.not_observed &&
 			winning.value === current.value &&
 			sameIds(winning.modifier_ids, current.picked);
-		if (same) {
+		if (winner !== null && same) {
 			continue;
 		}
 		ratings.push({

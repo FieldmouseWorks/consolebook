@@ -386,7 +386,11 @@ function gate(): {
 }
 
 /** Hold the first successful PUT response after the real server has applied it. */
-async function holdAppliedSave(page: Page, draftId: number) {
+async function holdAppliedSave(
+	page: Page,
+	draftId: number,
+	second: ReturnType<typeof gate> | null = null
+) {
 	const first = gate();
 	const revisions: number[] = [];
 	await page.route(`**/api/drafts/${draftId}/content`, async (route) => {
@@ -405,9 +409,23 @@ async function holdAppliedSave(page: Page, draftId: number) {
 			await route.fulfill({ response });
 			return;
 		}
+		if (revisions.length === 2 && second !== null) {
+			second.arrive();
+			await second.released;
+		}
 		await route.continue();
 	});
 	return { first, revisions };
+}
+
+/** Attempt a real tab close and reject the native unsaved-changes prompt. */
+async function dismissTabClose(page: Page): Promise<void> {
+	const prompted = page.waitForEvent('dialog', { timeout: 5_000 });
+	await page.close({ runBeforeUnload: true });
+	const dialog = await prompted;
+	expect(dialog.type()).toBe('beforeunload');
+	await dialog.dismiss();
+	expect(page.isClosed(), 'dismissing the warning should keep the draft open').toBe(false);
 }
 
 /** Waits until the draft is saved and the page reports it. */
@@ -1843,3 +1861,284 @@ for (const act of [
 	}
 });
 }
+
+test('tab close warns for pending, in-flight, and failed ordinary saves', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const authorContext = await browser.newContext();
+	const author = await signIn(authorContext, JORDAN, seeded.jordanResetCode, JORDAN_PASSWORD);
+	let held: Awaited<ReturnType<typeof holdAppliedSave>> | null = null;
+	try {
+		await author.goto(seeded.draftUrl);
+		await expect(author.getByLabel(MOST)).toBeVisible();
+		await author.clock.pauseAt(new Date());
+		const pendingText = 'Invented pending handover note.';
+		await author.getByLabel(MOST).fill(pendingText);
+		await expect(author.locator('.savestate')).toHaveText('Saving…');
+		await dismissTabClose(author);
+		await expect(author.getByLabel(MOST)).toHaveValue(pendingText);
+		await author.clock.runFor(700);
+		await expectSaved(author);
+		await author.clock.resume();
+
+		held = await holdAppliedSave(author, seeded.draftId);
+		const inFlightText = 'Invented second handover note.';
+		await author.getByLabel(MOST).fill(inFlightText);
+		await held.first.arrived;
+		await dismissTabClose(author);
+		await expect(author.getByLabel(MOST)).toHaveValue(inFlightText);
+		held.first.release();
+		await expectSaved(author);
+		await author.unroute(`**/api/drafts/${seeded.draftId}/content`);
+
+		await author.route(`**/api/drafts/${seeded.draftId}/content`, async (route) => {
+			await route.abort('failed');
+		});
+		await author.getByLabel(MOST).fill('Invented note from the failed save.');
+		await expect(author.locator('.savestate')).toHaveText('Save failed');
+		await dismissTabClose(author);
+		await expect(author.getByLabel(MOST)).toHaveValue('Invented note from the failed save.');
+		await author.unroute(`**/api/drafts/${seeded.draftId}/content`);
+
+		const recovered = 'Invented note saved after the failure.';
+		await author.getByLabel(MOST).fill(recovered);
+		await expectSaved(author);
+		await author.close({ runBeforeUnload: true });
+		await expect.poll(() => author.isClosed()).toBe(true);
+		const revisit = await authorContext.newPage();
+		await revisit.goto(seeded.draftUrl);
+		await expect(revisit.getByLabel(MOST)).toHaveValue(recovered);
+		await expect(revisit.locator('details.refused')).toHaveCount(0);
+	} finally {
+		held?.first.release();
+		await authorContext.close();
+	}
+});
+
+test('a full-document link explains why pending text cannot leave', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const authorContext = await browser.newContext();
+	const author = await signIn(authorContext, JORDAN, seeded.jordanResetCode, JORDAN_PASSWORD);
+	try {
+		await author.goto(seeded.draftUrl);
+		await expect(author.getByLabel(MOST)).toBeVisible();
+		await author.clock.pauseAt(new Date());
+		const sentence = 'Invented note awaiting its ordinary save.';
+		await author.getByLabel(MOST).fill(sentence);
+		await author.evaluate(() => {
+			const link = document.createElement('a');
+			link.id = 'full-document-link';
+			link.href = '/api/health';
+			link.setAttribute('data-sveltekit-reload', '');
+			link.textContent = 'Open health check';
+			document.body.appendChild(link);
+		});
+		await author.locator('#full-document-link').click();
+		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
+		await expect(author.getByRole('alert')).toContainText('unsaved changes');
+		await expect(author.getByLabel(MOST)).toHaveValue(sentence);
+		await author.clock.runFor(700);
+		await expectSaved(author);
+		await author.locator('#full-document-link').click();
+		await expect(author).toHaveURL(/\/api\/health$/);
+	} finally {
+		await authorContext.close();
+	}
+});
+
+test('a failed winner reload still shows a refused narrative deletion', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const baseline = 'Invented original narrative awaiting correction.';
+	await page.goto(seeded.draftUrl);
+	await page.getByLabel(MOST).fill(baseline);
+	await page.getByLabel('Rate Emergency Call Interrogation').selectOption({ label: '4 — Meets standards' });
+	await expectSaved(page);
+	const authorContext = await browser.newContext();
+	const author = await signIn(authorContext, CASEY, seeded.caseyResetCode, CASEY_PASSWORD);
+	const losing = gate();
+	try {
+		await author.goto(seeded.draftUrl);
+		await expect(author.getByLabel(MOST)).toHaveValue(baseline);
+		await author.route(`**/api/drafts/${seeded.draftId}/content`, async (route) => {
+			if (route.request().method() !== 'PUT') {
+				await route.continue();
+				return;
+			}
+			losing.arrive();
+			await losing.released;
+			await route.continue();
+		});
+		let refuseReload = false;
+		await author.route(`**/api/drafts/${seeded.draftId}`, async (route) => {
+			if (refuseReload && route.request().method() === 'GET' &&
+				new URL(route.request().url()).pathname === `/api/drafts/${seeded.draftId}`) {
+				await route.abort('failed');
+				return;
+			}
+			await route.continue();
+		});
+		let finalizations = 0;
+		await author.route(`**/api/drafts/${seeded.draftId}/finalize`, async (route) => {
+			finalizations += 1;
+			await route.continue();
+		});
+		await author.getByLabel(MOST).fill('');
+		await author.getByLabel('Rate Emergency Call Interrogation').selectOption({ index: 0 });
+		await losing.arrived;
+		await page.getByLabel(LEAST).fill('Invented winning desk note.');
+		await expectSaved(page);
+		refuseReload = true;
+		const refused = author.waitForResponse((response) =>
+			response.url().includes(`/api/drafts/${seeded.draftId}/content`) &&
+			response.status() === 409
+		);
+		losing.release();
+		await refused;
+		await expect(author.getByRole('alert')).toContainText('reloaded unsuccessfully');
+		const deletion = author.locator('details.refused .narrative').filter({ hasText: MOST });
+		await expect(deletion).toContainText('Clear this narrative');
+		const clearedRating = author.locator('details.refused table.grid tbody tr').filter({
+			hasText: 'Emergency Call Interrogation'
+		});
+		await expect(clearedRating.locator('td').nth(1)).toHaveText('—');
+		await expect(author.getByRole('button', { name: 'Finalize record' })).toHaveCount(0);
+		expect(finalizations).toBe(0);
+	} finally {
+		losing.release();
+		await authorContext.close();
+	}
+});
+
+test('a queued teardown save still warns after SPA navigation', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const authorContext = await browser.newContext();
+	const author = await signIn(authorContext, JORDAN, seeded.jordanResetCode, JORDAN_PASSWORD);
+	const second = gate();
+	let held: Awaited<ReturnType<typeof holdAppliedSave>> | null = null;
+	try {
+		await author.goto(seeded.draftUrl);
+		await expect(author.getByLabel(MOST)).toBeVisible();
+		await markSpa(author);
+		held = await holdAppliedSave(author, seeded.draftId, second);
+		await author.getByLabel(MOST).fill('Invented first note already applied by the server.');
+		await held.first.arrived;
+		const later = 'Invented later note queued as the route leaves.';
+		await author.getByLabel(MOST).fill(later);
+		await homeSessions(author);
+		await dismissTabClose(author);
+		await expect(author.getByRole('heading', { name: 'My sessions' })).toBeVisible();
+		held.first.release();
+		await second.arrived;
+		await dismissTabClose(author);
+		await expect(author.getByRole('heading', { name: 'My sessions' })).toBeVisible();
+		second.release();
+		await expect.poll(async () => {
+			const draft = await (await page.request.get(`/api/drafts/${seeded.draftId}`)).json();
+			return draft.content.narratives.some((entry: { text: string }) => entry.text === later);
+		}, { message: 'the queued teardown edit did not finish' }).toBe(true);
+		await expect.poll(() => held?.revisions.length).toBe(2);
+		await author.waitForLoadState('networkidle');
+		await author.close({ runBeforeUnload: true });
+		await expect.poll(() => author.isClosed()).toBe(true);
+	} finally {
+		held?.first.release();
+		second.release();
+		await authorContext.close();
+	}
+});
+
+test('a failed ordinary save cannot silently leave by SPA navigation', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const authorContext = await browser.newContext();
+	const author = await signIn(authorContext, JORDAN, seeded.jordanResetCode, JORDAN_PASSWORD);
+	try {
+		await author.goto(seeded.draftUrl);
+		await expect(author.getByLabel(MOST)).toBeVisible();
+		await author.route(`**/api/drafts/${seeded.draftId}/content`, async (route) => {
+			await route.abort('failed');
+		});
+		const unsaved = 'Invented note whose save could not reach the server.';
+		await author.getByLabel(MOST).fill(unsaved);
+		await expect(author.locator('.savestate')).toHaveText('Save failed');
+		await author.getByRole('link', { name: 'Home' }).click();
+		await expect(author.getByRole('alert')).toContainText('Stay on this draft');
+		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
+		await expect(author.getByLabel(MOST)).toHaveValue(unsaved);
+		await author.unroute(`**/api/drafts/${seeded.draftId}/content`);
+		await author.getByLabel(MOST).fill('Invented corrected note saved on retry.');
+		await expectSaved(author);
+		await markSpa(author);
+		await homeSessions(author);
+	} finally {
+		await authorContext.close();
+	}
+});
+
+test('recovery and discard release a full-document link after a stale save', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const authorContext = await browser.newContext();
+	const author = await signIn(authorContext, JORDAN, seeded.jordanResetCode, JORDAN_PASSWORD);
+	const losing = gate();
+	try {
+		await author.goto(seeded.draftUrl);
+		await expect(author.getByLabel(MOST)).toBeVisible();
+		await author.clock.pauseAt(new Date());
+		await author.route(`**/api/drafts/${seeded.draftId}/content`, async (route) => {
+			if (route.request().method() !== 'PUT') {
+				await route.continue();
+				return;
+			}
+			losing.arrive();
+			await losing.released;
+			await route.continue();
+		});
+		await author.getByLabel(MOST).fill('Invented refused first note.');
+		await author.clock.runFor(700);
+		await losing.arrived;
+		await author.getByLabel(LEAST).fill('Invented later note typed while the request waited.');
+		await author.clock.runFor(700);
+		await page.goto(seeded.draftUrl);
+		await page.getByLabel(MOST).fill('Invented winning note.');
+		await expectSaved(page);
+		losing.release();
+		await expect(author.locator('details.refused')).toBeVisible();
+		await author.getByRole('button', { name: 'Discard this text' }).click();
+		await expect(author.locator('details.refused')).toHaveCount(0);
+		await author.evaluate(() => {
+			const link = document.createElement('a');
+			link.id = 'leave-after-discard';
+			link.href = '/api/health';
+			link.setAttribute('data-sveltekit-reload', '');
+			link.textContent = 'Open health check';
+			document.body.appendChild(link);
+		});
+		await author.locator('#leave-after-discard').click();
+		await expect(author).toHaveURL(/\/api\/health$/);
+	} finally {
+		losing.release();
+		await authorContext.close();
+	}
+});
