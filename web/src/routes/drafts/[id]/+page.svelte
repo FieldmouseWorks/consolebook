@@ -669,58 +669,94 @@
 	// Link edits ride the same optimistic token as content saves; the
 	// returned revision keeps in-flight autosaves honest.
 	async function addLink() {
+		const origin = editor;
 		const current = view;
-		if (current === null || linkChoice === '') {
+		const wantedDraft = draftId;
+		const wantedVersion = requestedVersion;
+		const chosen = linkChoice;
+		if (current === null || chosen === '') {
 			return;
 		}
+		const picked = linkable.find((row) => row.daily_version_id === chosen);
+		const sameOwner = () => editor === origin && draftId === wantedDraft;
+		const stillHere = () => sameOwner() && requestedVersion === wantedVersion;
 		busy = true;
 		error = '';
 		try {
-			await editor.flush();
-			const saved = await addSummaryLink(draftId, Number(linkChoice), editor.revision);
-			editor.revision = saved.revision;
-			const picked = linkable.find((row) => row.daily_version_id === linkChoice);
-			if (picked) {
+			await origin.flush();
+			if (!stillHere() || heldByRefusal('adding the link')) return;
+			workflowRequest = true;
+			const saved = await addSummaryLink(wantedDraft, Number(chosen), origin.revision);
+			if (!stillHere()) return;
+			origin.revision = saved.revision;
+			if (view === current && picked) {
 				current.summary_links = [...current.summary_links, picked];
-				linkable = linkable.filter((row) => row.daily_version_id !== linkChoice);
+				linkable = linkable.filter((row) => row.daily_version_id !== chosen);
+			} else {
+				await load();
+				if (!stillHere()) return;
 			}
-			linkChoice = '';
+			if (linkChoice === chosen) linkChoice = '';
 		} catch (err) {
+			if (!stillHere()) return;
 			if (err instanceof ApiError && err.code === 'stale_save') {
 				await load();
+				if (!stillHere()) return;
 				error = 'Another contributor saved first; the draft reloaded.';
 				return;
 			}
 			error = err instanceof ApiError ? err.message : 'the server could not be reached';
 		} finally {
-			busy = false;
+			if (sameOwner()) {
+				workflowRequest = false;
+				busy = false;
+			}
 		}
 	}
 
 	async function removeLink(link: SummaryLink) {
+		const origin = editor;
 		const current = view;
+		const wantedDraft = draftId;
+		const wantedVersion = requestedVersion;
+		const dailyVersionId = link.daily_version_id;
 		if (current === null) {
 			return;
 		}
+		const sameOwner = () => editor === origin && draftId === wantedDraft;
+		const stillHere = () => sameOwner() && requestedVersion === wantedVersion;
 		busy = true;
 		error = '';
 		try {
-			await editor.flush();
-			const saved = await removeSummaryLink(draftId, link.daily_version_id, editor.revision);
-			editor.revision = saved.revision;
-			current.summary_links = current.summary_links.filter(
-				(row) => row.daily_version_id !== link.daily_version_id
-			);
-			linkable = [...linkable, link];
+			await origin.flush();
+			if (!stillHere() || heldByRefusal('removing the link')) return;
+			workflowRequest = true;
+			const saved = await removeSummaryLink(wantedDraft, dailyVersionId, origin.revision);
+			if (!stillHere()) return;
+			origin.revision = saved.revision;
+			if (view === current) {
+				current.summary_links = current.summary_links.filter(
+					(row) => row.daily_version_id !== dailyVersionId
+				);
+				linkable = [...linkable, link];
+			} else {
+				await load();
+				if (!stillHere()) return;
+			}
 		} catch (err) {
+			if (!stillHere()) return;
 			if (err instanceof ApiError && err.code === 'stale_save') {
 				await load();
+				if (!stillHere()) return;
 				error = 'Another contributor saved first; the draft reloaded.';
 				return;
 			}
 			error = err instanceof ApiError ? err.message : 'the server could not be reached';
 		} finally {
-			busy = false;
+			if (sameOwner()) {
+				workflowRequest = false;
+				busy = false;
+			}
 		}
 	}
 
@@ -1311,7 +1347,7 @@
 			{/if}
 			{#if editable && linkable.length > 0}
 				<div class="row route">
-					<select aria-label="Link a daily report" bind:value={linkChoice}>
+					<select aria-label="Link a daily report" bind:value={linkChoice} disabled={busy}>
 						<option value="">Link a finalized daily report…</option>
 						{#each linkable as candidate (candidate.daily_version_id)}
 							<option value={candidate.daily_version_id}>

@@ -70,6 +70,7 @@ const content = {
 interface Seeded {
 	draftUrl: string;
 	draftId: number;
+	enrollmentId: number;
 	versionId: number;
 	jordanUserId: number;
 	/** The one-time code the created trainer signs in with. */
@@ -82,7 +83,8 @@ interface Seeded {
 async function seed(
 	page: Page,
 	browser: Browser,
-	setupCode: string
+	setupCode: string,
+	withSummary = false
 ): Promise<Seeded> {
 	await page.goto(`/`);
 	await expect(page).toHaveURL(/\/setup$/);
@@ -101,8 +103,26 @@ async function seed(
 	const program = await (
 		await page.request.post(`/api/programs`, { data: { name: content.name } })
 	).json();
+	const versionContent = withSummary
+		? {
+			...content,
+			evaluation_forms: [
+				...content.evaluation_forms,
+				{
+					record_type: 'weekly_summary',
+					name: 'Weekly Summary',
+					instructions: 'Summarize invented training.',
+					competencies: [],
+					narratives: [
+						{ prompt: 'Weekly overview.', required: false },
+						{ prompt: 'Weekly follow-up.', required: false }
+					]
+				}
+			]
+		}
+		: content;
 	const version = await (
-		await page.request.post(`/api/programs/${program.id}/versions`, { data: content })
+		await page.request.post(`/api/programs/${program.id}/versions`, { data: versionContent })
 	).json();
 	await page.request.post(`/api/program-versions/${version.id}/publish`, { data: {} });
 	const trainee = await (
@@ -152,11 +172,54 @@ async function seed(
 	return {
 		draftUrl: `/drafts/${draft.id}`,
 		draftId: draft.id,
+		enrollmentId: enrollment.id,
 		versionId: version.id,
 		jordanUserId: jordan.id,
 		jordanResetCode: jordan.reset_code,
 		caseyResetCode: casey.reset_code
 	};
+}
+
+/** Finalize a seed daily, then start a weekly draft with that daily linkable. */
+async function seedWeekly(page: Page, browser: Browser, setupCode: string) {
+	const seeded = await seed(page, browser, setupCode, true);
+	const daily = await (await page.request.get(`/api/drafts/${seeded.draftId}`)).json();
+	const coordinatorContext = await browser.newContext();
+	try {
+		const coordinator = await signIn(
+			coordinatorContext, CASEY, seeded.caseyResetCode, CASEY_PASSWORD
+		);
+		const finalized = await coordinator.request.post(`/api/drafts/${seeded.draftId}/finalize`, {
+			data: { revision: daily.revision }
+		});
+		if (!finalized.ok()) {
+			throw new Error(`seed daily did not finalize: ${finalized.status()} ${await finalized.text()}`);
+		}
+		const created = await page.request.post(
+			`/api/enrollments/${seeded.enrollmentId}/weekly-summary`,
+			{ data: {} }
+		);
+		if (!created.ok()) {
+			throw new Error(`seed weekly draft failed: ${created.status()} ${await created.text()}`);
+		}
+		const summaryId: number = (await created.json()).id;
+		const linkable = await (
+			await page.request.get(`/api/drafts/${summaryId}/linkable-dailies`)
+		).json();
+		const dailyVersionId: number | undefined = linkable.dailies[0]?.daily_version_id;
+		if (dailyVersionId === undefined) throw new Error('the finalized seed daily is not linkable');
+		return {
+			...seeded,
+			coordinatorContext,
+			coordinator,
+			summaryId,
+			summaryUrl: `/drafts/${summaryId}`,
+			dailyVersionId
+		};
+	} catch (error) {
+		await coordinatorContext.close();
+		throw error;
+	}
 }
 
 /** The second program's form: different prompts, so field identities differ. */
@@ -191,6 +254,7 @@ function differentFormContent() {
 
 /** A second session's draft, which the test starts from the home page. */
 interface SecondSession {
+	sessionId: number;
 	businessDate: string;
 	traineeName: string;
 }
@@ -231,7 +295,7 @@ async function secondSession(page: Page, trainerUserId: number): Promise<SecondS
 	if (!created.ok()) {
 		throw new Error(`the second session failed: ${created.status()} ${await created.text()}`);
 	}
-	return { businessDate: '2026-06-03', traineeName: 'Riley Trainee' };
+	return { sessionId: (await created.json()).id, businessDate: '2026-06-03', traineeName: 'Riley Trainee' };
 }
 
 /** Hands a draft to another author, so the page holds that draft's acts. */
@@ -2598,6 +2662,167 @@ test('a stranded router state requires an explicit same-entry resume', async ({
 		await expect(author.getByLabel(MOST)).toHaveValue(unsaved);
 	} finally {
 		layout.release();
+		await authorContext.close();
+	}
+});
+
+for (const action of ['add', 'remove'] as const) {
+	test(`a refused weekly save holds ${action} link until the winning copy loads`, async ({
+		page,
+		setupCode,
+		browser
+	}) => {
+		const seeded = await seedWeekly(page, browser, setupCode);
+		if (action === 'remove') {
+			const summary = await (await page.request.get(`/api/drafts/${seeded.summaryId}`)).json();
+			const linked = await page.request.post(`/api/drafts/${seeded.summaryId}/links`, {
+				data: { daily_version_id: seeded.dailyVersionId, revision: summary.revision }
+			});
+			if (!linked.ok()) throw new Error(`seed link failed: ${linked.status()} ${await linked.text()}`);
+		}
+		const loserContext = seeded.coordinatorContext;
+		const loser = seeded.coordinator;
+		const losing = gate();
+		const reload = gate();
+		try {
+			await loser.goto(seeded.summaryUrl);
+			await expect(loser.getByLabel('Weekly overview.')).toBeVisible();
+			if (action === 'add') {
+				await loser.getByLabel('Link a daily report').selectOption(String(seeded.dailyVersionId));
+			} else {
+				await expect(loser.getByRole('button', { name: 'Remove' })).toBeVisible();
+			}
+			await loser.route(`**/api/drafts/${seeded.summaryId}/content`, async (route) => {
+				if (route.request().method() !== 'PUT') {
+					await route.continue();
+					return;
+				}
+				losing.arrive();
+				await losing.released;
+				await route.continue();
+			});
+			let reloads = 0;
+			await loser.route(`**/api/drafts/${seeded.summaryId}`, async (route) => {
+				if (route.request().method() !== 'GET' ||
+					new URL(route.request().url()).pathname !== `/api/drafts/${seeded.summaryId}`) {
+					await route.continue();
+					return;
+				}
+				reloads += 1;
+				if (reloads === 1) {
+					const response = await route.fetch();
+					reload.arrive();
+					await reload.released;
+					await route.fulfill({ response });
+					return;
+				}
+				await route.continue();
+			});
+			let linkMutations = 0;
+			loser.on('request', (request) => {
+				const path = new URL(request.url()).pathname;
+				if (request.method() === 'POST' &&
+					(path === `/api/drafts/${seeded.summaryId}/links` ||
+						path === `/api/drafts/${seeded.summaryId}/links/remove`)) {
+					linkMutations += 1;
+				}
+			});
+			const refused = `Invented weekly ${action} note withheld by another writer.`;
+			await loser.getByLabel('Weekly overview.').fill(refused);
+			await losing.arrived;
+			await page.goto(seeded.summaryUrl);
+			const winning = `Invented winning weekly ${action} note.`;
+			await page.getByLabel('Weekly overview.').fill(winning);
+			await expectSaved(page);
+			await expectUnloadReady(page);
+			await loser.getByRole('button', { name: action === 'add' ? 'Add link' : 'Remove' }).click();
+			const refusedSave = loser.waitForResponse((response) =>
+				response.request().method() === 'PUT' &&
+				new URL(response.url()).pathname === `/api/drafts/${seeded.summaryId}/content` &&
+				response.status() === 409
+			);
+			losing.release();
+			await refusedSave;
+			await reload.arrived;
+			const later = `Invented weekly ${action} follow-up typed during the winner reload.`;
+			await loser.getByLabel('Weekly follow-up.').fill(later);
+			await expect(loser.getByRole('alert')).toBeVisible();
+			expect({ linkMutations, reloads }, 'refusal must stop link mutation and a second reload')
+				.toEqual({ linkMutations: 0, reloads: 1 });
+			await expect(loser.getByRole('alert')).toContainText('Your refused text is still here');
+			reload.release();
+			await expect(refusedText(loser, 'Weekly overview.')).toHaveText(refused);
+			await expect(refusedText(loser, 'Weekly follow-up.')).toHaveText(later);
+			await expect(loser.getByLabel('Weekly overview.')).toHaveValue(winning);
+			const summary = await (await page.request.get(`/api/drafts/${seeded.summaryId}`)).json();
+			expect(summary.summary_links).toHaveLength(action === 'add' ? 0 : 1);
+		} finally {
+			losing.release();
+			reload.release();
+			await loserContext.close();
+		}
+	});
+}
+
+test('a late weekly link response cannot change the next draft editor', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seedWeekly(page, browser, setupCode);
+	const session = await secondSession(page, seeded.jordanUserId);
+	const other = await page.request.post(
+		`/api/sessions/${session.sessionId}/draft`, { data: {} }
+	);
+	if (!other.ok()) throw new Error(`second daily draft failed: ${other.status()}`);
+	const otherId: number = (await other.json()).id;
+	const authorContext = seeded.coordinatorContext;
+	const author = seeded.coordinator;
+	const linked = gate();
+	try {
+		await author.goto(seeded.summaryUrl);
+		await markSpa(author);
+		await author.getByLabel('Link a daily report').selectOption(String(seeded.dailyVersionId));
+		await author.route(`**/api/drafts/${seeded.summaryId}/links`, async (route) => {
+			if (route.request().method() !== 'POST') {
+				await route.continue();
+				return;
+			}
+			const response = await route.fetch();
+			if (!response.ok()) throw new Error(`source link failed: ${response.status()}`);
+			linked.arrive();
+			await linked.released;
+			await route.fulfill({ response });
+		});
+		await author.getByRole('button', { name: 'Add link' }).click();
+		await linked.arrived;
+		const sourcePaused = await author.getByLabel('Weekly overview.').isDisabled();
+		await spaToDraft(author, otherId, session.traineeName);
+		const destinationBefore = await (await page.request.get(`/api/drafts/${otherId}`)).json();
+		const answered = author.waitForResponse((response) =>
+			response.request().method() === 'POST' &&
+			new URL(response.url()).pathname === `/api/drafts/${seeded.summaryId}/links`
+		);
+		linked.release();
+		await answered;
+		await author.waitForLoadState('networkidle');
+		const fresh = 'Invented note on the later daily draft.';
+		const destinationSave = author.waitForRequest((request) =>
+			request.method() === 'PUT' &&
+			new URL(request.url()).pathname === `/api/drafts/${otherId}/content`
+		);
+		await author.getByLabel(LEAST).fill(fresh);
+		const submitted = await destinationSave;
+		expect(submitted.postDataJSON().revision, 'late source response changed the destination revision')
+			.toBe(destinationBefore.revision);
+		await expectSaved(author);
+		expect(sourcePaused, 'the source editor accepted typing during its link request').toBe(true);
+		await expect(author.locator('details.refused')).toHaveCount(0);
+		const destination = await (await page.request.get(`/api/drafts/${otherId}`)).json();
+		expect(destination.content.narratives.some((entry: { text: string }) => entry.text === fresh))
+			.toBe(true);
+	} finally {
+		linked.release();
 		await authorContext.close();
 	}
 });
