@@ -1068,7 +1068,8 @@
 		</section>
 	{/if}
 
-	{#if view.viewer_may_finalize && !frozenContentPending && !editor.unresolved}
+	{#if view.viewer_may_finalize && !frozenContentPending &&
+		(!editor.unresolved || openForEditing(view))}
 		<section class="panel">
 			<h2>Finalize</h2>
 			<p class="quiet">

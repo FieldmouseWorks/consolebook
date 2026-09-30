@@ -1222,6 +1222,7 @@ test('a workflow act over a refused save is not taken sight unseen', async ({
 		expect(submits, 'the draft was submitted sight unseen').toBe(0);
 		await expect(loser.getByRole('alert')).toContainText('Your refused text is still here');
 		const finalizeButton = loser.getByRole('button', { name: 'Finalize record' });
+		await expect(finalizeButton).toBeVisible();
 		await finalizeButton.click();
 		await expect(finalizeButton).toBeEnabled();
 		expect(finalizations, 'the record was sealed sight unseen').toBe(0);
