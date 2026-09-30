@@ -56,15 +56,24 @@ export interface RefusedRating {
 	typed_while_pending: boolean;
 }
 
+/** Server refusals and an unconfirmed save after a loaded draft became frozen. */
+export type RecoveryReason =
+	| 'stale_save'
+	| 'draft_submitted'
+	| 'draft_approved'
+	| 'draft_finalized'
+	| 'unconfirmed_frozen';
+
+export type FrozenRefusalCode = Exclude<RecoveryReason, 'stale_save' | 'unconfirmed_frozen'>;
+
 /**
- * A save the revision contract refused (`stale_save`) and the text it
- * carried, still readable after the workspace reloaded the winner.
- *
- * `narratives` and `ratings` hold what differed from the reloaded content,
- * or the full captured snapshot when the winning reload failed. The page
- * never invents a merge (issue #34; ADR 0008: one working copy).
+ * Local content missing from the latest loaded copy, kept in memory for
+ * the writer. An unconfirmed save is compared with the server copy before
+ * anything is called missing. With a failed reload, the whole captured
+ * snapshot stays readable. The page never invents a merge (#34; ADR 0008).
  */
 export interface RefusedBuffer {
+	reason: RecoveryReason;
 	/** Ascending `form_narrative_id`: a stable order for the buffer. */
 	narratives: RefusedNarrative[];
 	ratings: RefusedRating[];
@@ -100,7 +109,9 @@ export type SaveResult =
 	/** The typed refusal or transport answer the attempt failed with. */
 	| { status: 'failed'; message: string }
 	| { status: 'ignored' }
-	| { status: 'stale'; refused: EditorSnapshot };
+	| { status: 'stale'; refused: EditorSnapshot }
+	| { status: 'frozen'; refused: EditorSnapshot; reason: FrozenRefusalCode }
+	| { status: 'unconfirmed_frozen'; refused: EditorSnapshot };
 
 interface SaveRun {
 	draft_id: number;
@@ -129,14 +140,14 @@ export class DraftEditorController {
 	 * The text each refused save carried, plus anything typed while its
 	 * request was still in flight, for the writer to read and copy. Empty
 	 * whenever there is nothing to recover, and it only ever holds text
-	 * from saves the contract actually refused or from edits that were
-	 * never submitted because of a refusal. A later refusal is added, never
-	 * substituted: an earlier buffer the author has not copied yet is still
-	 * their text.
+	 * from saves the contract refused, a save unconfirmed after the loaded
+	 * draft froze, or edits never submitted because of either. A later
+	 * recovery is added, never substituted: an earlier buffer the author
+	 * has not copied yet is still their text.
 	 */
 	refused: RefusedBuffer[] = $state([]);
 	/**
-	 * A refusal whose reload did not land: the page's working copy is not
+	 * A recovery whose reload did not land: the page's working copy is not
 	 * the winner's, so nothing may be acted on until a reload or a save
 	 * succeeds. Kept apart from the buffers because it can be true with no
 	 * buffer to show.
@@ -159,7 +170,7 @@ export class DraftEditorController {
 	 */
 	get unresolved(): boolean {
 		return (
-			this.#reported_stale ||
+			this.#reported_refusal ||
 			this.#reloadFailed ||
 			this.refused.some((buffer) => !buffer.resolved)
 		);
@@ -179,9 +190,9 @@ export class DraftEditorController {
 		return !this.#destroyed && this.saveState === 'failed';
 	}
 
-	/** A new refusal must be shown before the writer can leave this draft. */
+	/** A new recovery must be shown before the writer can leave this draft. */
 	get hasPendingRecovery(): boolean {
-		return this.#reported_stale && !this.#reloadFailed;
+		return this.#reported_refusal && !this.#reloadFailed;
 	}
 
 	/** The winning copy did not load; the writer can retry it in place. */
@@ -215,12 +226,12 @@ export class DraftEditorController {
 		}
 	};
 	/**
-	 * A refusal the page has not answered with a reload yet. A later save
+	 * A refusal or frozen-view failure awaiting the page's reload. A later save
 	 * that the same stale revision also refuses reports nothing new: it
 	 * carries no text the first refusal did not already hand over, and
 	 * reporting again would overwrite the buffer with post-reload state.
 	 */
-	#reported_stale = false;
+	#reported_refusal = $state(false);
 
 	/**
 	 * `view` returns the draft the page loaded (or `null` while loading);
@@ -316,12 +327,10 @@ export class DraftEditorController {
 		if (draft_id === null) {
 			return Promise.resolve();
 		}
-		if (this.#reported_stale) {
+		if (this.#reported_refusal) {
 			// The page has not yet reloaded the winner for the refusal it
-			// was already told about; a further attempt would only be
-			// refused by the same stale revision — and it is not a save
-			// that is still coming, so the indicator must not keep saying
-			// one is.
+			// was already told about. Do not send again before the latest
+			// draft loads; the indicator must not keep saying a save is coming.
 			this.saveState = 'idle';
 			return Promise.resolve();
 		}
@@ -361,7 +370,7 @@ export class DraftEditorController {
 			} else {
 				return;
 			}
-			if (this.#destroyed || this.#reported_stale || this.saveState === 'failed') {
+			if (this.#destroyed || this.#reported_refusal || this.saveState === 'failed') {
 				return;
 			}
 		}
@@ -439,7 +448,7 @@ export class DraftEditorController {
 	 */
 	markReloaded(): void {
 		this.#retirePendingEdit();
-		this.#reported_stale = false;
+		this.#reported_refusal = false;
 		this.#reloadFailed = false;
 	}
 
@@ -512,7 +521,7 @@ export class DraftEditorController {
 	 */
 	destroy(): void {
 		const draft = this.#draftView;
-		const pending = (this.#timer !== null || this.#dirty) && !this.#reported_stale;
+		const pending = (this.#timer !== null || this.#dirty) && !this.#reported_refusal;
 		const content = pending && draft !== null ? this.#buildContent(draft) : null;
 		const inflight = this.#inFlight;
 		this.#destroyed = true;
@@ -545,7 +554,7 @@ export class DraftEditorController {
 		if (inflight !== null) {
 			await inflight.catch(() => {});
 		}
-		if (this.#reported_stale) {
+		if (this.#reported_refusal) {
 			return;
 		}
 		try {
@@ -629,9 +638,13 @@ export class DraftEditorController {
 				} catch (err) {
 					if (this.#destroyed) {
 						// Teardown may have queued a newer ordinary edit. A late
-						// refusal must stop that send, not retry refused content.
-						if (err instanceof ApiError && err.code === 'stale_save') {
-							this.#reported_stale = true;
+						// refusal or known frozen view must stop that send.
+						if (
+							(err instanceof ApiError && err.code === 'stale_save') ||
+							frozenRefusalCode(err) !== null ||
+							(this.#draftView !== null && !openForEditing(this.#draftView))
+						) {
+							this.#reported_refusal = true;
 						}
 						return;
 					}
@@ -655,19 +668,26 @@ export class DraftEditorController {
 						// text readable (#34). One report per refusal: any
 						// later attempt is refused by the same stale
 						// revision and carries nothing new.
-						this.#retirePendingEdit();
-						this.saveState = 'idle';
-						if (!this.#reported_stale) {
-							this.#reported_stale = true;
-							// Recorded before the page is told, so a
-							// workflow act that starts while the refusal's
-							// reload is in flight already waits.
-							this.#refusals += 1;
-							this.#settled = {
-								status: 'stale',
-								refused: run.refused
-							};
-						}
+						this.#recordRecovery({ status: 'stale', refused: run.refused });
+						return;
+					}
+					const frozenCode = frozenRefusalCode(err);
+					const loaded = this.#view();
+					if (frozenCode !== null) {
+						// The server rejected content because the draft froze.
+						// This is distinct from a revision's stale_save answer.
+						this.#recordRecovery({
+							status: 'frozen', reason: frozenCode, refused: run.refused
+						});
+						return;
+					}
+					if (loaded !== null && !openForEditing(loaded)) {
+						// A transport failure does not prove what reached the
+						// server. The actually loaded frozen status does prove
+						// this copy cannot be retried here; reload to compare.
+						this.#recordRecovery({
+							status: 'unconfirmed_frozen', refused: run.refused
+						});
 						return;
 					}
 					this.saveState = 'failed';
@@ -688,7 +708,9 @@ export class DraftEditorController {
 					return;
 				}
 				this.revision = saved.revision;
-				this.saveState = 'saved';
+				// A later edit is still queued while metadata reloads. It is
+				// not saved merely because this earlier snapshot succeeded.
+				this.saveState = this.#dirty ? 'pending' : 'saved';
 				if (this.#refusals === refusalsAtStart) {
 					this.#resolveCarried(run.refused);
 				}
@@ -709,6 +731,17 @@ export class DraftEditorController {
 
 	/** The result this chain settled as, reported once when it releases. */
 	#settled: SaveResult = { status: 'saved' };
+
+	/** Block another send before the page starts its authoritative reload. */
+	#recordRecovery(result: Extract<SaveResult, { refused: EditorSnapshot }>): void {
+		this.#retirePendingEdit();
+		if (!this.#reported_refusal) {
+			this.#reported_refusal = true;
+			this.#refusals += 1;
+			this.#settled = result;
+		}
+		this.saveState = 'idle';
+	}
 
 	/** Whether this run's result still belongs to the draft on screen. */
 	#stale(run: SaveRun): boolean {
@@ -811,7 +844,8 @@ export function openForEditing(view: DraftView): boolean {
 export function divergentBuffer(
 	refused: EditorSnapshot,
 	latest: EditorSnapshot,
-	winner: DraftView | null
+	winner: DraftView | null,
+	reason: RecoveryReason = 'stale_save'
 ): RefusedBuffer {
 	// With no reloaded copy to compare against (a reload that failed), the
 	// whole buffer is recoverable text rather than divergent text: the
@@ -928,7 +962,7 @@ export function divergentBuffer(
 				!sameIds(sent.picked, current.picked)
 		});
 	}
-	return { narratives, ratings, resolved: false };
+	return { reason, narratives, ratings, resolved: false };
 }
 
 function sameIds(left: number[], right: number[]): boolean {
@@ -937,4 +971,16 @@ function sameIds(left: number[], right: number[]): boolean {
 	}
 	const sorted = [...left].sort((first, second) => first - second);
 	return sorted.every((candidate, index) => candidate === right[index]);
+}
+
+function frozenRefusalCode(error: unknown): FrozenRefusalCode | null {
+	if (!(error instanceof ApiError)) return null;
+	switch (error.code) {
+		case 'draft_submitted':
+		case 'draft_approved':
+		case 'draft_finalized':
+			return error.code;
+		default:
+			return null;
+	}
 }

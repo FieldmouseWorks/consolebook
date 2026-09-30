@@ -163,9 +163,8 @@ async function seed(
 		throw new Error(`the seeded session failed: ${created.status()} ${await created.text()}`);
 	}
 	const session = await created.json();
-	// The administrator starts the draft. Jordan is a coordinator, so the
-	// losing writer can edit and take a workflow act on a draft it does
-	// not own, which is what the recovery scenarios need.
+	// The administrator starts the draft. Jordan can contribute as its
+	// assigned trainer; Casey can review and finalize as coordinator.
 	const draft = await (
 		await page.request.post(`/api/sessions/${session.id}/draft`, { data: {} })
 	).json();
@@ -508,7 +507,8 @@ function gate(): {
 async function holdAppliedSave(
 	page: Page,
 	draftId: number,
-	second: ReturnType<typeof gate> | null = null
+	second: ReturnType<typeof gate> | null = null,
+	abortSecond = false
 ) {
 	const first = gate();
 	const revisions: number[] = [];
@@ -531,6 +531,10 @@ async function holdAppliedSave(
 		if (revisions.length === 2 && second !== null) {
 			second.arrive();
 			await second.released;
+			if (abortSecond) {
+				await route.abort('failed');
+				return;
+			}
 		}
 		await route.continue();
 	});
@@ -714,7 +718,7 @@ test('the losing writer recovers their sentence after a stale-save reload', asyn
 		// separated from the winning working copy.
 		const panel = loser.locator('details.refused');
 		await expect(panel).toBeVisible();
-		await expect(panel).toContainText('Your unsaved text from before the reload');
+		await expect(panel).toContainText('Your local text from before the reload');
 		await expect(refusedText(loser, MOST)).toHaveText(losingSentence);
 		// Exactly one PUT was attempted: the refused buffer is never
 		// resubmitted on the writer's behalf.
@@ -1117,10 +1121,10 @@ test('a second refusal adds to the refused text instead of replacing it', async 
 		await expect(refusedText(loser, LEAST)).toHaveText(secondText);
 		await expect(refusedText(loser, MOST)).toHaveText(firstText);
 		await expect(loser.locator('details.refused summary').first()).toContainText(
-			'Your unsaved text from before the reload'
+			'Your local text from before the reload'
 		);
 		await expect(loser.locator('details.refused summary').nth(1)).toContainText(
-			'Text from an earlier refused save'
+			'Earlier local text'
 		);
 
 		// Discarding one leaves the other.
@@ -2523,6 +2527,377 @@ test('retrying a failed save against an advanced revision preserves its refused 
 		await expect(author.getByRole('alert')).toContainText('Your refused text is still here');
 		expect(submissions, 'workflow must wait for the writer to resolve refused text').toBe(0);
 	} finally {
+		await authorContext.close();
+	}
+});
+
+test('a first save refused by a frozen draft survives a failed reload', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const authorContext = await browser.newContext();
+	const author = await signIn(authorContext, JORDAN, seeded.jordanResetCode, JORDAN_PASSWORD);
+	const reload = gate();
+	let reloads = 0;
+	let puts = 0;
+	try {
+		await author.goto(seeded.draftUrl);
+		await expect(author.getByLabel(MOST)).toBeEnabled();
+		await markSpa(author);
+		const initial = await (await page.request.get(`/api/drafts/${seeded.draftId}`)).json();
+		const submit = await page.request.post(`/api/drafts/${seeded.draftId}/submit`, {
+			data: { revision: initial.revision }
+		});
+		expect(submit.ok(), `freeze failed: ${submit.status()} ${await submit.text()}`).toBe(true);
+		await author.route(`**/api/drafts/${seeded.draftId}`, async (route) => {
+			if (route.request().method() !== 'GET' ||
+				new URL(route.request().url()).pathname !== `/api/drafts/${seeded.draftId}`) {
+				await route.continue();
+				return;
+			}
+			reloads += 1;
+			if (reloads === 1) {
+				reload.arrive();
+				await reload.released;
+				await route.abort('failed');
+				return;
+			}
+			await route.continue();
+		});
+		author.on('request', (request) => {
+			if (request.method() === 'PUT' &&
+				new URL(request.url()).pathname === `/api/drafts/${seeded.draftId}/content`) {
+				puts += 1;
+			}
+		});
+		const local = 'Invented dispatch note typed before the frozen status arrived.';
+		const denied = author.waitForResponse((response) =>
+			response.request().method() === 'PUT' &&
+			new URL(response.url()).pathname === `/api/drafts/${seeded.draftId}/content` &&
+			response.status() === 409
+		);
+		await author.getByLabel(MOST).fill(local);
+		expect((await (await denied).json()).error).toBe('draft_submitted');
+		await expect.poll(() => reloads, {
+			message: 'a frozen refusal must reload the authoritative draft'
+		}).toBe(1);
+		await reload.arrived;
+		await author.getByRole('link', { name: 'Home' }).click();
+		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
+		await expect(author.getByRole('alert')).toContainText('latest draft is still loading');
+		reload.release();
+		await expect(author.getByRole('alert')).toContainText('could not load');
+		await expect(refusedText(author, MOST)).toHaveText(local);
+		await expect(author.getByRole('button', { name: 'Reload latest draft' })).toBeVisible();
+		await author.getByRole('button', { name: 'Reload latest draft' }).click();
+		await expect(author.getByText('Submitted for review', { exact: true })).toBeVisible();
+		await expect(author.getByLabel(MOST)).toHaveValue('');
+		await expect(author.getByLabel(MOST)).toBeDisabled();
+		await expect(refusedText(author, MOST)).toHaveText(local);
+		await expect(author.locator('details.refused')).toContainText('cannot be saved to this draft');
+		expect(puts, 'the refused copy must not be sent again').toBe(1);
+		await author.getByRole('button', { name: 'Discard this text' }).click();
+		await expect(author.locator('details.refused')).toHaveCount(0);
+		await homeSessions(author);
+		const frozen = await (await page.request.get(`/api/drafts/${seeded.draftId}`)).json();
+		expect(frozen.status).toBe('submitted');
+		expect(frozen.content.narratives).toEqual([]);
+	} finally {
+		reload.release();
+		await authorContext.close();
+	}
+});
+
+for (const outcome of ['typed frozen refusal', 'transport failure on a frozen view'] as const) {
+test(`a queued save with ${outcome} keeps its text and permits an exit`, async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const authorContext = await browser.newContext();
+	const author = await signIn(authorContext, JORDAN, seeded.jordanResetCode, JORDAN_PASSWORD);
+	const second = gate();
+	const recovery = gate();
+	let draftGets = 0;
+	let held: Awaited<ReturnType<typeof holdAppliedSave>> | null = null;
+	try {
+		await author.goto(seeded.draftUrl);
+		await expect(author.getByLabel(MOST)).toBeEnabled();
+		await markSpa(author);
+		held = await holdAppliedSave(
+			author, seeded.draftId, second, outcome === 'transport failure on a frozen view'
+		);
+		await author.route(`**/api/drafts/${seeded.draftId}`, async (route) => {
+			if (route.request().method() !== 'GET' ||
+				new URL(route.request().url()).pathname !== `/api/drafts/${seeded.draftId}`) {
+				await route.continue();
+				return;
+			}
+			draftGets += 1;
+			if (draftGets === 2) {
+				recovery.arrive();
+				await recovery.released;
+			}
+			await route.continue();
+		});
+		const applied = 'Invented first note accepted before submission.';
+		await author.getByLabel(MOST).fill(applied);
+		await held.first.arrived;
+		const first = await (await page.request.get(`/api/drafts/${seeded.draftId}`)).json();
+		expect(first.content.narratives.some((entry: { text: string }) => entry.text === applied))
+			.toBe(true);
+		const local = 'Invented later note that the frozen draft refused.';
+		await author.getByLabel(MOST).fill(local);
+		const submit = await page.request.post(`/api/drafts/${seeded.draftId}/submit`, {
+			data: { revision: first.revision }
+		});
+		expect(submit.ok(), `freeze failed: ${submit.status()} ${await submit.text()}`).toBe(true);
+		// The real server is frozen; in the transport variant, the browser
+		// loses B's reply before receiving the typed refusal. Metadata from
+		// A has already told this controller the view is read-only.
+		const denied = outcome === 'typed frozen refusal'
+			? author.waitForResponse((response) =>
+				response.request().method() === 'PUT' &&
+				new URL(response.url()).pathname === `/api/drafts/${seeded.draftId}/content` &&
+				response.status() === 409
+			)
+			: null;
+		const failed = outcome === 'transport failure on a frozen view'
+			? author.waitForEvent('requestfailed', (request) =>
+				request.method() === 'PUT' &&
+				new URL(request.url()).pathname === `/api/drafts/${seeded.draftId}/content`
+			)
+			: null;
+		held.first.release();
+		await second.arrived;
+		await expect(author.getByText('Submitted for review', { exact: true })).toBeVisible();
+		await expect(author.getByText('Local copy awaiting server comparison')).toBeVisible();
+		await expect(author.getByText("These fields do not establish the server's current content.")).toBeVisible();
+		await expect(author.getByLabel(MOST)).toHaveValue(local);
+		await expect(author.getByLabel(MOST)).toHaveAttribute('readonly');
+		second.release();
+		if (outcome === 'typed frozen refusal') {
+			expect((await (await denied!).json()).error).toBe('draft_submitted');
+		} else {
+			await failed!;
+		}
+		expect(held.revisions).toHaveLength(2);
+		expect(held.revisions[1]).toBe(first.revision);
+		await recovery.arrived;
+		expect(draftGets).toBe(2);
+		await expect(author.getByText('Local copy awaiting server comparison')).toBeVisible();
+		await expect(author.getByLabel(MOST)).toHaveValue(local);
+		await expect(author.getByLabel(MOST)).toHaveAttribute('readonly');
+		recovery.release();
+		await expect(refusedText(author, MOST)).toHaveText(local);
+		await expect(author.getByText('Local copy awaiting server comparison')).toHaveCount(0);
+		await expect(author.getByText('Submitted for review', { exact: true })).toBeVisible();
+		await expect(author.getByLabel(MOST)).toHaveValue(applied);
+		await expect(author.getByLabel(MOST)).toBeDisabled();
+		await expect(author.locator('details.refused')).toContainText('cannot be saved to this draft');
+		await expect(author.getByRole('button', { name: 'Retry save' })).toHaveCount(0);
+		const frozen = await (await page.request.get(`/api/drafts/${seeded.draftId}`)).json();
+		expect(frozen.status).toBe('submitted');
+		expect(frozen.content.narratives.some((entry: { text: string }) => entry.text === applied))
+			.toBe(true);
+		expect(frozen.content.narratives.some((entry: { text: string }) => entry.text === local))
+			.toBe(false);
+		await author.getByRole('button', { name: 'Discard this text' }).click();
+		await expect(author.locator('details.refused')).toHaveCount(0);
+		await homeSessions(author);
+	} finally {
+		held?.first.release();
+		second.release();
+		recovery.release();
+		await authorContext.close();
+	}
+});
+}
+
+test('a queued save frozen by finalization keeps a local copy until the sealed record loads', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const authorContext = await browser.newContext();
+	const coordinatorContext = await browser.newContext();
+	const author = await signIn(authorContext, JORDAN, seeded.jordanResetCode, JORDAN_PASSWORD);
+	const coordinator = await signIn(
+		coordinatorContext, CASEY, seeded.caseyResetCode, CASEY_PASSWORD
+	);
+	const second = gate();
+	const recovery = gate();
+	let draftGets = 0;
+	let held: Awaited<ReturnType<typeof holdAppliedSave>> | null = null;
+	try {
+		await author.goto(seeded.draftUrl);
+		await expect(author.getByLabel(MOST)).toBeEnabled();
+		await markSpa(author);
+		held = await holdAppliedSave(author, seeded.draftId, second);
+		await author.route(`**/api/drafts/${seeded.draftId}`, async (route) => {
+			if (route.request().method() !== 'GET' ||
+				new URL(route.request().url()).pathname !== `/api/drafts/${seeded.draftId}`) {
+				await route.continue();
+				return;
+			}
+			draftGets += 1;
+			if (draftGets === 2) {
+				recovery.arrive();
+				await recovery.released;
+			}
+			await route.continue();
+		});
+		const applied = 'Invented note accepted before finalization.';
+		const local = 'Invented later note refused by the finalized record.';
+		await author.getByLabel(MOST).fill(applied);
+		await held.first.arrived;
+		const first = await (await page.request.get(`/api/drafts/${seeded.draftId}`)).json();
+		await author.getByLabel(MOST).fill(local);
+		const finalized = await coordinator.request.post(`/api/drafts/${seeded.draftId}/finalize`, {
+			data: { revision: first.revision }
+		});
+		expect(finalized.ok(), `finalization failed: ${finalized.status()} ${await finalized.text()}`)
+			.toBe(true);
+		const denied = author.waitForResponse((response) =>
+			response.request().method() === 'PUT' &&
+			new URL(response.url()).pathname === `/api/drafts/${seeded.draftId}/content` &&
+			response.status() === 409
+		);
+		held.first.release();
+		await second.arrived;
+		await expect(author.getByText('Finalized', { exact: true })).toBeVisible();
+		await expect(author.getByText('Local copy awaiting server comparison')).toBeVisible();
+		await expect(author.getByLabel(MOST)).toHaveValue(local);
+		await expect(author.getByLabel(MOST)).toHaveAttribute('readonly');
+		second.release();
+		expect((await (await denied).json()).error).toBe('draft_finalized');
+		await recovery.arrived;
+		expect(draftGets).toBe(2);
+		await expect(author.getByLabel(MOST)).toHaveValue(local);
+		await expect(author.getByText('Local copy awaiting server comparison')).toBeVisible();
+		recovery.release();
+		await expect(refusedText(author, MOST)).toHaveText(local);
+		await expect(author.getByText('Local copy awaiting server comparison')).toHaveCount(0);
+		await expect(author.getByRole('heading', { name: 'Finalized record' })).toBeVisible();
+		await expect(author.getByLabel(MOST)).toHaveCount(0);
+		await expect(author.locator('.sealed-text').filter({ hasText: applied })).toBeVisible();
+		const server = await (await page.request.get(`/api/drafts/${seeded.draftId}`)).json();
+		expect(server.status).toBe('finalized');
+		expect(server.content.narratives.some((entry: { text: string }) => entry.text === local))
+			.toBe(false);
+		await author.getByRole('button', { name: 'Discard this text' }).click();
+		await homeSessions(author);
+	} finally {
+		held?.first.release();
+		second.release();
+		recovery.release();
+		await authorContext.close();
+		await coordinatorContext.close();
+	}
+});
+
+test('a reviewer waits for frozen local recovery text before deciding', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const reviewerContext = await browser.newContext();
+	const reviewer = await signIn(
+		reviewerContext, CASEY, seeded.caseyResetCode, CASEY_PASSWORD
+	);
+	let reviews = 0;
+	try {
+		await reviewer.goto(seeded.draftUrl);
+		await expect(reviewer.getByLabel(MOST)).toBeEnabled();
+		const initial = await (await page.request.get(`/api/drafts/${seeded.draftId}`)).json();
+		const submit = await page.request.post(`/api/drafts/${seeded.draftId}/submit`, {
+			data: { revision: initial.revision }
+		});
+		expect(submit.ok(), `submission failed: ${submit.status()} ${await submit.text()}`)
+			.toBe(true);
+		reviewer.on('request', (request) => {
+			if (request.method() === 'POST' &&
+				new URL(request.url()).pathname === `/api/drafts/${seeded.draftId}/review`) {
+				reviews += 1;
+			}
+		});
+		const local = 'Invented reviewer note refused by the submitted draft.';
+		const denied = reviewer.waitForResponse((response) =>
+			response.request().method() === 'PUT' &&
+			new URL(response.url()).pathname === `/api/drafts/${seeded.draftId}/content` &&
+			response.status() === 409
+		);
+		await reviewer.getByLabel(MOST).fill(local);
+		expect((await (await denied).json()).error).toBe('draft_submitted');
+		await expect(refusedText(reviewer, MOST)).toHaveText(local);
+		await expect(reviewer.getByText('Submitted for review', { exact: true })).toBeVisible();
+		const eligible = await (await reviewer.request.get(`/api/drafts/${seeded.draftId}`)).json();
+		expect(eligible.viewer_may_review, 'reviewer must have an actual review action')
+			.toBe(true);
+		await expect(reviewer.getByRole('button', { name: 'Decide' })).toHaveCount(0);
+		expect(reviews, 'no review may run while the local buffer is unresolved').toBe(0);
+		await reviewer.getByRole('button', { name: 'Discard this text' }).click();
+		const decide = reviewer.getByRole('button', { name: 'Decide' });
+		await expect(decide).toBeVisible();
+		const reviewed = reviewer.waitForResponse((response) =>
+			response.request().method() === 'POST' &&
+			new URL(response.url()).pathname === `/api/drafts/${seeded.draftId}/review`
+		);
+		await decide.click();
+		expect((await reviewed).ok()).toBe(true);
+		expect(reviews).toBe(1);
+		const decided = await (await page.request.get(`/api/drafts/${seeded.draftId}`)).json();
+		expect(decided.status).toBe('approved');
+	} finally {
+		await reviewerContext.close();
+	}
+});
+
+test('a frozen failed save permits deliberate SPA departure after recovery', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const authorContext = await browser.newContext();
+	const author = await signIn(authorContext, JORDAN, seeded.jordanResetCode, JORDAN_PASSWORD);
+	let held: Awaited<ReturnType<typeof holdAppliedSave>> | null = null;
+	try {
+		await author.goto(seeded.draftUrl);
+		await expect(author.getByLabel(MOST)).toBeEnabled();
+		await markSpa(author);
+		held = await holdAppliedSave(author, seeded.draftId);
+		await author.getByLabel(MOST).fill('Invented accepted note before the draft froze.');
+		await held.first.arrived;
+		const applied = await (await page.request.get(`/api/drafts/${seeded.draftId}`)).json();
+		await author.getByLabel(MOST).fill('Invented local note withheld by the frozen draft.');
+		const submit = await page.request.post(`/api/drafts/${seeded.draftId}/submit`, {
+			data: { revision: applied.revision }
+		});
+		expect(submit.ok(), `freeze failed: ${submit.status()} ${await submit.text()}`).toBe(true);
+		const denied = author.waitForResponse((response) =>
+			response.request().method() === 'PUT' &&
+			new URL(response.url()).pathname === `/api/drafts/${seeded.draftId}/content` &&
+			response.status() === 409
+		);
+		held.first.release();
+		expect((await (await denied).json()).error).toBe('draft_submitted');
+		await expect(author.getByText('Submitted for review', { exact: true })).toBeVisible();
+		await author.waitForLoadState('networkidle');
+		await expect(refusedText(author, MOST)).toHaveText(
+			'Invented local note withheld by the frozen draft.'
+		);
+		await author.getByRole('link', { name: 'Home' }).click();
+		await expect(author).toHaveURL(/\/$/);
+		await expectSpaAlive(author);
+		await expect(author.locator('details.refused')).toHaveCount(0);
+	} finally {
+		held?.first.release();
 		await authorContext.close();
 	}
 });

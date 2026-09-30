@@ -1,9 +1,7 @@
 <script lang="ts">
-	// The losing writer's refused text, kept in memory after a stale-save
-	// reload (#34; ADR 0008). Read-only and copyable: the writer copies what
-	// they still want into the reloaded working copy and saves it through
-	// the same revision contract. This component never merges, never
-	// resubmits, and never writes the buffer anywhere.
+	// Local text missing from the server copy, kept in memory after a
+	// refused or unconfirmed save (#34; ADR 0008). Read-only and copyable:
+	// this component never merges, resubmits, or persists the buffer.
 	import type { RefusedBuffer } from '$lib/drafts/editor.svelte';
 
 	let {
@@ -12,18 +10,16 @@
 	}: { buffers: RefusedBuffer[]; onDiscard: (index: number) => void } = $props();
 </script>
 
-<!-- One block per refused save, newest first: a later refusal is added,
-     never substituted, so text the writer has not copied yet is still
-     here. The newest is open by default; the reloaded working copy stays
-     the page's main content. -->
+<!-- One block per interrupted save, newest first. The newest is open by
+     default; the server copy remains the page's main content. -->
 {#each buffers as refused, index (index)}
 	{@const narrativeCount = refused.narratives.length}
 	{@const ratingCount = refused.ratings.length}
-	<details class="refused" open={index === 0 && narrativeCount > 0}>
+	<details class="refused" open={index === 0 && (narrativeCount > 0 || ratingCount > 0)}>
 		<summary>
 			{index === 0
-				? 'Your unsaved text from before the reload'
-				: 'Text from an earlier refused save'}
+				? 'Your local text from before the reload'
+				: 'Earlier local text'}
 			{#if narrativeCount > 0}
 				<span class="quiet-inline">
 					({narrativeCount}
@@ -32,10 +28,22 @@
 			{/if}
 		</summary>
 		<p class="quiet small-note">
-			Another contributor saved first. Your save was refused and never
-			applied. Once the latest draft loads, copy the text or repeat the
-			deletion below in its fields, then save through the normal revision
-			check. Nothing here is merged or resubmitted for you.
+			{#if refused.reason === 'stale_save'}
+				Another contributor saved first. Your save was refused and never
+				applied. Once the latest draft loads, copy the text or repeat the
+				deletion below in its fields, then save through the normal revision
+				check. Nothing here is merged or resubmitted for you.
+			{:else if refused.reason === 'unconfirmed_frozen'}
+				The draft is now read-only, and this save could not be confirmed.
+				Compare this local text with the latest
+				draft when it loads. Copy anything you need elsewhere before leaving
+				or discard it; it cannot be saved to this draft while read-only.
+			{:else}
+				The server refused this save because the draft became read-only.
+				This local copy stays on this page. Compare it with the latest draft
+				when it loads. Copy anything you need elsewhere before leaving or
+				discard it; it cannot be saved to this draft while read-only.
+			{/if}
 		</p>
 		{#if narrativeCount > 0}
 			<h3>Narratives to recover</h3>
@@ -45,14 +53,18 @@
 						{narrative.label}
 						{#if narrative.typed_while_pending}
 							<span class="pending-note">
-								— typed after the refused save was sent, so it was
+								— typed after the save was sent, so it was
 								never submitted
 							</span>
 						{/if}
 					</p>
 					{#if narrative.text === ''}
 						<p class="refused-text">
-							Clear this narrative. After the latest draft loads, leave its field empty and save to apply the deletion.
+							{#if refused.reason === 'stale_save'}
+								Clear this narrative. After the latest draft loads, leave its field empty and save to apply the deletion.
+							{:else}
+								This narrative was empty in your local copy. Compare it with the latest draft when it loads; no change can be applied while read-only.
+							{/if}
 						</p>
 					{:else}
 						<!-- Read-only and copyable; never an editor. -->
@@ -88,7 +100,7 @@
 								{rating.modifier_codes.join(' ')}
 								{#if rating.typed_while_pending}
 									<span class="pending-note">
-										changed after the refused save was sent
+										changed after the save was sent
 									</span>
 								{/if}
 							</td>

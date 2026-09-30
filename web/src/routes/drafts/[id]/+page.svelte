@@ -151,7 +151,7 @@
 			navigation.cancel();
 			if (navigation.type !== 'leave') {
 				error = origin.hasPendingRecovery
-					? 'The latest draft is still loading after a refused save. Wait before leaving.'
+					? 'The latest draft is still loading after a save stopped. Wait before leaving.'
 					: 'The draft has unsaved changes. Wait for the save to finish before leaving.';
 			}
 			return;
@@ -175,7 +175,7 @@
 		}
 		if (origin.hasPendingRecovery) {
 			navigation.cancel();
-			error = 'The latest draft is still loading after a refused save. Wait before leaving.';
+			error = 'The latest draft is still loading after a save stopped. Wait before leaving.';
 		}
 	});
 
@@ -333,6 +333,12 @@
 		view !== null && !workflowRequest && !routeLeaving && openForEditing(view) &&
 		(canAssign || canAuthor)
 	);
+	let frozenContentPending = $derived.by(() => {
+		const current = view;
+		return current !== null && !openForEditing(current) &&
+			(editor.saveState === 'pending' || editor.saveState === 'saving' ||
+				editor.hasPendingRecovery);
+	});
 	let mayRoute = $derived.by(() => {
 		const current = view;
 		return current !== null && (canAssign || myUserId === current.owner_user_id);
@@ -352,7 +358,9 @@
 			return true;
 		}
 		if (editor.unresolved) {
-			error = `Your refused text is still here and is not in the draft; copy anything you need into the reloaded fields and save, or discard it, before ${act}.`;
+			error = view === null || !openForEditing(view)
+				? `Your local recovery text is still here; compare it with the latest draft, copy anything you need elsewhere, or discard it before ${act}.`
+				: `Your refused text is still here and is not in the draft; copy anything you need into the reloaded fields and save, or discard it, before ${act}.`;
 			return true;
 		}
 		return false;
@@ -381,7 +389,8 @@
 
 	// Everything the controller settled, including a real failure.
 	function received(result: SaveResult): void {
-		if (result.status === 'stale') {
+		if (result.status === 'stale' || result.status === 'frozen' ||
+			result.status === 'unconfirmed_frozen') {
 			void recoverFromRefusal(result);
 			return;
 		}
@@ -390,13 +399,10 @@
 		}
 	}
 
-	/**
-	 * Another contributor saved first. Their copy wins and the page
-	 * reloads it, so rather than overwriting it. The text this save
-	 * carried is computed against the reloaded winner and kept in the
-	 * controller as the read-only recovery buffer (#34).
-	 */
+	/** Reload the server copy and keep only local text it does not contain. */
 	async function recoverFromRefusal(result: SaveResult): Promise<void> {
+		if (result.status !== 'stale' && result.status !== 'frozen' &&
+			result.status !== 'unconfirmed_frozen') return;
 		// The controller this refusal belongs to, captured before the reload
 		// awaits: a route change replaces the controller, and this
 		// continuation must then touch nothing at all — not its buffers, not
@@ -404,7 +410,9 @@
 		const origin = editor;
 		const originDraft = draftId;
 		const originVersion = requestedVersion;
-		const refused = result.status === 'stale' ? result.refused : null;
+		const refused = result.refused;
+		const reason = result.status === 'stale' ? 'stale_save' :
+			result.status === 'frozen' ? result.reason : 'unconfirmed_frozen';
 		// The reload hands back the working copy it replaced, so an edit
 		// made while it was in flight is still in the comparison instead of
 		// being overwritten unseen.
@@ -415,29 +423,31 @@
 			return;
 		}
 		const reloaded = replaced !== null;
-		if (refused !== null) {
-			// With no reloaded copy to compare against, everything the
-			// refusal carried stays recoverable: a failed reload must never
-			// be the reason text disappears.
-			origin.keepRefused(
-				divergentBuffer(refused, replaced ?? origin.snapshot(), reloaded ? view : null)
-			);
-		}
+		// With no reloaded copy to compare against, everything local stays
+		// recoverable. Publish it before ending the pending-recovery guard.
+		origin.keepRefused(divergentBuffer(
+			refused, replaced ?? origin.snapshot(), reloaded ? view : null, reason
+		));
 		if (reloaded) {
 			origin.markReloaded();
 		} else {
 			origin.markReloadFailed();
 		}
 		if (!reloaded) {
-			// A failed reload is not a successful refresh: the refused
-			// text stays available above, and the load failure is what the
-			// page reports.
-			error =
-				'The draft reloaded unsuccessfully after another contributor saved first; your unsaved text is kept below.';
+			// A failed reload leaves the full local snapshot above. Transport
+			// did not prove whether the attempted save reached the server.
+			error = result.status === 'stale'
+				? 'The draft reloaded unsuccessfully after another contributor saved first; your unsaved text is kept below.'
+				: result.status === 'frozen'
+					? 'The server refused the save because the draft became read-only. The latest draft could not load; your local text is kept above.'
+					: 'The save could not be confirmed after the draft became read-only. The latest draft could not load; your local text is kept above.';
 			return;
 		}
-		error =
-			'Another contributor saved first; the draft reloaded with their latest content.';
+		error = result.status === 'stale'
+			? 'Another contributor saved first; the draft reloaded with their latest content.'
+			: result.status === 'frozen'
+				? 'The server refused the save because the draft became read-only. Compare any local recovery text above with the latest copy.'
+				: 'The save could not be confirmed after the draft became read-only. Compare any local recovery text above with the latest copy.';
 	}
 
 	/** Retry only the winning GET; the refused buffer remains read-only. */
@@ -454,7 +464,7 @@
 			if (!stillHere()) return;
 			if (replaced === null) {
 				origin.markReloadFailed();
-				error = 'The latest draft could not load. Your refused text remains here; try again.';
+				error = 'The latest draft could not load. Your local recovery text remains here; try again.';
 			} else {
 				origin.markReloaded();
 				error = '';
@@ -462,7 +472,7 @@
 		} catch {
 			if (!stillHere()) return;
 			origin.markReloadFailed();
-			error = 'The latest draft could not load. Your refused text remains here; try again.';
+			error = 'The latest draft could not load. Your local recovery text remains here; try again.';
 		} finally {
 			if (sameOwner()) retryingLatest = false;
 		}
@@ -533,6 +543,7 @@
 	let reviewChoice: ReviewDecisionKind = $state('approved');
 	let reviewComment = $state('');
 	async function decide() {
+		if (frozenContentPending || heldByRefusal('reviewing')) return;
 		busy = true;
 		error = '';
 		try {
@@ -1031,7 +1042,7 @@
 		{/if}
 	</section>
 
-	{#if view.viewer_may_review}
+	{#if view.viewer_may_review && !frozenContentPending && !editor.unresolved}
 		<section class="panel">
 			<h2>Review</h2>
 			<label for="review-comment">
@@ -1057,7 +1068,7 @@
 		</section>
 	{/if}
 
-	{#if view.viewer_may_finalize}
+	{#if view.viewer_may_finalize && !frozenContentPending && !editor.unresolved}
 		<section class="panel">
 			<h2>Finalize</h2>
 			<p class="quiet">
@@ -1322,7 +1333,7 @@
 			</section>
 		{/if}
 
-		{#if view.viewer_may_amend && !viewingSuperseded}
+		{#if view.viewer_may_amend && !viewingSuperseded && !frozenContentPending && !editor.unresolved}
 			<section class="panel">
 				<h2>Amend</h2>
 				<p class="quiet">
@@ -1399,7 +1410,18 @@
 		</section>
 	{/if}
 
-	{#if view.status !== 'finalized'}
+	{#if frozenContentPending}
+		<section class="panel" role="status">
+			<h2>Local copy awaiting server comparison</h2>
+			<p>
+				The fields below show this browser's local values while the pending
+				save and latest draft load settle. These fields do not establish the server's current content.
+				You can copy the narrative text now; review actions are paused.
+			</p>
+		</section>
+	{/if}
+
+	{#if view.status !== 'finalized' || frozenContentPending}
 	<section class="panel">
 		<h2>Ratings</h2>
 		{#if view.form.competencies.length === 0}
@@ -1550,7 +1572,8 @@
 					<textarea
 						id={`narrative-${narrative.form_narrative_id}`}
 						rows="4"
-						disabled={!editable}
+						readonly={frozenContentPending}
+						disabled={!editable && !frozenContentPending}
 						bind:value={editor.narratives[narrative.form_narrative_id]}
 						oninput={editNow}
 					></textarea>
