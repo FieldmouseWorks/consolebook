@@ -2,24 +2,37 @@
 
 The roadmap is ordered by risk. Dates come later; fake schedules are how software projects begin lying to themselves.
 
-**Current position:** Milestones 0 through 4 are complete. Milestone 0
-closed with ADR 0011's canonical-record-bytes specification, delivered
-with Milestone 4's first slice; Milestone 4 — defensible records —
-closed with #32's four slices (#36, #38, #40, #42): canonical bytes
-and immutable finalized versions with completion rules, acknowledgments
-and the trainee timeline, amendments and successor versions
-(ADR 0012), and weekly summaries with task signoffs (ADR 0013, record
-schema 2). Milestone 5 is in progress under #44. Its first two slices are
-complete: file-verifiable structured record exports (#46, ADR 0014) and
-complete trainee packets (#50, ADR 0015). Slice 3 — retention policy,
-holds, lawful disposition, tombstones, and explicit authority — is tracked in
-[#64](https://github.com/FieldmouseWorks/consolebook/issues/64). Its administration
-stage (#65, ADR 0020) provides policy versions, holds, and explicit administration
-authority. Confirmed disposition, backup/restore scope, tombstones, and portable
-policy-boundary evidence remain next.
+## Current state and next gates
 
-For continuation, start with the approved design in
-[#44](https://github.com/FieldmouseWorks/consolebook/issues/44) and check the
+Product baseline: [`7936a4e`](https://github.com/FieldmouseWorks/consolebook/commit/7936a4e6459ff7e1a4557eff7736fd74ca452750),
+checked 2026-09-23. Milestones 0–4 are complete, including immutable finalized
+records, acknowledgments, amendments, summaries, and task signoffs
+([Milestone 4 history](https://github.com/FieldmouseWorks/consolebook/issues/32)).
+Milestone 5 has file-verifiable [record exports](https://github.com/FieldmouseWorks/consolebook/pull/46)
+and [trainee packets](https://github.com/FieldmouseWorks/consolebook/pull/50),
+[retention policies and holds](https://github.com/FieldmouseWorks/consolebook/pull/66),
+and [trainee signoff history](https://github.com/FieldmouseWorks/consolebook/pull/68).
+
+Material limits: confirmed disposition, tombstones, portable policy-boundary
+evidence, expanded backup/restore scope, deterministic PDFs, and clean-room
+recovery proof remain Milestone 5 work. Pre-alpha status still applies;
+implemented backup/restore tests are not a recovery drill.
+
+Active setup outcome: establish the [evidence-driven workflow](workflow.md)
+through [#71](https://github.com/FieldmouseWorks/consolebook/issues/71), which owns
+the canonical task graph, permission/effort record, current next action, and
+verification receipts. Its gates are documentation/instruction review, the
+existing full PR checks, and a reviewable PR for the maintainer's merge decision.
+The issue's live state supersedes this setup pointer once it closes.
+
+Next product gate: finish the approved retention/disposition design in
+[#64](https://github.com/FieldmouseWorks/consolebook/issues/64) under
+[#44](https://github.com/FieldmouseWorks/consolebook/issues/44). This is sequencing,
+not authorization to begin another outcome. Reconcile live issues and PR reviews
+before selecting work, including the recorded intermittent retention test
+failure [#70](https://github.com/FieldmouseWorks/consolebook/issues/70).
+
+For continuation, check the
 [open issues](https://github.com/FieldmouseWorks/consolebook/issues?q=is%3Aissue+is%3Aopen)
 and current PR reviews. The [2026-09-05 audit](audits/2026-09-05.md) records
 verification, known gaps, and recommended sequencing at that revision; it is

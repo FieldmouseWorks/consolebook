@@ -17,6 +17,8 @@ Read only the context needed for the task:
 - Product constraints: `PRINCIPLES.md`; boundaries: `docs/architecture.md`.
 - Domain terms: `docs/domain-model.md`; record integrity: `docs/records-integrity.md`.
 - Contribution lifecycle, verification, and refactor rules: `CONTRIBUTING.md`.
+- Evidence-driven execution, graph records, authority, and effort policy:
+  `docs/workflow.md`. Use it as the standing default for substantive work.
 - Decisions and formats: the task index in `docs/development.md` links the
   relevant ADRs and specifications. Do not load the entire corpus by default.
 - Preview deployment: `docs/preview.md`. Host configuration and deployed
@@ -50,11 +52,33 @@ Non-trivial work requires one primary issue, an issue-linked branch, and a PR.
 Search existing issues first; never push directly to `main`. `Closes #...` means
 all acceptance criteria are satisfied; otherwise use `Refs #...`.
 
+Define an observable outcome and acceptance check before editing. Keep one
+canonical task graph in the primary issue for substantive dependent work;
+simple changes need only a short plan. Record ownership, dependencies, inputs,
+effort policy, state, exact-revision evidence, and one next action. Verified
+results unlock dependencies; failures trigger investigation and scoped repairs,
+with the approach changed when evidence calls for it.
+
+Use `gpt-6-astra` / `max` for planning, architecture, review, and integration;
+`gpt-6-sol` / `max` for complex implementation; `gpt-6-luna` / `max` for bounded
+exploration, documentation, and checks. Delegate only useful work with explicit
+ownership, then verify the artifacts. Report unavailable routes; instructions
+do not change a running model. DeepSeek remains paused pending explicit re-enable.
+
+Carry task authorization forward without asking again. Record its source and
+any owner-set effort budget in the issue; preserve that budget across children
+and resumes. Credentials and graph edits grant no authority. There is no
+default repair-cycle cap. Without an owner-set budget, continue in scope until
+acceptance or a concrete blocker; revise the approach when failures repeat,
+preserve evidence, and finish independent work before asking for a decision.
+See `docs/workflow.md`.
+
 Build `web/` before Rust when UI or embedding matters. The command sequence and
 browser prerequisites are in `CONTRIBUTING.md`. Required checks: `npm ci`,
 `npm run check`, `npm run build` in `web/`; `cargo fmt --check`,
 `cargo clippy --workspace --all-targets -- -D warnings`, and
-`cargo test --workspace`. Browser tests need the compiled debug binary.
+`cargo test --workspace`; then `cargo build -p consolebook-server` and
+`npm run e2e` in `web/` with the documented Chromium prerequisite.
 Keep the pinned Rust toolchain in `rust-toolchain.toml`.
 
 Report only verification actually run, with exact failures. Investigate
@@ -75,7 +99,8 @@ Use short imperative Conventional Commit subjects. Logs exclude sensitive
 content; existing first-run setup-code output is the documented exception
 (ADR 0004), not permission for additional secret logging.
 
-This file owns the concise shared contract; `CONTRIBUTING.md` owns workflow,
-`docs/development.md` owns the source map, and ADRs own decisions. Tool-specific
+This file owns the concise shared contract; `CONTRIBUTING.md` owns contribution
+rules and gates, `docs/workflow.md` owns execution procedure,
+`docs/development.md` owns the source map, and ADRs own product decisions. Tool-specific
 entrypoints (`CLAUDE.md`, `.agents/rules/`, `.github/copilot-instructions.md`)
 only point here. Keep machine preferences and session handoffs out of this file.

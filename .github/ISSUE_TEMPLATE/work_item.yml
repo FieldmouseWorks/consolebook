@@ -52,6 +52,19 @@ body:
     validations:
       required: true
   - type: textarea
+    id: execution
+    attributes:
+      label: Execution record
+      description: For dependent work, this issue body owns the canonical graph described in docs/workflow.md. A simple change needs only a short plan. Link receipts in comments; do not duplicate the live graph in the PR.
+      placeholder: |
+        Authority and source:
+        Owner-set effort budget and source (if any; carries across children and resumptions):
+        Continuation boundary:
+        Nodes: ID | outcome | dependencies | model/owner | inputs | acceptance | state | evidence
+        Next action:
+    validations:
+      required: false
+  - type: textarea
     id: related
     attributes:
       label: Related roadmap, decisions, or issues
