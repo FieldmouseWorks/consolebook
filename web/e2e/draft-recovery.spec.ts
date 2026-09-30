@@ -418,6 +418,24 @@ async function holdAppliedSave(
 	return { first, revisions };
 }
 
+/** Hold the final metadata refresh after an ordinary save reaches the server. */
+async function holdDraftMetadata(page: Page, draftId: number) {
+	const metadata = gate();
+	await page.route(`**/api/drafts/${draftId}`, async (route) => {
+		if (route.request().method() !== 'GET' ||
+			new URL(route.request().url()).pathname !== `/api/drafts/${draftId}`) {
+			await route.continue();
+			return;
+		}
+		const response = await route.fetch();
+		if (!response.ok()) throw new Error(`metadata refresh failed: ${response.status()}`);
+		metadata.arrive();
+		await metadata.released;
+		await route.fulfill({ response });
+	});
+	return metadata;
+}
+
 /** Attempt a real tab close and reject the native unsaved-changes prompt. */
 async function dismissTabClose(page: Page): Promise<void> {
 	const prompted = page.waitForEvent('dialog', { timeout: 5_000 });
@@ -431,6 +449,31 @@ async function dismissTabClose(page: Page): Promise<void> {
 /** Waits until the draft is saved and the page reports it. */
 async function expectSaved(page: Page): Promise<void> {
 	await expect(page.locator('.savestate')).toHaveText('Saved');
+}
+
+/** Wait until no controller still cancels a document unload. */
+async function expectUnloadReady(page: Page): Promise<void> {
+	await expect.poll(async () => page.evaluate(() => {
+		const event = new Event('beforeunload', { cancelable: true });
+		window.dispatchEvent(event);
+		return event.defaultPrevented;
+	}), { message: 'the ordinary save chain still holds the unload guard' }).toBe(false);
+}
+
+/** A saved label appears before the metadata GET releases the save chain. */
+async function settleDraftMetadata(
+	page: Page,
+	draftId: number,
+	metadata: ReturnType<typeof gate>
+): Promise<void> {
+	const answered = page.waitForResponse((response) =>
+		response.request().method() === 'GET' &&
+		new URL(response.url()).pathname === `/api/drafts/${draftId}`
+	);
+	metadata.release();
+	await answered;
+	await page.waitForLoadState('networkidle');
+	await expectUnloadReady(page);
 }
 
 /**
@@ -1871,6 +1914,7 @@ test('tab close warns for pending, in-flight, and failed ordinary saves', async 
 	const authorContext = await browser.newContext();
 	const author = await signIn(authorContext, JORDAN, seeded.jordanResetCode, JORDAN_PASSWORD);
 	let held: Awaited<ReturnType<typeof holdAppliedSave>> | null = null;
+	let metadata: ReturnType<typeof gate> | null = null;
 	try {
 		await author.goto(seeded.draftUrl);
 		await expect(author.getByLabel(MOST)).toBeVisible();
@@ -1904,15 +1948,25 @@ test('tab close warns for pending, in-flight, and failed ordinary saves', async 
 		await author.unroute(`**/api/drafts/${seeded.draftId}/content`);
 
 		const recovered = 'Invented note saved after the failure.';
+		metadata = await holdDraftMetadata(author, seeded.draftId);
 		await author.getByLabel(MOST).fill(recovered);
 		await expectSaved(author);
+		await metadata.arrived;
+		await settleDraftMetadata(author, seeded.draftId, metadata);
+		let cleanExitPrompts = 0;
+		author.on('dialog', async (dialog) => {
+			cleanExitPrompts += 1;
+			await dialog.dismiss();
+		});
 		await author.close({ runBeforeUnload: true });
+		expect(cleanExitPrompts, 'a settled save should close without a warning').toBe(0);
 		await expect.poll(() => author.isClosed()).toBe(true);
 		const revisit = await authorContext.newPage();
 		await revisit.goto(seeded.draftUrl);
 		await expect(revisit.getByLabel(MOST)).toHaveValue(recovered);
 		await expect(revisit.locator('details.refused')).toHaveCount(0);
 	} finally {
+		metadata?.release();
 		held?.first.release();
 		await authorContext.close();
 	}
@@ -1926,6 +1980,7 @@ test('a full-document link explains why pending text cannot leave', async ({
 	const seeded = await seed(page, browser, setupCode);
 	const authorContext = await browser.newContext();
 	const author = await signIn(authorContext, JORDAN, seeded.jordanResetCode, JORDAN_PASSWORD);
+	let metadata: ReturnType<typeof gate> | null = null;
 	try {
 		await author.goto(seeded.draftUrl);
 		await expect(author.getByLabel(MOST)).toBeVisible();
@@ -1944,11 +1999,15 @@ test('a full-document link explains why pending text cannot leave', async ({
 		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
 		await expect(author.getByRole('alert')).toContainText('unsaved changes');
 		await expect(author.getByLabel(MOST)).toHaveValue(sentence);
+		metadata = await holdDraftMetadata(author, seeded.draftId);
 		await author.clock.runFor(700);
 		await expectSaved(author);
+		await metadata.arrived;
+		await settleDraftMetadata(author, seeded.draftId, metadata);
 		await author.locator('#full-document-link').click();
 		await expect(author).toHaveURL(/\/api\/health$/);
 	} finally {
+		metadata?.release();
 		await authorContext.close();
 	}
 });
@@ -2053,8 +2112,15 @@ test('a queued teardown save still warns after SPA navigation', async ({
 		}, { message: 'the queued teardown edit did not finish' }).toBe(true);
 		await expect.poll(() => held?.revisions.length).toBe(2);
 		await author.waitForLoadState('networkidle');
+		await expectUnloadReady(author);
+		let cleanExitPrompts = 0;
+		author.on('dialog', async (dialog) => {
+			cleanExitPrompts += 1;
+			await dialog.dismiss();
+		});
 		await author.close({ runBeforeUnload: true });
 		await expect.poll(() => author.isClosed()).toBe(true);
+		expect(cleanExitPrompts, 'settled teardown should close without a warning').toBe(0);
 	} finally {
 		held?.first.release();
 		second.release();
