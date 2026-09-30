@@ -73,6 +73,7 @@
 
 	let view: DraftView | null = $state(null);
 	let error = $state('');
+	let invalidRouteUrl = $state(false);
 	let busy = $state(false);
 	let retryingLatest = $state(false);
 	// Fields stay editable while a workflow act drains its save chain, then
@@ -224,6 +225,17 @@
 		const origin = untrack(() => editor);
 		const wanted = requestedVersion;
 		const wantedDraft = draftId;
+		if (
+			!Number.isSafeInteger(wantedDraft) ||
+			wantedDraft <= 0 ||
+			(wanted !== null && (!Number.isSafeInteger(wanted) || wanted <= 0))
+		) {
+			view = null;
+			sealed = null;
+			invalidRouteUrl = true;
+			return null;
+		}
+		invalidRouteUrl = false;
 		try {
 			const fetched = await getDraft(wantedDraft);
 			let nextSealed: FinalizedView | null = null;
@@ -892,7 +904,9 @@
 {/if}
 
 {#if view === null}
-	{#if error}
+	{#if invalidRouteUrl}
+		<p class="error" role="alert">Invalid draft or version URL.</p>
+	{:else if error}
 		<p class="error" role="alert">{error}</p>
 	{:else}
 		<p class="quiet">Loading…</p>

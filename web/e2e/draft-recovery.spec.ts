@@ -327,6 +327,61 @@ async function expectSpaAlive(page: Page): Promise<void> {
 	).toBe(1);
 }
 
+/** Navigates through a real SvelteKit link, including when the page has no app controls. */
+async function spaToPath(page: Page, target: string): Promise<void> {
+	const expectedUrl = new URL(target, page.url()).href;
+	await page.evaluate((href) => {
+		document.getElementById('test-draft-route-hop')?.remove();
+		const link = document.createElement('a');
+		link.id = 'test-draft-route-hop';
+		link.href = href;
+		link.textContent = 'invented test navigation';
+		link.style.position = 'fixed';
+		link.style.left = '0';
+		link.style.top = '0';
+		link.style.zIndex = '9999';
+		document.body.appendChild(link);
+	}, target);
+	await page.locator('#test-draft-route-hop').click();
+	await expect(page).toHaveURL(expectedUrl);
+	await expectSpaAlive(page);
+}
+
+/** Rejects a route before any draft API request and renders its route error. */
+async function expectInvalidDraftRoute(page: Page, draftGets: string[]): Promise<void> {
+	await expect.poll(async () => ({
+		alerts: (await page.getByRole('alert').allTextContents()).map((text) => text.trim()),
+		loading: await page.getByText('Loading…', { exact: true }).count() > 0,
+		draftGets
+	}), { message: 'the invalid route should settle without loading a draft' }).toEqual({
+		alerts: ['Invalid draft or version URL.'],
+		loading: false,
+		draftGets: []
+	});
+}
+
+/** Returns to a valid route through SPA navigation and proves editing still saves. */
+async function returnToEditableDraft(page: Page, draftId: number): Promise<void> {
+	await spaToPath(page, `/drafts/${draftId}`);
+	await expect(page.getByRole('heading', { name: 'Daily Observation Report' })).toBeVisible();
+	await expect(page.getByRole('alert')).toHaveCount(0);
+	const narrative = page.getByLabel(MOST);
+	await expect(narrative).toBeEnabled();
+	const savedText = 'Invented text after an invalid route was corrected.';
+	const saved = page.waitForResponse((response) =>
+		response.request().method() === 'PUT' &&
+		new URL(response.url()).pathname === `/api/drafts/${draftId}/content`
+	);
+	await narrative.fill(savedText);
+	const response = await saved;
+	expect(response.ok()).toBe(true);
+	await expectSaved(page);
+	const persisted = await (await page.request.get(`/api/drafts/${draftId}`)).json();
+	expect(
+		persisted.content.narratives.some((entry: { text: string }) => entry.text === savedText)
+	).toBe(true);
+}
+
 /**
  * Goes straight from one draft to another inside the app. No shipped link
  * offers this transition — every route into a draft passes through another
@@ -551,6 +606,56 @@ function refusedText(page: Page, prompt: string) {
 		.filter({ hasText: prompt })
 		.locator('pre.refused-text');
 }
+
+test('an invalid draft path reports its URL and recovers through SPA navigation', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	await page.goto(seeded.draftUrl);
+	await expect(page.getByRole('heading', { name: 'Daily Observation Report' })).toBeVisible();
+	await markSpa(page);
+	const draftGets: string[] = [];
+	const onRequest = (request: { method: () => string; url: () => string }) => {
+		if (request.method() === 'GET' && new URL(request.url()).pathname.startsWith('/api/drafts/')) {
+			draftGets.push(new URL(request.url()).pathname);
+		}
+	};
+	page.on('request', onRequest);
+	try {
+		await spaToPath(page, '/drafts/foo');
+		await expectInvalidDraftRoute(page, draftGets);
+	} finally {
+		page.off('request', onRequest);
+	}
+	await returnToEditableDraft(page, seeded.draftId);
+});
+
+test('an invalid version query reports its URL and recovers through SPA navigation', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	await page.goto(seeded.draftUrl);
+	await expect(page.getByRole('heading', { name: 'Daily Observation Report' })).toBeVisible();
+	await markSpa(page);
+	const draftGets: string[] = [];
+	const onRequest = (request: { method: () => string; url: () => string }) => {
+		if (request.method() === 'GET' && new URL(request.url()).pathname.startsWith('/api/drafts/')) {
+			draftGets.push(new URL(request.url()).pathname);
+		}
+	};
+	page.on('request', onRequest);
+	try {
+		await spaToPath(page, `/drafts/${seeded.draftId}?version=abc`);
+		await expectInvalidDraftRoute(page, draftGets);
+	} finally {
+		page.off('request', onRequest);
+	}
+	await returnToEditableDraft(page, seeded.draftId);
+});
 
 test('the losing writer recovers their sentence after a stale-save reload', async ({
 	page,
