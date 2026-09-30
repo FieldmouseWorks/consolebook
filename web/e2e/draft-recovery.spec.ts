@@ -2391,6 +2391,142 @@ test('a failed ordinary save cannot silently leave by SPA navigation', async ({
 	}
 });
 
+test('an unchanged failed save can retry until it reaches the server', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const authorContext = await browser.newContext();
+	const author = await signIn(authorContext, JORDAN, seeded.jordanResetCode, JORDAN_PASSWORD);
+	const thirdAttempt = gate();
+	const bodies: string[] = [];
+	try {
+		await author.goto(seeded.draftUrl);
+		await markSpa(author);
+		const before = await (await page.request.get(`/api/drafts/${seeded.draftId}`)).json();
+		await author.route(`**/api/drafts/${seeded.draftId}/content`, async (route) => {
+			if (route.request().method() !== 'PUT') {
+				await route.continue();
+				return;
+			}
+			bodies.push(route.request().postData() ?? '');
+			if (bodies.length <= 2) {
+				await route.abort('failed');
+				return;
+			}
+			thirdAttempt.arrive();
+			await thirdAttempt.released;
+			await route.continue();
+		});
+		const unsaved = 'Invented desk note awaiting restored connectivity.';
+		await author.getByLabel(MOST).fill(unsaved);
+		await expect(author.locator('.savestate')).toHaveText('Save failed');
+		await expect.poll(() => bodies.length).toBe(1);
+		await author.getByRole('link', { name: 'Home' }).click();
+		await expect(author.getByRole('alert')).toContainText('Stay on this draft');
+		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
+		const retry = author.getByRole('button', { name: 'Retry save' });
+		await expect(retry).toBeVisible();
+		await retry.click();
+		await expect.poll(() => bodies.length).toBe(2);
+		await expect(author.locator('.savestate')).toHaveText('Save failed');
+		expect(bodies[1], 'retry must send the same unchanged snapshot').toBe(bodies[0]);
+		await author.getByRole('link', { name: 'Home' }).click();
+		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
+		await expect(author.getByLabel(MOST)).toHaveValue(unsaved);
+		const stillUnsaved = await (await page.request.get(`/api/drafts/${seeded.draftId}`)).json();
+		expect(stillUnsaved.revision).toBe(before.revision);
+		await retry.click();
+		await thirdAttempt.arrived;
+		expect(bodies[2], 'restored connectivity must send the same unchanged snapshot').toBe(bodies[0]);
+		expect(JSON.parse(bodies[2]).revision).toBe(before.revision);
+		await author.getByRole('link', { name: 'Home' }).click();
+		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
+		await expect(author.getByRole('alert')).toContainText('Try leaving again after it saves');
+		thirdAttempt.release();
+		await expectSaved(author);
+		await expectUnloadReady(author);
+		const saved = await (await page.request.get(`/api/drafts/${seeded.draftId}`)).json();
+		expect(saved.revision).toBe(before.revision + 1);
+		expect(saved.content.narratives.some((entry: { text: string }) => entry.text === unsaved))
+			.toBe(true);
+		await homeSessions(author);
+	} finally {
+		thirdAttempt.release();
+		await authorContext.close();
+	}
+});
+
+test('retrying a failed save against an advanced revision preserves its refused text', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const authorContext = await browser.newContext();
+	const author = await signIn(authorContext, CASEY, seeded.caseyResetCode, CASEY_PASSWORD);
+	let failTransport = true;
+	let saves = 0;
+	let submissions = 0;
+	const saveStatuses: number[] = [];
+	try {
+		await author.goto(seeded.draftUrl);
+		await expect(author.getByRole('button', { name: 'Submit for review' })).toBeVisible();
+		author.on('response', (response) => {
+			if (response.request().method() === 'PUT' &&
+				new URL(response.url()).pathname === `/api/drafts/${seeded.draftId}/content`) {
+				saveStatuses.push(response.status());
+			}
+		});
+		await author.route(`**/api/drafts/${seeded.draftId}/content`, async (route) => {
+			if (route.request().method() !== 'PUT') {
+				await route.continue();
+				return;
+			}
+			saves += 1;
+			if (failTransport) {
+				await route.abort('failed');
+				return;
+			}
+			await route.continue();
+		});
+		await author.route(`**/api/drafts/${seeded.draftId}/submit`, async (route) => {
+			submissions += 1;
+			await route.continue();
+		});
+		const refused = 'Invented note held after a failed network request.';
+		await author.getByLabel(MOST).fill(refused);
+		await expect(author.locator('.savestate')).toHaveText('Save failed');
+		await expect.poll(() => saves).toBe(1);
+		await page.goto(seeded.draftUrl);
+		const winner = 'Invented winning note saved while the desk was disconnected.';
+		await page.getByLabel(MOST).fill(winner);
+		await expectSaved(page);
+		const winning = await (await page.request.get(`/api/drafts/${seeded.draftId}`)).json();
+		failTransport = false;
+		const retry = author.getByRole('button', { name: 'Retry save' });
+		await expect(retry).toBeVisible();
+		await retry.click();
+		await expect.poll(() => saves).toBe(2);
+		await expect.poll(() => saveStatuses).toContain(409);
+		await expect(refusedText(author, MOST)).toHaveText(refused);
+		await expect(author.getByLabel(MOST)).toHaveValue(winner);
+		expect(saves, 'refusal must not resubmit the losing snapshot').toBe(2);
+		const after = await (await page.request.get(`/api/drafts/${seeded.draftId}`)).json();
+		expect(after.revision).toBe(winning.revision);
+		expect(after.content.narratives.some((entry: { text: string }) => entry.text === winner))
+			.toBe(true);
+		const submit = author.getByRole('button', { name: 'Submit for review' });
+		await expect(submit).toBeVisible();
+		await submit.click();
+		await expect(author.getByRole('alert')).toContainText('Your refused text is still here');
+		expect(submissions, 'workflow must wait for the writer to resolve refused text').toBe(0);
+	} finally {
+		await authorContext.close();
+	}
+});
+
 test('recovery and discard release a full-document link after a stale save', async ({
 	page,
 	setupCode,

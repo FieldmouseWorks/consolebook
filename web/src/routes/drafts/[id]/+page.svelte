@@ -365,6 +365,20 @@
 		editor.scheduleSave();
 	}
 
+	/** Retry the unchanged working copy after an ordinary save failure. */
+	function retryFailedSave(): void {
+		const origin = editor;
+		const current = view;
+		if (
+			current === null || current.id !== draftId || busy ||
+			!origin.hasFailedOrdinarySave || !origin.editable
+		) return;
+		error = '';
+		// The controller's normal chain owns the answer, including another
+		// failure or a stale revision that needs the winner reloaded.
+		void origin.saveNow();
+	}
+
 	// Everything the controller settled, including a real failure.
 	function received(result: SaveResult): void {
 		if (result.status === 'stale') {
@@ -973,6 +987,9 @@
 							Save failed
 						{/if}
 					</span>
+					{#if editor.hasFailedOrdinarySave && editable && !busy}
+						<button type="button" class="secondary" onclick={retryFailedSave}>Retry save</button>
+					{/if}
 				{/if}
 			</div>
 		</div>
