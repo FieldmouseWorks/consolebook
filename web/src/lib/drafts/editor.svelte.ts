@@ -179,6 +179,16 @@ export class DraftEditorController {
 		return !this.#destroyed && this.saveState === 'failed';
 	}
 
+	/** A new refusal must be shown before the writer can leave this draft. */
+	get hasPendingRecovery(): boolean {
+		return this.#reported_stale && !this.#reloadFailed;
+	}
+
+	/** The winning copy did not load; the writer can retry it in place. */
+	get reloadFailed(): boolean {
+		return this.#reloadFailed;
+	}
+
 	/**
 	 * Every settled save reports here, whichever path started it: the
 	 * debounce, an explicit save, or a flush before a workflow act. The
@@ -199,7 +209,7 @@ export class DraftEditorController {
 	#teardownPending = false;
 	#unloadListening = false;
 	#beforeUnload = (event: BeforeUnloadEvent): void => {
-		if (this.hasUnsavedOrdinaryEdits) {
+		if (this.hasUnsavedOrdinaryEdits || this.hasPendingRecovery) {
 			event.preventDefault();
 			event.returnValue = '';
 		}

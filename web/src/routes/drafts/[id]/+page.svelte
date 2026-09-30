@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { beforeNavigate } from '$app/navigation';
-	import { page } from '$app/state';
+	import { beforeNavigate, goto } from '$app/navigation';
+	import { navigating, page } from '$app/state';
 	import { untrack } from 'svelte';
 	import {
 		ApiError,
@@ -74,6 +74,7 @@
 	let view: DraftView | null = $state(null);
 	let error = $state('');
 	let busy = $state(false);
+	let retryingLatest = $state(false);
 	// Fields stay editable while a workflow act drains its save chain, then
 	// pause while the act can freeze or replace the working copy.
 	let workflowRequest = $state(false);
@@ -96,23 +97,84 @@
 	let editor: DraftEditorController = $state(
 		new DraftEditorController(
 			() => view,
-			() => !workflowRequest && (canAssign || canAuthor)
+			() => !workflowRequest && !routeLeaving && (canAssign || canAuthor)
 		)
 	);
+	// An accepted SPA navigation publishes before its route loads. Freeze
+	// fields until the router clears that state. A rejected navigation can
+	// leave its promise published while the router still skips navigation
+	// callbacks, so rejection alone cannot make the fields editable.
+	let rejectedNavigation: Promise<void> | null = $state.raw(null);
+	let routeLeaving = $derived(navigating.to !== null);
+	$effect(() => {
+		const complete = navigating.complete;
+		if (complete === null) return;
+		// Reattach if the route reuses this component for a different
+		// editor while a navigation remains published.
+		const origin = editor;
+		void complete.catch(() => {
+			// Offer a deliberate same-entry resettlement only for the exact
+			// rejected navigation still published on this editor's page.
+			if (editor === origin && navigating.complete === complete) {
+				rejectedNavigation = complete;
+			}
+		});
+	});
+
+	async function resumeEditing(): Promise<void> {
+		const rejected = rejectedNavigation;
+		if (rejected === null || navigating.complete !== rejected || !routeLeaving) return;
+		// Replacing the current entry leaves the URL, page state, and history
+		// depth intact. Only a real router settlement unlocks the editor.
+		try {
+			await goto(page.url.href, {
+				replaceState: true,
+				keepFocus: true,
+				noScroll: true,
+				state: page.state
+			});
+		} catch {
+			// The current navigation's rejection is observed above; its
+			// still-current promise keeps the retry available on this editor.
+		}
+	}
 
 	// A full document unload cannot wait for fetch to finish. SvelteKit
 	// supplies the native confirmation for refresh/tab close; an outside
-	// link stays here with a plain reason. Client-side routes still use the
-	// controller's ordered teardown save, except after a failed save.
+	// link stays here with a plain reason. Client-side departures wait for
+	// an ordinary save while the editor remains mounted, then need a new
+	// departure attempt so any failure or refusal is seen on this draft.
 	beforeNavigate((navigation) => {
-		if (navigation.willUnload && editor.hasUnsavedOrdinaryEdits) {
+		const origin = editor;
+		if (navigation.willUnload && (origin.hasUnsavedOrdinaryEdits || origin.hasPendingRecovery)) {
 			navigation.cancel();
 			if (navigation.type !== 'leave') {
-				error = 'The draft has unsaved changes. Wait for the save to finish before leaving.';
+				error = origin.hasPendingRecovery
+					? 'The latest draft is still loading after a refused save. Wait before leaving.'
+					: 'The draft has unsaved changes. Wait for the save to finish before leaving.';
 			}
-		} else if (!navigation.willUnload && editor.hasFailedOrdinarySave) {
+			return;
+		}
+		if (navigation.willUnload) return;
+		if (origin.hasFailedOrdinarySave) {
 			navigation.cancel();
 			error = 'The draft did not save. Stay on this draft and save again before leaving.';
+			return;
+		}
+		if (origin.hasUnsavedOrdinaryEdits) {
+			navigation.cancel();
+			error = 'The draft is saving. Try leaving again after it saves.';
+			void origin.flush().then(() => {
+				if (editor === origin && origin.saveState === 'saved' &&
+					!origin.hasUnsavedOrdinaryEdits) {
+					error = 'The draft saved. Try leaving again.';
+				}
+			});
+			return;
+		}
+		if (origin.hasPendingRecovery) {
+			navigation.cancel();
+			error = 'The latest draft is still loading after a refused save. Wait before leaving.';
 		}
 	});
 
@@ -233,10 +295,12 @@
 			view = null;
 			error = '';
 			busy = false;
+			retryingLatest = false;
 			workflowRequest = false;
+			rejectedNavigation = null;
 			editor = new DraftEditorController(
 				() => view,
-				() => !workflowRequest && (canAssign || canAuthor)
+				() => !workflowRequest && !routeLeaving && (canAssign || canAuthor)
 			);
 			editor.onSettled = received;
 		};
@@ -254,7 +318,8 @@
 	}
 
 	let editable = $derived(
-		view !== null && !workflowRequest && openForEditing(view) && (canAssign || canAuthor)
+		view !== null && !workflowRequest && !routeLeaving && openForEditing(view) &&
+		(canAssign || canAuthor)
 	);
 	let mayRoute = $derived.by(() => {
 		const current = view;
@@ -347,6 +412,34 @@
 		}
 		error =
 			'Another contributor saved first; the draft reloaded with their latest content.';
+	}
+
+	/** Retry only the winning GET; the refused buffer remains read-only. */
+	async function reloadLatestDraft(): Promise<void> {
+		const origin = editor;
+		const wantedDraft = draftId;
+		const wantedVersion = requestedVersion;
+		if (!origin.reloadFailed || retryingLatest) return;
+		const sameOwner = () => editor === origin && draftId === wantedDraft;
+		const stillHere = () => sameOwner() && requestedVersion === wantedVersion;
+		retryingLatest = true;
+		try {
+			const replaced = await load();
+			if (!stillHere()) return;
+			if (replaced === null) {
+				origin.markReloadFailed();
+				error = 'The latest draft could not load. Your refused text remains here; try again.';
+			} else {
+				origin.markReloaded();
+				error = '';
+			}
+		} catch {
+			if (!stillHere()) return;
+			origin.markReloadFailed();
+			error = 'The latest draft could not load. Your refused text remains here; try again.';
+		} finally {
+			if (sameOwner()) retryingLatest = false;
+		}
 	}
 
 	let transferTo: number | '' = $state('');
@@ -743,6 +836,22 @@
 			buffers={editor.refused}
 			onDiscard={(index) => editor.discardRefused(index)}
 		/>
+	</section>
+{/if}
+
+{#if routeLeaving && navigating.complete === rejectedNavigation}
+	<section class="panel">
+		<p class="quiet">Navigation was interrupted. Resume editing to continue working on this draft.</p>
+		<button type="button" class="secondary" onclick={resumeEditing}>Resume editing this draft</button>
+	</section>
+{/if}
+
+{#if editor.reloadFailed}
+	<section class="panel">
+		<p class="quiet">The latest draft has not loaded. Reload it here before editing or using workflow actions.</p>
+		<button type="button" class="secondary" disabled={retryingLatest} onclick={reloadLatestDraft}>
+			Reload latest draft
+		</button>
 	</section>
 {/if}
 

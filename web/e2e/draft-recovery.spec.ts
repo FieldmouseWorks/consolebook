@@ -1170,7 +1170,7 @@ test('a refusal dies with its draft and never blocks another one', async ({
 	}
 });
 
-test('an ordinary edit made just before navigating away is saved', async ({
+test('an ordinary edit saves before a retried SPA departure', async ({
 	page,
 	setupCode,
 	browser
@@ -1178,6 +1178,7 @@ test('an ordinary edit made just before navigating away is saved', async ({
 	const seeded = await seed(page, browser, setupCode);
 	const loserContext = await browser.newContext();
 	const loser = await signIn(loserContext, JORDAN, seeded.jordanResetCode, JORDAN_PASSWORD);
+	const saveReply = gate();
 	try {
 		await loser.goto(seeded.draftUrl);
 		await expect(loser.getByRole('heading', { name: 'Daily Observation Report' })).toBeVisible();
@@ -1188,13 +1189,32 @@ test('an ordinary edit made just before navigating away is saved', async ({
 				saves += 1;
 			}
 		});
+		await loser.route(`**/api/drafts/${seeded.draftId}/content`, async (route) => {
+			if (route.request().method() !== 'PUT') {
+				await route.continue();
+				return;
+			}
+			const response = await route.fetch();
+			if (!response.ok()) throw new Error(`mounted save failed: ${response.status()}`);
+			saveReply.arrive();
+			await saveReply.released;
+			await route.fulfill({ response });
+		});
 
 		// No refusal here: this is an ordinary debounced autosave.
 		const sentence = 'The invented handover note was dictated before the shift change.';
 		await loser.getByLabel(MOST).fill(sentence);
 		expect(saves, 'the debounce had already fired').toBe(0);
 
-		// Away inside the debounce window: the timer never fired.
+		// Leaving inside the debounce window starts a mounted save. The
+		// writer leaves deliberately after seeing that it finished.
+		await loser.getByRole('link', { name: 'Home' }).click();
+		await saveReply.arrived;
+		await expect(loser).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
+		await expect(loser.getByRole('alert')).toContainText('Try leaving again after it saves');
+		saveReply.release();
+		await expectSaved(loser);
+		await expectUnloadReady(loser);
 		await loser.getByRole('link', { name: 'Home' }).click();
 		await expect(loser.getByRole('heading', { name: 'Installation status' })).toBeVisible();
 
@@ -1214,6 +1234,7 @@ test('an ordinary edit made just before navigating away is saved', async ({
 			.toBe(true);
 		expect(saves, 'the edit was saved more than once').toBe(1);
 	} finally {
+		saveReply.release();
 		await loserContext.close();
 	}
 });
@@ -1369,7 +1390,7 @@ test('saving one refusal back does not resolve another refusal\'s text', async (
 	}
 });
 
-test('a refusal whose reload lands after the page moved on changes nothing', async ({
+test('a retry reload answered after leaving cannot affect another draft', async ({
 	page,
 	setupCode,
 	browser
@@ -1397,18 +1418,25 @@ test('a refusal whose reload lands after the page moved on changes nothing', asy
 			await losingSave.released;
 			await route.continue();
 		});
-		// The reload a refusal triggers is held open, so the page can leave
-		// before its answer arrives.
+		// The automatic winner load fails, leaving a visible buffer. A
+		// deliberate retry may be abandoned while its GET is still in flight.
 		const reload = gate();
+		let reloads = 0;
 		await loser.route(`**/api/drafts/${seeded.draftId}`, async (route) => {
 			const path = new URL(route.request().url()).pathname;
 			if (route.request().method() !== 'GET' || path !== `/api/drafts/${seeded.draftId}`) {
 				await route.continue();
 				return;
 			}
+			reloads += 1;
+			if (reloads === 1) {
+				await route.abort('failed');
+				return;
+			}
+			const response = await route.fetch();
 			reload.arrive();
 			await reload.released;
-			await route.continue();
+			await route.fulfill({ response });
 		});
 
 		const losingSentence = 'The invented handover note was never signed.';
@@ -1424,13 +1452,21 @@ test('a refusal whose reload lands after the page moved on changes nothing', asy
 		);
 		losingSave.release();
 		await refused;
+		await expect(refusedText(loser, MOST)).toHaveText(losingSentence);
+		await expect(loser.getByRole('button', { name: 'Reload latest draft' })).toBeVisible();
+		await loser.getByRole('button', { name: 'Reload latest draft' }).click();
 		await reload.arrived;
 
-		// Leave for the other draft, inside the app, and then let the
-		// obsolete answer land.
+		// The refusal was surfaced before departure. The retry answer still
+		// belongs to the old controller and cannot paint the destination.
 		await homeSessions(loser);
 		await openDraftFromHome(loser, second.businessDate, otherId);
+		const oldAnswer = loser.waitForResponse((response) =>
+			response.url().endsWith(`/api/drafts/${seeded.draftId}`) && response.status() === 200
+		);
 		reload.release();
+		await oldAnswer;
+		await loser.waitForLoadState('networkidle');
 
 		// The destination is untouched: no buffer, no refused text, no error
 		// painted onto it, and its act is not held.
@@ -1456,7 +1492,7 @@ test('a refusal whose reload lands after the page moved on changes nothing', asy
 	}
 });
 
-test('navigation sends the later edit with the revision the held save reached', async ({
+test('a retried navigation saves the later edit with the accepted revision', async ({
 	page,
 	setupCode,
 	browser
@@ -1475,7 +1511,10 @@ test('navigation sends the later edit with the revision the held save reached', 
 		await held.first.arrived;
 		const later = 'Second invented note from the north desk.';
 		await author.getByLabel(MOST).fill(later);
-		await spaToDraft(author, otherId, second.traineeName);
+		await author.getByRole('link', { name: 'Home' }).click();
+		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
+		await expect(author.getByLabel(MOST)).toHaveValue(later);
+		await expect(author.getByRole('alert')).toContainText('Try leaving again after it saves');
 		held.first.release();
 
 		await expect.poll(async () => {
@@ -1484,6 +1523,8 @@ test('navigation sends the later edit with the revision the held save reached', 
 		}, { message: 'the later edit was lost after navigation' }).toBe(true);
 		expect(held.revisions).toHaveLength(2);
 		expect(held.revisions[1]).toBe(held.revisions[0] + 1);
+		await expectUnloadReady(author);
+		await spaToDraft(author, otherId, second.traineeName);
 		const other = await (await page.request.get(`/api/drafts/${otherId}`)).json();
 		expect(other.content.narratives).toEqual([]);
 		await expectSpaAlive(author);
@@ -1751,6 +1792,10 @@ test('an old reload cannot adopt into a new visit to the same draft', async ({
 			}
 			reloads += 1;
 			if (reloads === 1) {
+				await route.abort('failed');
+				return;
+			}
+			if (reloads === 2) {
 				const response = await route.fetch();
 				oldReload.arrive();
 				await oldReload.released;
@@ -1765,6 +1810,8 @@ test('an old reload cannot adopt into a new visit to the same draft', async ({
 		await page.getByLabel(MOST).fill('Invented winning note from the east desk.');
 		await expectSaved(page);
 		losing.release();
+		await expect(author.getByRole('button', { name: 'Reload latest draft' })).toBeVisible();
+		await author.getByRole('button', { name: 'Reload latest draft' }).click();
 		await oldReload.arrived;
 		await spaToDraft(author, otherId, second.traineeName);
 		await spaToDraft(author, seeded.draftId, 'Taylor Trainee');
@@ -1820,7 +1867,7 @@ test('a workflow act waits for an edit made during its in-flight save', async ({
 	}
 });
 
-test('a workflow act waiting on one draft cannot run on the next draft', async ({
+test('a workflow response from one draft cannot act on the next draft', async ({
 	page,
 	setupCode,
 	browser
@@ -1830,30 +1877,40 @@ test('a workflow act waiting on one draft cannot run on the next draft', async (
 	await transferDraft(page, seeded.draftId, seeded.jordanUserId);
 	const authorContext = await browser.newContext();
 	const author = await signIn(authorContext, JORDAN, seeded.jordanResetCode, JORDAN_PASSWORD);
+	const submitted = gate();
 	try {
 		await markSpa(author);
 		const otherId = await startDraftFromHome(author, second.businessDate);
 		await homeSessions(author);
 		await openDraftFromHome(author, '2026-06-02', seeded.draftId);
-		const held = await holdAppliedSave(author, seeded.draftId);
+		await author.route(`**/api/drafts/${seeded.draftId}/submit`, async (route) => {
+			const response = await route.fetch();
+			if (!response.ok()) throw new Error(`source submit failed: ${response.status()}`);
+			submitted.arrive();
+			await submitted.released;
+			await route.fulfill({ response });
+		});
 		let otherSubmits = 0;
 		await author.route(`**/api/drafts/${otherId}/submit`, async (route) => {
 			otherSubmits += 1;
 			await route.continue();
 		});
 		await author.getByLabel(MOST).fill('Invented source draft note.');
-		await held.first.arrived;
+		await expectSaved(author);
+		await expectUnloadReady(author);
 		const submit = author.getByRole('button', { name: 'Submit for review' });
 		await submit.click();
 		await expect(submit).toBeDisabled();
+		await submitted.arrived;
 		await spaToDraft(author, otherId, second.traineeName);
-		held.first.release();
+		submitted.release();
 		await author.waitForLoadState('networkidle');
 		const other = await (await page.request.get(`/api/drafts/${otherId}`)).json();
 		expect(other.status).toBe('draft');
 		expect(otherSubmits, 'the old act reached the destination draft').toBe(0);
 		await expectSpaAlive(author);
 	} finally {
+		submitted.release();
 		await authorContext.close();
 	}
 });
@@ -2079,7 +2136,7 @@ test('a failed winner reload still shows a refused narrative deletion', async ({
 	}
 });
 
-test('a queued teardown save still warns after SPA navigation', async ({
+test('a queued follow-up save keeps SPA departure on the draft until accepted', async ({
 	page,
 	setupCode,
 	browser
@@ -2096,23 +2153,28 @@ test('a queued teardown save still warns after SPA navigation', async ({
 		held = await holdAppliedSave(author, seeded.draftId, second);
 		await author.getByLabel(MOST).fill('Invented first note already applied by the server.');
 		await held.first.arrived;
-		const later = 'Invented later note queued as the route leaves.';
+		const later = 'Invented later note queued while the first save waits.';
 		await author.getByLabel(MOST).fill(later);
-		await homeSessions(author);
+		await author.getByRole('link', { name: 'Home' }).click();
+		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
+		await expect(author.getByRole('alert')).toContainText('Try leaving again after it saves');
 		await dismissTabClose(author);
-		await expect(author.getByRole('heading', { name: 'My sessions' })).toBeVisible();
+		await expect(author.getByLabel(MOST)).toHaveValue(later);
 		held.first.release();
 		await second.arrived;
+		await author.getByRole('link', { name: 'Home' }).click();
+		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
 		await dismissTabClose(author);
-		await expect(author.getByRole('heading', { name: 'My sessions' })).toBeVisible();
+		await expect(author.getByLabel(MOST)).toHaveValue(later);
 		second.release();
 		await expect.poll(async () => {
 			const draft = await (await page.request.get(`/api/drafts/${seeded.draftId}`)).json();
 			return draft.content.narratives.some((entry: { text: string }) => entry.text === later);
-		}, { message: 'the queued teardown edit did not finish' }).toBe(true);
+		}, { message: 'the queued follow-up edit did not finish' }).toBe(true);
 		await expect.poll(() => held?.revisions.length).toBe(2);
 		await author.waitForLoadState('networkidle');
 		await expectUnloadReady(author);
+		await homeSessions(author);
 		let cleanExitPrompts = 0;
 		author.on('dialog', async (dialog) => {
 			cleanExitPrompts += 1;
@@ -2120,7 +2182,7 @@ test('a queued teardown save still warns after SPA navigation', async ({
 		});
 		await author.close({ runBeforeUnload: true });
 		await expect.poll(() => author.isClosed()).toBe(true);
-		expect(cleanExitPrompts, 'settled teardown should close without a warning').toBe(0);
+		expect(cleanExitPrompts, 'settled save chain should close without a warning').toBe(0);
 	} finally {
 		held?.first.release();
 		second.release();
@@ -2152,6 +2214,7 @@ test('a failed ordinary save cannot silently leave by SPA navigation', async ({
 		await author.unroute(`**/api/drafts/${seeded.draftId}/content`);
 		await author.getByLabel(MOST).fill('Invented corrected note saved on retry.');
 		await expectSaved(author);
+		await expectUnloadReady(author);
 		await markSpa(author);
 		await homeSessions(author);
 	} finally {
@@ -2205,6 +2268,336 @@ test('recovery and discard release a full-document link after a stale save', asy
 		await expect(author).toHaveURL(/\/api\/health$/);
 	} finally {
 		losing.release();
+		await authorContext.close();
+	}
+});
+
+test('a failed save during SPA departure keeps the ordinary edit on its draft', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const authorContext = await browser.newContext();
+	const author = await signIn(authorContext, JORDAN, seeded.jordanResetCode, JORDAN_PASSWORD);
+	const save = gate();
+	try {
+		await author.goto(seeded.draftUrl);
+		await markSpa(author);
+		await author.route(`**/api/drafts/${seeded.draftId}/content`, async (route) => {
+			if (route.request().method() !== 'PUT') {
+				await route.continue();
+				return;
+			}
+			save.arrive();
+			await save.released;
+			await route.abort('failed');
+		});
+		const unsaved = 'Invented handover text from a disconnected desk.';
+		await author.getByLabel(MOST).fill(unsaved);
+		await save.arrived;
+		await author.getByRole('link', { name: 'Home' }).click();
+		save.release();
+		await expect(author.locator('.savestate')).toHaveText('Save failed');
+		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
+		await expect(author.getByRole('alert')).toContainText('did not save');
+		await expect(author.getByLabel(MOST)).toHaveValue(unsaved);
+		await author.unroute(`**/api/drafts/${seeded.draftId}/content`);
+		await author.getByLabel(MOST).fill('Invented handover text saved on retry.');
+		await expectSaved(author);
+		await expectUnloadReady(author);
+		await homeSessions(author);
+		const draft = await (await page.request.get(`/api/drafts/${seeded.draftId}`)).json();
+		expect(draft.content.narratives.some((entry: { text: string }) =>
+			entry.text === 'Invented handover text saved on retry.'
+		)).toBe(true);
+	} finally {
+		save.release();
+		await authorContext.close();
+	}
+});
+
+test('a failed winner reload can retry in place and preserve a refused deletion', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const original = 'Invented initial note awaiting a correction.';
+	await page.goto(seeded.draftUrl);
+	await page.getByLabel(MOST).fill(original);
+	await expectSaved(page);
+	const authorContext = await browser.newContext();
+	const author = await signIn(authorContext, CASEY, seeded.caseyResetCode, CASEY_PASSWORD);
+	const losing = gate();
+	let failReload = false;
+	let puts = 0;
+	let finalizations = 0;
+	try {
+		await author.goto(seeded.draftUrl);
+		await author.route(`**/api/drafts/${seeded.draftId}/content`, async (route) => {
+			if (route.request().method() === 'PUT') {
+				puts += 1;
+				if (puts === 1) {
+					losing.arrive();
+					await losing.released;
+				}
+			}
+			await route.continue();
+		});
+		await author.route(`**/api/drafts/${seeded.draftId}`, async (route) => {
+			if (failReload && route.request().method() === 'GET' &&
+				new URL(route.request().url()).pathname === `/api/drafts/${seeded.draftId}`) {
+				await route.abort('failed');
+				return;
+			}
+			await route.continue();
+		});
+		await author.route(`**/api/drafts/${seeded.draftId}/finalize`, async (route) => {
+			finalizations += 1;
+			await route.continue();
+		});
+		await author.getByLabel(MOST).fill('');
+		await losing.arrived;
+		const winning = 'Invented newer note from the other desk.';
+		await page.getByLabel(MOST).fill(winning);
+		await expectSaved(page);
+		failReload = true;
+		losing.release();
+		await expect(author.getByRole('alert')).toContainText('reloaded unsuccessfully');
+		await expect(author.locator('details.refused')).toContainText('Clear this narrative');
+		const reload = author.getByRole('button', { name: 'Reload latest draft' });
+		await expect(reload).toBeVisible();
+		failReload = false;
+		await reload.click();
+		await expect(author.getByLabel(MOST)).toHaveValue(winning);
+		await expect(author.locator('details.refused')).toContainText('Clear this narrative');
+		expect(puts, 'retrying the reload must not save the refused deletion').toBe(1);
+		await author.getByRole('button', { name: 'Finalize record' }).click();
+		await expect(author.getByRole('alert')).toContainText('Your refused text is still here');
+		expect(finalizations).toBe(0);
+		await author.getByLabel(MOST).fill('');
+		await expectSaved(author);
+		expect(puts).toBe(2);
+		const finalized = author.waitForResponse((response) =>
+			response.url().includes(`/api/drafts/${seeded.draftId}/finalize`)
+		);
+		await author.getByRole('button', { name: 'Finalize record' }).click();
+		expect((await finalized).ok()).toBe(true);
+	} finally {
+		losing.release();
+		await authorContext.close();
+	}
+});
+
+test('an allowed SPA departure locks clean draft fields until the route settles', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const authorContext = await browser.newContext();
+	const author = await signIn(authorContext, JORDAN, seeded.jordanResetCode, JORDAN_PASSWORD);
+	const layout = gate();
+	try {
+		await author.goto(seeded.draftUrl);
+		await markSpa(author);
+		await expect(author.getByLabel(MOST)).toBeEnabled();
+		await author.route('**/api/instance', async (route) => {
+			const response = await route.fetch();
+			if (!response.ok()) throw new Error(`layout refresh failed: ${response.status()}`);
+			layout.arrive();
+			await layout.released;
+			await route.fulfill({ response });
+		});
+		const leaving = author.getByRole('link', { name: 'Home' }).click();
+		await layout.arrived;
+		await expect(author.getByLabel(MOST)).toBeDisabled();
+		layout.release();
+		await leaving;
+		await expect(author.getByRole('heading', { name: 'My sessions' })).toBeVisible();
+		await expectSpaAlive(author);
+	} finally {
+		layout.release();
+		await authorContext.close();
+	}
+});
+
+test('a refused save stays on its draft until the writer sees recovery', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const authorContext = await browser.newContext();
+	const author = await signIn(authorContext, CASEY, seeded.caseyResetCode, CASEY_PASSWORD);
+	const losing = gate();
+	const reload = gate();
+	try {
+		await author.goto(seeded.draftUrl);
+		await expect(author.getByLabel(MOST)).toBeVisible();
+		await markSpa(author);
+		await author.route(`**/api/drafts/${seeded.draftId}/content`, async (route) => {
+			if (route.request().method() !== 'PUT') {
+				await route.continue();
+				return;
+			}
+			losing.arrive();
+			await losing.released;
+			await route.continue();
+		});
+		await author.route(`**/api/drafts/${seeded.draftId}`, async (route) => {
+			if (route.request().method() !== 'GET' ||
+				new URL(route.request().url()).pathname !== `/api/drafts/${seeded.draftId}`) {
+				await route.continue();
+				return;
+			}
+			const response = await route.fetch();
+			reload.arrive();
+			await reload.released;
+			await route.fulfill({ response });
+		});
+		const refused = 'Invented source note refused after another desk saved.';
+		await author.getByLabel(MOST).fill(refused);
+		await losing.arrived;
+		await page.goto(seeded.draftUrl);
+		await page.getByLabel(MOST).fill('Invented winning note from the other desk.');
+		await expectSaved(page);
+		await author.getByRole('link', { name: 'Home' }).click();
+		await expect(author.getByRole('alert')).toContainText('Try leaving again after it saves');
+		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
+		losing.release();
+		await reload.arrived;
+		await author.getByRole('link', { name: 'Home' }).click();
+		await expect(author.getByRole('alert')).toContainText('latest draft is still loading');
+		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
+		await dismissTabClose(author);
+		reload.release();
+		await expect(refusedText(author, MOST)).toHaveText(refused);
+		await author.getByRole('link', { name: 'Home' }).click();
+		await expect(author).toHaveURL(/\/$/);
+		await expectSpaAlive(author);
+		await expect(author.locator('details.refused')).toHaveCount(0);
+	} finally {
+		losing.release();
+		reload.release();
+		await authorContext.close();
+	}
+});
+
+test('overlapping SPA navigation keeps the draft locked until the current route settles', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const authorContext = await browser.newContext();
+	const author = await signIn(authorContext, JORDAN, seeded.jordanResetCode, JORDAN_PASSWORD);
+	const firstLayout = gate();
+	try {
+		await author.goto(seeded.draftUrl);
+		await expect(author.getByLabel(MOST)).toBeVisible();
+		await markSpa(author);
+		await homeSessions(author);
+		await openDraftFromHome(author, '2026-06-02', seeded.draftId);
+		const entryCount = await author.evaluate(() => history.length);
+		let instances = 0;
+		await author.route('**/api/instance', async (route) => {
+			instances += 1;
+			const held = instances === 1 ? firstLayout : null;
+			if (held !== null) {
+				const response = await route.fetch();
+				held.arrive();
+				await held.released;
+				try { await route.fulfill({ response }); } catch { /* superseded */ }
+				return;
+			}
+			await route.continue();
+		});
+		void author.getByRole('link', { name: 'Home' }).click();
+		await firstLayout.arrived;
+		await expect(author.getByLabel(MOST)).toBeDisabled();
+		// Real SPA entries exist for Home and this draft. Back starts a
+		// second navigation to the same Home route (which can reuse the
+		// first load); Forward returns to the current entry before commit.
+		await author.evaluate(() => history.back());
+		await expect(author).toHaveURL(/\/$/);
+		await author.evaluate(() => history.forward());
+		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
+		firstLayout.release();
+		await author.waitForLoadState('networkidle');
+		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
+		await expect(author.getByLabel(MOST)).toBeEnabled();
+		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
+		expect(await author.evaluate(() => history.length)).toBe(entryCount);
+		await expect(author.getByRole('button', { name: 'Resume editing this draft' })).toHaveCount(0);
+		await expectSpaAlive(author);
+	} finally {
+		firstLayout.release();
+		await authorContext.close();
+	}
+});
+
+test('a stranded router state requires an explicit same-entry resume', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const authorContext = await browser.newContext();
+	const author = await signIn(authorContext, JORDAN, seeded.jordanResetCode, JORDAN_PASSWORD);
+	const layout = gate();
+	try {
+		await author.goto(seeded.draftUrl);
+		await expect(author.getByLabel(MOST)).toBeVisible();
+		await markSpa(author);
+		await homeSessions(author);
+		await openDraftFromHome(author, '2026-06-02', seeded.draftId);
+		const originalState = await author.evaluate(() => history.state);
+		// Recreate a shallow popstate that resets the router token while
+		// the destination GET is held. Native hash entries need the active
+		// SvelteKit state copied onto them for this synthetic boundary.
+		await author.evaluate(() => { location.hash = 'earlier'; });
+		await expect(author).toHaveURL(/#earlier$/);
+		await author.evaluate((state) => history.replaceState(state, '', location.href), originalState);
+		await author.evaluate(() => { location.hash = 'current'; });
+		await expect(author).toHaveURL(/#current$/);
+		await author.evaluate((state) => history.replaceState(state, '', location.href), originalState);
+		const entryCount = await author.evaluate(() => history.length);
+		await author.route('**/api/instance', async (route) => {
+			const response = await route.fetch();
+			layout.arrive();
+			await layout.released;
+			try { await route.fulfill({ response }); } catch { /* abandoned navigation */ }
+		});
+		void author.getByRole('link', { name: 'Home' }).click();
+		await layout.arrived;
+		await expect(author.getByLabel(MOST)).toBeDisabled();
+		await author.evaluate(() => history.back());
+		await expect(author).toHaveURL(/#earlier$/);
+		await author.evaluate(() => history.forward());
+		await expect(author).toHaveURL(/#current$/);
+		layout.release();
+		await author.waitForLoadState('networkidle');
+		await expect(author.getByLabel(MOST)).toBeDisabled();
+		await expect(author.getByRole('button', { name: 'Resume editing this draft' })).toBeVisible();
+		await author.getByRole('button', { name: 'Resume editing this draft' }).click();
+		await expect(author.getByLabel(MOST)).toBeEnabled();
+		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}#current$`));
+		expect(await author.evaluate(() => history.length)).toBe(entryCount);
+		expect(await author.evaluate(() => history.state['sveltekit:states']))
+			.toEqual(originalState['sveltekit:states']);
+		const unsaved = 'Invented post-abort note.';
+		await author.route(`**/api/drafts/${seeded.draftId}/content`, async (route) => {
+			await route.abort('failed');
+		});
+		await author.getByLabel(MOST).fill(unsaved);
+		await author.getByRole('link', { name: 'Home' }).click();
+		await expect(author.locator('.savestate')).toHaveText('Save failed');
+		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}#current$`));
+		await expect(author.getByLabel(MOST)).toHaveValue(unsaved);
+	} finally {
+		layout.release();
 		await authorContext.close();
 	}
 });
