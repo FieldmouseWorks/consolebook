@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { untrack } from 'svelte';
 	import {
 		ApiError,
 		acknowledgeRecord,
@@ -72,6 +73,9 @@
 	let view: DraftView | null = $state(null);
 	let error = $state('');
 	let busy = $state(false);
+	// Fields stay editable while a workflow act drains its save chain, then
+	// pause while the act can freeze or replace the working copy.
+	let workflowRequest = $state(false);
 
 	// One owner of the editable working copy, the autosave chain, and the
 	// refused-save recovery buffer (#34; #59 ownership boundary). The page
@@ -91,7 +95,7 @@
 	let editor: DraftEditorController = $state(
 		new DraftEditorController(
 			() => view,
-			() => canAssign || canAuthor
+			() => !workflowRequest && (canAssign || canAuthor)
 		)
 	);
 
@@ -138,6 +142,7 @@
 	 * failed or the route moved to another draft or version while it ran.
 	 */
 	async function load(): Promise<EditorSnapshot | null> {
+		const origin = untrack(() => editor);
 		const wanted = requestedVersion;
 		const wantedDraft = draftId;
 		try {
@@ -164,7 +169,7 @@
 			if (fetched.record_type === 'weekly_summary' && fetched.status !== 'finalized') {
 				nextLinkable = (await linkableDailies(wantedDraft)).dailies;
 			}
-			if (draftId !== wantedDraft || requestedVersion !== wanted) {
+			if (editor !== origin || draftId !== wantedDraft || requestedVersion !== wanted) {
 				// The route moved on while this draft was loading: its
 				// answer belongs to a page that is gone, and publishing it
 				// would put one draft's content on another's route.
@@ -179,7 +184,7 @@
 				verification = null;
 			}
 		} catch (err) {
-			if (draftId !== wantedDraft || requestedVersion !== wanted) {
+			if (editor !== origin || draftId !== wantedDraft || requestedVersion !== wanted) {
 				return null;
 			}
 			view = null;
@@ -195,18 +200,26 @@
 	// navigation that reuses this route never carries text across drafts.
 	$effect(() => {
 		void draftId;
+		// This effect follows the route identity, not the reactive editor it
+		// replaces in cleanup. Reading editor as a dependency here makes a
+		// direct draft-to-draft navigation recurse through cleanup forever.
+		const origin = untrack(() => editor);
 		// Every settled save reports here, whichever path started it.
-		editor.onSettled = received;
-		// The route component is destroyed on navigation and on logout
-		// (client-side navigation to another draft included), which is
-		// where the refused text stops existing.
+		origin.onSettled = received;
+		// Navigation or logout ends this controller. SvelteKit can reuse the
+		// route component for another draft, so its identity effect must
+		// explicitly end the old controller and its refused text.
 		return () => {
-			editor.destroy();
+			origin.destroy();
 			// A different draft must not inherit this one's working copy or
 			// its refused text.
+			view = null;
+			error = '';
+			busy = false;
+			workflowRequest = false;
 			editor = new DraftEditorController(
 				() => view,
-				() => canAssign || canAuthor
+				() => !workflowRequest && (canAssign || canAuthor)
 			);
 			editor.onSettled = received;
 		};
@@ -224,7 +237,7 @@
 	}
 
 	let editable = $derived(
-		view !== null && openForEditing(view) && (canAssign || canAuthor)
+		view !== null && !workflowRequest && openForEditing(view) && (canAssign || canAuthor)
 	);
 	let mayRoute = $derived.by(() => {
 		const current = view;
@@ -338,30 +351,44 @@
 	}
 
 	async function submit() {
+		const origin = editor;
+		const wantedDraft = draftId;
+		const wantedVersion = requestedVersion;
+		const sameOwner = () => editor === origin && draftId === wantedDraft;
+		const stillHere = () =>
+			sameOwner() && requestedVersion === wantedVersion;
 		busy = true;
 		error = '';
 		try {
-			await editor.flush();
+			await origin.flush();
+			if (!stillHere()) return;
 			if (heldByRefusal('submitting')) {
 				// A failed save, or text of the writer's own that the
 				// reloaded copy does not carry, is not something to submit
 				// sight unseen.
 				return;
 			}
-			await submitDraft(draftId, editor.revision);
+			workflowRequest = true;
+			await submitDraft(wantedDraft, origin.revision);
+			if (!stillHere()) return;
 			await load();
 		} catch (err) {
+			if (!stillHere()) return;
 			if (err instanceof ApiError && err.code === 'stale_save') {
 				// The draft moved on since this page last saw it; show the
 				// winning copy instead of freezing it sight unseen.
 				await load();
+				if (!stillHere()) return;
 				error =
 					'Another contributor saved first; review the reloaded draft before submitting.';
 				return;
 			}
 			error = err instanceof ApiError ? err.message : 'the server could not be reached';
 		} finally {
-			busy = false;
+			if (sameOwner()) {
+				workflowRequest = false;
+				busy = false;
+			}
 		}
 	}
 
@@ -405,25 +432,39 @@
 	// sealed over a failed save, a stale reload, or a revision this
 	// page has not seen.
 	async function finalizeNow() {
+		const origin = editor;
+		const wantedDraft = draftId;
+		const wantedVersion = requestedVersion;
+		const sameOwner = () => editor === origin && draftId === wantedDraft;
+		const stillHere = () =>
+			sameOwner() && requestedVersion === wantedVersion;
 		busy = true;
 		error = '';
 		try {
-			await editor.flush();
+			await origin.flush();
+			if (!stillHere()) return;
 			if (heldByRefusal('finalizing')) {
 				return;
 			}
-			await finalizeDraft(draftId, editor.revision);
+			workflowRequest = true;
+			await finalizeDraft(wantedDraft, origin.revision);
+			if (!stillHere()) return;
 			await load();
 		} catch (err) {
+			if (!stillHere()) return;
 			if (err instanceof ApiError && err.code === 'stale_save') {
 				await load();
+				if (!stillHere()) return;
 				error =
 					'The record changed since this page last saw it; review the reloaded content before finalizing.';
 				return;
 			}
 			error = err instanceof ApiError ? err.message : 'the server could not be reached';
 		} finally {
-			busy = false;
+			if (sameOwner()) {
+				workflowRequest = false;
+				busy = false;
+			}
 		}
 	}
 

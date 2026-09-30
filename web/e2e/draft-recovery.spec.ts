@@ -266,12 +266,19 @@ async function expectSpaAlive(page: Page): Promise<void> {
 /**
  * Goes straight from one draft to another inside the app. No shipped link
  * offers this transition — every route into a draft passes through another
- * page — so the tests below use the real one; this helper documents the
- * component-reusing transition a guard outside the controller would
- * survive, and is kept for the day such a link exists.
+ * page. A trusted injected link exercises that component-reusing route
+ * transition, including its controller teardown and next draft load.
  */
 async function spaToDraft(page: Page, draftId: number, traineeName: string): Promise<void> {
 	const hop = `spa-hop-${draftId}`;
+	const requests: string[] = [];
+	const errors: string[] = [];
+	const onRequest = (request: { url: () => string }) => {
+		if (request.url().includes('/api/drafts/')) requests.push(request.url());
+	};
+	const onPageError = (error: Error) => errors.push(error.message);
+	page.on('request', onRequest);
+	page.on('pageerror', onPageError);
 	await page.evaluate(
 		([target, id]) => {
 			const link = document.createElement('a');
@@ -290,7 +297,18 @@ async function spaToDraft(page: Page, draftId: number, traineeName: string): Pro
 	await page.locator(`#${hop}`).click();
 	await expect(page).toHaveURL(new RegExp(`/drafts/${draftId}$`));
 	// The destination's own content is what proves the new draft loaded.
-	await expect(page.getByText(traineeName)).toBeVisible();
+	try {
+		await expect(page.getByText(traineeName)).toBeVisible();
+	} catch (error) {
+		const marker = await page.evaluate(() => (window as unknown as { __spa?: number }).__spa);
+		throw new Error(
+			`direct draft navigation did not render ${traineeName}; requests=${JSON.stringify(requests)}; page errors=${JSON.stringify(errors)}; marker=${marker}`,
+			{ cause: error }
+		);
+	} finally {
+		page.off('request', onRequest);
+		page.off('pageerror', onPageError);
+	}
 	await expectSpaAlive(page);
 }
 
@@ -365,6 +383,31 @@ function gate(): {
 		release = resolve;
 	});
 	return { arrived, released, arrive, release };
+}
+
+/** Hold the first successful PUT response after the real server has applied it. */
+async function holdAppliedSave(page: Page, draftId: number) {
+	const first = gate();
+	const revisions: number[] = [];
+	await page.route(`**/api/drafts/${draftId}/content`, async (route) => {
+		if (route.request().method() !== 'PUT') {
+			await route.continue();
+			return;
+		}
+		revisions.push(route.request().postDataJSON().revision);
+		if (revisions.length === 1) {
+			const response = await route.fetch();
+			if (!response.ok()) {
+				throw new Error(`the first save failed: ${response.status()}`);
+			}
+			first.arrive();
+			await first.released;
+			await route.fulfill({ response });
+			return;
+		}
+		await route.continue();
+	});
+	return { first, revisions };
 }
 
 /** Waits until the draft is saved and the page reports it. */
@@ -1351,3 +1394,452 @@ test('a refusal whose reload lands after the page moved on changes nothing', asy
 		await loserContext.close();
 	}
 });
+
+test('navigation sends the later edit with the revision the held save reached', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const second = await secondSession(page, seeded.jordanUserId);
+	const authorContext = await browser.newContext();
+	const author = await signIn(authorContext, JORDAN, seeded.jordanResetCode, JORDAN_PASSWORD);
+	try {
+		await markSpa(author);
+		const otherId = await startDraftFromHome(author, second.businessDate);
+		await homeSessions(author);
+		await openDraftFromHome(author, '2026-06-02', seeded.draftId);
+		const held = await holdAppliedSave(author, seeded.draftId);
+		await author.getByLabel(MOST).fill('First invented note from the north desk.');
+		await held.first.arrived;
+		const later = 'Second invented note from the north desk.';
+		await author.getByLabel(MOST).fill(later);
+		await spaToDraft(author, otherId, second.traineeName);
+		held.first.release();
+
+		await expect.poll(async () => {
+			const draft = await (await page.request.get(`/api/drafts/${seeded.draftId}`)).json();
+			return draft.content.narratives.some((entry: { text: string }) => entry.text === later);
+		}, { message: 'the later edit was lost after navigation' }).toBe(true);
+		expect(held.revisions).toHaveLength(2);
+		expect(held.revisions[1]).toBe(held.revisions[0] + 1);
+		const other = await (await page.request.get(`/api/drafts/${otherId}`)).json();
+		expect(other.content.narratives).toEqual([]);
+		await expectSpaAlive(author);
+	} finally {
+		await authorContext.close();
+	}
+});
+
+for (const resolution of ['copy back', 'discard'] as const) {
+	test(`a refused narrative deletion stays visible until ${resolution}`, async ({
+		page,
+		setupCode,
+		browser
+	}) => {
+		const seeded = await seed(page, browser, setupCode);
+		const original = 'Invented baseline note kept on the winning draft.';
+		await page.goto(seeded.draftUrl);
+		await page.getByLabel(MOST).fill(original);
+		await expectSaved(page);
+		const authorContext = await browser.newContext();
+		const author = await signIn(authorContext, CASEY, seeded.caseyResetCode, CASEY_PASSWORD);
+		const losing = gate();
+		try {
+			await author.goto(seeded.draftUrl);
+			await author.route(`**/api/drafts/${seeded.draftId}/content`, async (route) => {
+				if (route.request().method() !== 'PUT') {
+					await route.continue();
+					return;
+				}
+				losing.arrive();
+				await losing.released;
+				await route.continue();
+			});
+			let finalizations = 0;
+			await author.route(`**/api/drafts/${seeded.draftId}/finalize`, async (route) => {
+				finalizations += 1;
+				await route.continue();
+			});
+			await author.getByLabel(MOST).fill('');
+			await losing.arrived;
+			await page.getByLabel(LEAST).fill('The invented callback was checked.');
+			await expectSaved(page);
+			// Return the winner's other field to its original value. The only
+			// divergent field is then the writer's intended deletion.
+			await page.getByLabel(LEAST).fill('');
+			await expectSaved(page);
+			losing.release();
+			await expect(author.getByLabel(MOST)).toHaveValue(original);
+			const deletion = author.locator('details.refused .narrative').filter({ hasText: MOST });
+			await expect(deletion).toContainText('Clear this narrative');
+			await expect(author.locator('details.refused')).toHaveCount(1);
+			const finalize = author.getByRole('button', { name: 'Finalize record' });
+			await finalize.click();
+			await expect(author.getByRole('alert')).toContainText('Your refused text is still here');
+			expect(finalizations).toBe(0);
+			if (resolution === 'copy back') {
+				await author.getByLabel(MOST).fill('');
+				await expectSaved(author);
+				await expect(author.locator('details.refused')).toHaveCount(1);
+			} else {
+				await author.getByRole('button', { name: 'Discard this text' }).click();
+				await expect(author.locator('details.refused')).toHaveCount(0);
+			}
+			const submitted = author.waitForResponse((response) =>
+				response.url().includes(`/api/drafts/${seeded.draftId}/finalize`)
+			);
+			await finalize.click();
+			expect((await submitted).ok()).toBe(true);
+			expect(finalizations).toBe(1);
+			const final = await (await page.request.get(`/api/drafts/${seeded.draftId}`)).json();
+			expect(final.content.narratives.some((entry: { text: string }) => entry.text === original))
+				.toBe(resolution === 'discard');
+		} finally {
+			losing.release();
+			await authorContext.close();
+		}
+	});
+}
+
+test('only a successfully submitted snapshot resolves refused text', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const authorContext = await browser.newContext();
+	const author = await signIn(authorContext, CASEY, seeded.caseyResetCode, CASEY_PASSWORD);
+	const losing = gate();
+	const applied = gate();
+	const meta = gate();
+	try {
+		await author.goto(seeded.draftUrl);
+		await author.route(`**/api/drafts/${seeded.draftId}/content`, async (route) => {
+			if (route.request().method() !== 'PUT') {
+				await route.continue();
+				return;
+			}
+			losing.arrive();
+			await losing.released;
+			await route.continue();
+		});
+		const refused = 'Invented radio check from the east desk.';
+		const winner = 'Invented callback from the west desk.';
+		await author.getByLabel(MOST).fill(refused);
+		await losing.arrived;
+		await page.goto(seeded.draftUrl);
+		await page.getByLabel(MOST).fill(winner);
+		await expectSaved(page);
+		losing.release();
+		await expect(refusedText(author, MOST)).toHaveText(refused);
+
+		let saves = 0;
+		await author.unroute(`**/api/drafts/${seeded.draftId}/content`);
+		await author.route(`**/api/drafts/${seeded.draftId}`, async (route) => {
+			if (route.request().method() !== 'GET' ||
+				new URL(route.request().url()).pathname !== `/api/drafts/${seeded.draftId}`) {
+				await route.continue();
+				return;
+			}
+			meta.arrive();
+			await meta.released;
+			await route.continue();
+		});
+		await author.route(`**/api/drafts/${seeded.draftId}/content`, async (route) => {
+			if (route.request().method() !== 'PUT') {
+				await route.continue();
+				return;
+			}
+			saves += 1;
+			if (saves === 1) {
+				const response = await route.fetch();
+				applied.arrive();
+				await applied.released;
+				await route.fulfill({ response });
+				return;
+			}
+			await route.continue();
+		});
+		let finalizations = 0;
+		await author.route(`**/api/drafts/${seeded.draftId}/finalize`, async (route) => {
+			finalizations += 1;
+			await route.continue();
+		});
+		// This request carries the winner's text, plus an unrelated edit.
+		await author.getByLabel(LEAST).fill('Invented unrelated note.');
+		await applied.arrived;
+		// The refused text exists only in the live field while that older
+		// request is settling. It was absent from the submitted snapshot.
+		await author.getByLabel(MOST).fill(refused);
+		applied.release();
+		await meta.arrived;
+		await author.getByLabel(MOST).fill(winner);
+		meta.release();
+		await expect.poll(() => saves, { message: 'the later edit was not saved' }).toBeGreaterThan(1);
+		await expectSaved(author);
+		const finalize = author.getByRole('button', { name: 'Finalize record' });
+		await finalize.click();
+		await expect(author.getByRole('alert')).toContainText('Your refused text is still here');
+		expect(finalizations, 'a live-only match incorrectly cleared the recovery guard').toBe(0);
+	} finally {
+		losing.release();
+		applied.release();
+		meta.release();
+		await authorContext.close();
+	}
+});
+
+test('a pending refusal reload holds workflow acts and keeps later typing', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const authorContext = await browser.newContext();
+	const author = await signIn(authorContext, CASEY, seeded.caseyResetCode, CASEY_PASSWORD);
+	const losing = gate();
+	const reload = gate();
+	try {
+		await author.goto(seeded.draftUrl);
+		await expect(author.getByRole('heading', { name: 'Daily Observation Report' })).toBeVisible();
+		await author.route(`**/api/drafts/${seeded.draftId}/content`, async (route) => {
+			if (route.request().method() !== 'PUT') {
+				await route.continue();
+				return;
+			}
+			losing.arrive();
+			await losing.released;
+			await route.continue();
+		});
+		let reloads = 0;
+		await author.route(`**/api/drafts/${seeded.draftId}`, async (route) => {
+			if (route.request().method() !== 'GET' ||
+				new URL(route.request().url()).pathname !== `/api/drafts/${seeded.draftId}`) {
+				await route.continue();
+				return;
+			}
+			reloads += 1;
+			if (reloads === 1) {
+				reload.arrive();
+				await reload.released;
+			}
+			await route.continue();
+		});
+		let finalizations = 0;
+		await author.route(`**/api/drafts/${seeded.draftId}/finalize`, async (route) => {
+			finalizations += 1;
+			await route.continue();
+		});
+		const refused = 'Invented dispatch note from the first desk.';
+		const later = 'Invented dispatch note typed during the reload.';
+		await author.getByLabel(MOST).fill(refused);
+		await losing.arrived;
+		await page.goto(seeded.draftUrl);
+		await page.getByLabel(MOST).fill('Invented winning callback note.');
+		await expectSaved(page);
+		losing.release();
+		await reload.arrived;
+		await author.getByLabel(LEAST).fill(later);
+		const finalize = author.getByRole('button', { name: 'Finalize record' });
+		await finalize.click();
+		await expect(author.getByRole('alert')).toContainText('Your refused text is still here');
+		expect(finalizations).toBe(0);
+		expect(reloads).toBe(1);
+		reload.release();
+		await expect(refusedText(author, MOST)).toHaveText(refused);
+		await expect(refusedText(author, LEAST)).toHaveText(later);
+	} finally {
+		losing.release();
+		reload.release();
+		await authorContext.close();
+	}
+});
+
+test('an old reload cannot adopt into a new visit to the same draft', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const second = await secondSession(page, seeded.jordanUserId);
+	const authorContext = await browser.newContext();
+	const author = await signIn(authorContext, JORDAN, seeded.jordanResetCode, JORDAN_PASSWORD);
+	const losing = gate();
+	const oldReload = gate();
+	try {
+		await markSpa(author);
+		const otherId = await startDraftFromHome(author, second.businessDate);
+		await homeSessions(author);
+		await openDraftFromHome(author, '2026-06-02', seeded.draftId);
+		await author.route(`**/api/drafts/${seeded.draftId}/content`, async (route) => {
+			if (route.request().method() !== 'PUT') {
+				await route.continue();
+				return;
+			}
+			losing.arrive();
+			await losing.released;
+			await route.continue();
+		});
+		let reloads = 0;
+		await author.route(`**/api/drafts/${seeded.draftId}`, async (route) => {
+			if (route.request().method() !== 'GET' ||
+				new URL(route.request().url()).pathname !== `/api/drafts/${seeded.draftId}`) {
+				await route.continue();
+				return;
+			}
+			reloads += 1;
+			if (reloads === 1) {
+				const response = await route.fetch();
+				oldReload.arrive();
+				await oldReload.released;
+				await route.fulfill({ response });
+				return;
+			}
+			await route.continue();
+		});
+		await author.getByLabel(MOST).fill('Invented refused note from the first visit.');
+		await losing.arrived;
+		await page.goto(seeded.draftUrl);
+		await page.getByLabel(MOST).fill('Invented winning note from the east desk.');
+		await expectSaved(page);
+		losing.release();
+		await oldReload.arrived;
+		await spaToDraft(author, otherId, second.traineeName);
+		await spaToDraft(author, seeded.draftId, 'Taylor Trainee');
+		const fresh = 'Invented fresh note from the second visit.';
+		await author.getByLabel(MOST).fill(fresh);
+		await expectSaved(author);
+		const oldAnswer = author.waitForResponse((response) =>
+			response.url().endsWith(`/api/drafts/${seeded.draftId}`) && response.status() === 200
+		);
+		oldReload.release();
+		await oldAnswer;
+		await author.waitForLoadState('networkidle');
+		await expect(author.getByLabel(MOST)).toHaveValue(fresh);
+		await expect(author.locator('details.refused')).toHaveCount(0);
+		await expect(author.getByRole('alert')).toHaveCount(0);
+		await expectSpaAlive(author);
+	} finally {
+		losing.release();
+		oldReload.release();
+		await authorContext.close();
+	}
+});
+
+test('a workflow act waits for an edit made during its in-flight save', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const authorContext = await browser.newContext();
+	const author = await signIn(authorContext, CASEY, seeded.caseyResetCode, CASEY_PASSWORD);
+	try {
+		await author.goto(seeded.draftUrl);
+		const held = await holdAppliedSave(author, seeded.draftId);
+		await author.getByLabel(MOST).fill('Invented first desk note.');
+		await held.first.arrived;
+		const finalize = author.getByRole('button', { name: 'Finalize record' });
+		await finalize.click();
+		await expect(finalize).toBeDisabled();
+		await author.clock.pauseAt(new Date());
+		const later = 'Invented second desk note typed while finalization waited.';
+		await author.getByLabel(LEAST).fill(later);
+		held.first.release();
+		await expect(author.getByText('Finalized', { exact: true })).toBeVisible();
+		const finalized = await (await page.request.get(`/api/drafts/${seeded.draftId}`)).json();
+		expect(finalized.status).toBe('finalized');
+		expect(finalized.content.narratives.some((entry: { text: string }) => entry.text === later))
+			.toBe(true);
+		expect(held.revisions).toHaveLength(2);
+		expect(held.revisions[1]).toBe(held.revisions[0] + 1);
+	} finally {
+		await authorContext.close();
+	}
+});
+
+test('a workflow act waiting on one draft cannot run on the next draft', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const second = await secondSession(page, seeded.jordanUserId);
+	await transferDraft(page, seeded.draftId, seeded.jordanUserId);
+	const authorContext = await browser.newContext();
+	const author = await signIn(authorContext, JORDAN, seeded.jordanResetCode, JORDAN_PASSWORD);
+	try {
+		await markSpa(author);
+		const otherId = await startDraftFromHome(author, second.businessDate);
+		await homeSessions(author);
+		await openDraftFromHome(author, '2026-06-02', seeded.draftId);
+		const held = await holdAppliedSave(author, seeded.draftId);
+		let otherSubmits = 0;
+		await author.route(`**/api/drafts/${otherId}/submit`, async (route) => {
+			otherSubmits += 1;
+			await route.continue();
+		});
+		await author.getByLabel(MOST).fill('Invented source draft note.');
+		await held.first.arrived;
+		const submit = author.getByRole('button', { name: 'Submit for review' });
+		await submit.click();
+		await expect(submit).toBeDisabled();
+		await spaToDraft(author, otherId, second.traineeName);
+		held.first.release();
+		await author.waitForLoadState('networkidle');
+		const other = await (await page.request.get(`/api/drafts/${otherId}`)).json();
+		expect(other.status).toBe('draft');
+		expect(otherSubmits, 'the old act reached the destination draft').toBe(0);
+		await expectSpaAlive(author);
+	} finally {
+		await authorContext.close();
+	}
+});
+
+for (const act of [
+	{ label: 'Submit for review', path: 'submit', status: 'submitted' },
+	{ label: 'Finalize record', path: 'finalize', status: 'finalized' }
+] as const) {
+	test(`editing pauses while the ${act.path} request is in flight`, async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const authorContext = act.path === 'finalize' ? await browser.newContext() : null;
+	const author = authorContext === null
+		? page
+		: await signIn(authorContext, CASEY, seeded.caseyResetCode, CASEY_PASSWORD);
+	const held = gate();
+	try {
+		await author.goto(seeded.draftUrl);
+		await expect(author.getByLabel(MOST)).toBeVisible();
+		await author.getByLabel(MOST).fill('Invented note saved before the workflow act.');
+		await expectSaved(author);
+		await author.route(`**/api/drafts/${seeded.draftId}/${act.path}`, async (route) => {
+			const response = await route.fetch();
+			if (!response.ok()) throw new Error(`${act.path} failed: ${response.status()}`);
+			held.arrive();
+			await held.released;
+			await route.fulfill({ response });
+		});
+		await author.getByRole('button', { name: act.label }).click();
+		await held.arrived;
+		await expect(author.getByLabel(MOST)).toBeDisabled();
+		await expect(author.getByLabel(LEAST)).toBeDisabled();
+		held.release();
+		await expect(author.getByText(
+			act.status === 'submitted' ? 'Submitted for review' : 'Finalized',
+			{ exact: true }
+		)).toBeVisible();
+		await expect.poll(async () => {
+			const draft = await (await page.request.get(`/api/drafts/${seeded.draftId}`)).json();
+			return draft.status;
+		}).toBe(act.status);
+	} finally {
+		held.release();
+		await authorContext?.close();
+	}
+});
+}

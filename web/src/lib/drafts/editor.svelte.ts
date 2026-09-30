@@ -11,8 +11,9 @@
 // Two lifetimes live here, and they are deliberately different:
 //
 // - component/controller-lifetimed state: `values`, `notObserved`,
-//   `modifiers`, `narratives`, `revision`, and the save chain. Discarded
-//   when the controller is destroyed;
+//   `modifiers`, `narratives`, `revision`, and the save chain. An accepted
+//   in-flight revision may finish after destruction to order a queued
+//   ordinary edit; the state is then discarded;
 // - `refused`: every refused save's divergent text that the author has not
 //   discarded yet, newest first, and only until they discard it, the
 //   controller is destroyed (navigation or logout), or a new draft
@@ -157,7 +158,11 @@ export class DraftEditorController {
 	 * that save carries — never another refusal's text.
 	 */
 	get unresolved(): boolean {
-		return this.#reloadFailed || this.refused.some((buffer) => !buffer.resolved);
+		return (
+			this.#reported_stale ||
+			this.#reloadFailed ||
+			this.refused.some((buffer) => !buffer.resolved)
+		);
 	}
 
 	/**
@@ -170,6 +175,8 @@ export class DraftEditorController {
 
 	readonly #view: () => DraftView | null;
 	readonly #mayEdit: (view: DraftView) => boolean;
+	/** The last adopted view pins this controller's draft and form at teardown. */
+	#draftView: DraftView | null = null;
 	#timer: ReturnType<typeof setTimeout> | null = null;
 	#inFlight: Promise<void> | null = null;
 	#release: (() => void) | null = null;
@@ -210,6 +217,11 @@ export class DraftEditorController {
 			return;
 		}
 		this.saveState = 'pending';
+		if (this.#inFlight !== null) {
+			// A workflow act awaiting the running chain must see this edit,
+			// even when its debounce has not fired before the first reply.
+			this.#dirty = true;
+		}
 		if (this.#timer !== null) {
 			clearTimeout(this.#timer);
 		}
@@ -284,12 +296,17 @@ export class DraftEditorController {
 	 * it settled as.
 	 */
 	async flush(): Promise<void> {
-		if (this.#timer !== null) {
-			await this.saveNow();
-			return;
-		}
-		if (this.#inFlight !== null) {
-			await this.#inFlight;
+		for (;;) {
+			if (this.#timer !== null) {
+				await this.saveNow();
+			} else if (this.#inFlight !== null) {
+				await this.#inFlight;
+			} else {
+				return;
+			}
+			if (this.#destroyed || this.#reported_stale || this.saveState === 'failed') {
+				return;
+			}
 		}
 	}
 
@@ -301,6 +318,7 @@ export class DraftEditorController {
 	 */
 	adopt(view: DraftView): EditorSnapshot {
 		const replaced = this.snapshot();
+		this.#draftView = view;
 		const values: Record<number, number | null> = {};
 		const notObserved: Record<number, boolean> = {};
 		const modifiers: Record<number, Record<number, boolean>> = {};
@@ -330,9 +348,6 @@ export class DraftEditorController {
 		this.modifiers = modifiers;
 		this.narratives = narratives;
 		this.revision = view.revision;
-		// The page has reloaded the winning copy, so a refusal of the
-		// revision left behind is answered and may be reported afresh.
-		this.#reported_stale = false;
 		return replaced;
 	}
 
@@ -358,7 +373,6 @@ export class DraftEditorController {
 	 */
 	discardRefused(index: number): void {
 		this.refused = this.refused.filter((_, at) => at !== index);
-		this.#reported_stale = false;
 	}
 
 	/**
@@ -367,6 +381,7 @@ export class DraftEditorController {
 	 * discard.
 	 */
 	markReloaded(): void {
+		this.#reported_stale = false;
 		this.#reloadFailed = false;
 	}
 
@@ -384,20 +399,19 @@ export class DraftEditorController {
 	 * writer putting it back; a save that does not leaves that buffer
 	 * unresolved.
 	 */
-	#carries(buffer: RefusedBuffer): boolean {
+	#carries(buffer: RefusedBuffer, saved: EditorSnapshot): boolean {
 		for (const narrative of buffer.narratives) {
-			if ((this.narratives[narrative.form_narrative_id] ?? '') !== narrative.text) {
+			if ((saved.narratives.get(narrative.form_narrative_id) ?? '') !== narrative.text) {
 				return false;
 			}
 		}
 		for (const rating of buffer.ratings) {
 			const id = rating.form_competency_id;
-			const marked = this.notObserved[id] ?? false;
-			const value = marked ? null : (this.values[id] ?? null);
-			const picked = Object.entries(this.modifiers[id] ?? {})
-				.filter(([, on]) => on)
-				.map(([key]) => Number(key))
-				.sort((left, right) => left - right);
+			const marked = saved.notObserved.get(id) ?? false;
+			const value = marked ? null : (saved.values.get(id) ?? null);
+			const picked = [...(saved.modifiers.get(id) ?? new Set<number>())].sort(
+				(left, right) => left - right
+			);
 			const expected = [...rating.modifier_ids].sort((left, right) => left - right);
 			if (marked !== rating.not_observed || value !== rating.value) {
 				return false;
@@ -415,17 +429,18 @@ export class DraftEditorController {
 	 * text it did not carry stays unresolved, so an act still waits for it.
 	 * The buffers themselves stay readable until the writer discards them.
 	 */
-	#resolveCarried(): void {
+	#resolveCarried(saved: EditorSnapshot): void {
 		this.#reloadFailed = false;
 		this.refused = this.refused.map((buffer) =>
-			!buffer.resolved && this.#carries(buffer) ? { ...buffer, resolved: true } : buffer
+			!buffer.resolved && this.#carries(buffer, saved) ? { ...buffer, resolved: true } : buffer
 		);
 	}
 
 	/**
 	 * Ends this controller's work: the refused text is dropped, a late
-	 * response from this draft is ignored, and an ordinary edit still
-	 * waiting on the debounce is sent rather than discarded. Called on
+	 * accepted revision is retained only for teardown ordering, and an
+	 * ordinary edit still waiting on the debounce is sent rather than
+	 * discarded. Called on
 	 * navigation (including client-side navigation that reuses the route)
 	 * and on logout, because the route component is destroyed either way.
 	 *
@@ -437,18 +452,18 @@ export class DraftEditorController {
 	 * never part of what a save carries.
 	 */
 	destroy(): void {
-		const draft_id = this.#view()?.id ?? null;
+		const draft = this.#draftView;
 		const pending = (this.#timer !== null || this.#dirty) && !this.#reported_stale;
+		const content = pending && draft !== null ? this.#buildContent(draft) : null;
 		this.#destroyed = true;
 		if (this.#timer !== null) {
 			clearTimeout(this.#timer);
 			this.#timer = null;
 		}
 		this.#dirty = false;
-		this.#reported_stale = false;
 		this.refused = [];
-		if (pending && draft_id !== null) {
-			void this.#saveOnTeardown(draft_id);
+		if (content !== null && draft !== null) {
+			void this.#saveOnTeardown(draft.id, content);
 		}
 	}
 
@@ -458,16 +473,16 @@ export class DraftEditorController {
 	 * is the one the server actually reached, and it reports nothing: the
 	 * page that would have shown the outcome is gone.
 	 */
-	async #saveOnTeardown(draft_id: number): Promise<void> {
+	async #saveOnTeardown(draft_id: number, content: DraftContent): Promise<void> {
 		const inflight = this.#inFlight;
 		if (inflight !== null) {
 			await inflight.catch(() => {});
 		}
-		if (this.#view()?.id !== draft_id) {
+		if (this.#reported_stale) {
 			return;
 		}
 		try {
-			await saveDraftContent(draft_id, this.revision, this.#buildContent());
+			await saveDraftContent(draft_id, this.revision, content);
 		} catch {
 			// The page is gone; the next visit surfaces the state.
 		}
@@ -476,8 +491,7 @@ export class DraftEditorController {
 	// --------------------------------------------------------- the content
 
 	/** The content a save would send right now. */
-	#buildContent(): DraftContent {
-		const view = this.#view();
+	#buildContent(view: DraftView | null = this.#view()): DraftContent {
 		if (view === null) {
 			return { ratings: [], narratives: [] };
 		}
@@ -523,6 +537,12 @@ export class DraftEditorController {
 			// nothing typed during an await is dropped, and an attempt the
 			// server refused is never repeated against the same revision.
 			for (;;) {
+				// This attempt includes the latest edit, so consume its timer.
+				// A later edit arms a new one and marks the chain dirty again.
+				if (this.#timer !== null) {
+					clearTimeout(this.#timer);
+					this.#timer = null;
+				}
 				this.#dirty = false;
 				if (this.#stale(run)) {
 					return;
@@ -540,6 +560,14 @@ export class DraftEditorController {
 						this.#buildContent()
 					);
 				} catch (err) {
+					if (this.#destroyed) {
+						// Teardown may have queued a newer ordinary edit. A late
+						// refusal must stop that send, not retry refused content.
+						if (err instanceof ApiError && err.code === 'stale_save') {
+							this.#reported_stale = true;
+						}
+						return;
+					}
 					if (this.#stale(run)) {
 						return;
 					}
@@ -582,13 +610,19 @@ export class DraftEditorController {
 					};
 					return;
 				}
+				if (this.#destroyed) {
+					// The response is still the original draft's accepted
+					// revision. Its queued teardown edit needs this number.
+					this.revision = saved.revision;
+					return;
+				}
 				if (this.#stale(run)) {
 					return;
 				}
 				this.revision = saved.revision;
 				this.saveState = 'saved';
 				if (this.#refusals === refusalsAtStart) {
-					this.#resolveCarried();
+					this.#resolveCarried(run.refused);
 				}
 				await this.refreshMeta(run.draft_id);
 				if (!this.#dirty || this.#destroyed || this.#stale(run)) {
@@ -732,7 +766,7 @@ export function divergentBuffer(
 		// server: a save refused at request time never carried an edit made
 		// after it was sent, so that text is newer than the refusal.
 		const text = current;
-		if (text === '' || text === (winning_narratives.get(id) ?? '')) {
+		if (text === (winning_narratives.get(id) ?? '') || (winner === null && text === '')) {
 			continue;
 		}
 		narratives.push({

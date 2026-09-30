@@ -33,13 +33,13 @@
 		</summary>
 		<p class="quiet small-note">
 			Another contributor saved first, so their copy is what this page now
-			edits. Your save was refused and never applied. The text below is
-			yours and was not saved anywhere — copy anything you still want into
-			the reloaded fields, then save again through the normal revision
+			edits. Your save was refused and never applied. The text or deletion below is
+			yours and was not saved anywhere — copy text or clear a field in
+			the reloaded copy, then save again through the normal revision
 			check. Nothing here is merged or resubmitted for you.
 		</p>
 		{#if narrativeCount > 0}
-			<h3>Narrative text that differed</h3>
+			<h3>Narratives that differed</h3>
 			{#each refused.narratives as narrative (narrative.form_narrative_id)}
 				<div class="narrative">
 					<p class="label">
@@ -51,8 +51,14 @@
 							</span>
 						{/if}
 					</p>
-					<!-- Read-only and copyable; never an editor. -->
-					<pre class="refused-text">{narrative.text}</pre>
+					{#if narrative.text === ''}
+						<p class="refused-text">
+							Clear this narrative. Leave the reloaded field empty and save to apply the deletion.
+						</p>
+					{:else}
+						<!-- Read-only and copyable; never an editor. -->
+						<pre class="refused-text">{narrative.text}</pre>
+					{/if}
 				</div>
 			{/each}
 		{/if}
