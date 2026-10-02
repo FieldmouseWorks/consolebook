@@ -1,5 +1,7 @@
 <script lang="ts">
-	import { page } from '$app/state';
+	import { beforeNavigate, goto } from '$app/navigation';
+	import { navigating, page } from '$app/state';
+	import { untrack } from 'svelte';
 	import {
 		ApiError,
 		acknowledgeRecord,
@@ -36,6 +38,14 @@
 		type Verification,
 		type VersionHistoryRow
 	} from '$lib/api';
+	import {
+		DraftEditorController,
+		divergentBuffer,
+		openForEditing,
+		type EditorSnapshot,
+		type SaveResult
+	} from '$lib/drafts/editor.svelte';
+	import RefusedTextPanel from '$lib/drafts/RefusedTextPanel.svelte';
 	import { instant } from '$lib/format';
 	import type { ShellData } from '../../+layout';
 
@@ -63,16 +73,111 @@
 
 	let view: DraftView | null = $state(null);
 	let error = $state('');
+	let invalidRouteUrl = $state(false);
 	let busy = $state(false);
+	let retryingLatest = $state(false);
+	// Fields stay editable while a workflow act drains its save chain, then
+	// pause while the act can freeze or replace the working copy.
+	let workflowRequest = $state(false);
 
-	// The working copy under edit, keyed by the pinned vocabulary ids,
-	// and the revision it was based on — every save carries it, so a
-	// concurrent contributor's work is never silently overwritten.
-	let revision = $state(0);
-	let values: Record<number, number | null> = $state({});
-	let notObserved: Record<number, boolean> = $state({});
-	let modifiers: Record<number, Record<number, boolean>> = $state({});
-	let narratives: Record<number, string> = $state({});
+	// One owner of the editable working copy, the autosave chain, and the
+	// refused-save recovery buffer (#34; #59 ownership boundary). The page
+	// supplies the session-derived editing rule and otherwise reads the
+	// controller; it never mirrors an editable value beside it.
+	//
+	// The instance is deliberately not derived from the view: a reload
+	// replaces the working copy many times over one draft's life, and a
+	// fresh controller per reload would drop an in-flight save's identity
+	// and any refused text. One instance per draft identity, replaced only
+	// when the route addresses a different draft.
+	// Created once, then replaced only when the route addresses a different
+	// draft. It is never undefined: the first render reads it before any
+	// effect has run, and an effect-assigned binding would leave that
+	// render without one. The class carries its own fine-grained rune
+	// state, so replacing the instance is visible where it matters.
+	let editor: DraftEditorController = $state(
+		new DraftEditorController(
+			() => view,
+			() => !workflowRequest && !routeLeaving && (canAssign || canAuthor)
+		)
+	);
+	// An accepted SPA navigation publishes before its route loads. Freeze
+	// fields until the router clears that state. A rejected navigation can
+	// leave its promise published while the router still skips navigation
+	// callbacks, so rejection alone cannot make the fields editable.
+	let rejectedNavigation: Promise<void> | null = $state.raw(null);
+	let routeLeaving = $derived(navigating.to !== null);
+	$effect(() => {
+		const complete = navigating.complete;
+		if (complete === null) return;
+		// Reattach if the route reuses this component for a different
+		// editor while a navigation remains published.
+		const origin = editor;
+		void complete.catch(() => {
+			// Offer a deliberate same-entry resettlement only for the exact
+			// rejected navigation still published on this editor's page.
+			if (editor === origin && navigating.complete === complete) {
+				rejectedNavigation = complete;
+			}
+		});
+	});
+
+	async function resumeEditing(): Promise<void> {
+		const rejected = rejectedNavigation;
+		if (rejected === null || navigating.complete !== rejected || !routeLeaving) return;
+		// Replacing the current entry leaves the URL, page state, and history
+		// depth intact. Only a real router settlement unlocks the editor.
+		try {
+			await goto(page.url.href, {
+				replaceState: true,
+				keepFocus: true,
+				noScroll: true,
+				state: page.state
+			});
+		} catch {
+			// The current navigation's rejection is observed above; its
+			// still-current promise keeps the retry available on this editor.
+		}
+	}
+
+	// A full document unload cannot wait for fetch to finish. SvelteKit
+	// supplies the native confirmation for refresh/tab close; an outside
+	// link stays here with a plain reason. Client-side departures wait for
+	// an ordinary save while the editor remains mounted, then need a new
+	// departure attempt so any failure or refusal is seen on this draft.
+	beforeNavigate((navigation) => {
+		const origin = editor;
+		if (navigation.willUnload && (origin.hasUnsavedOrdinaryEdits || origin.hasPendingRecovery)) {
+			navigation.cancel();
+			if (navigation.type !== 'leave') {
+				error = origin.hasPendingRecovery
+					? 'The latest draft is still loading after a save stopped. Wait before leaving.'
+					: 'The draft has unsaved changes. Wait for the save to finish before leaving.';
+			}
+			return;
+		}
+		if (navigation.willUnload) return;
+		if (origin.hasFailedOrdinarySave) {
+			navigation.cancel();
+			error = 'The draft did not save. Stay on this draft and save again before leaving.';
+			return;
+		}
+		if (origin.hasUnsavedOrdinaryEdits) {
+			navigation.cancel();
+			error = 'The draft is saving. Try leaving again after it saves.';
+			void origin.flush().then(() => {
+				if (editor === origin && origin.saveState === 'saved' &&
+					!origin.hasUnsavedOrdinaryEdits) {
+					error = 'The draft saved. Try leaving again.';
+				}
+			});
+			return;
+		}
+		if (origin.hasPendingRecovery) {
+			navigation.cancel();
+			error = 'The latest draft is still loading after a save stopped. Wait before leaving.';
+		}
+	});
 
 	// The sealed record, fetched when the draft is finalized: the page
 	// then presents from the stored envelope, never from live rows
@@ -110,70 +215,108 @@
 	let linkable: SummaryLink[] = $state([]);
 	let linkChoice: number | '' = $state('');
 
-	async function load() {
+	/**
+	 * Loads the draft the route addresses and adopts it as the working
+	 * copy. Returns the working copy that adopt replaced — text typed while
+	 * this reload was in flight is only there — or `null` when the load
+	 * failed or the route moved to another draft or version while it ran.
+	 */
+	async function load(): Promise<EditorSnapshot | null> {
+		const origin = untrack(() => editor);
+		const wanted = requestedVersion;
+		const wantedDraft = draftId;
+		if (
+			!Number.isSafeInteger(wantedDraft) ||
+			wantedDraft <= 0 ||
+			(wanted !== null && (!Number.isSafeInteger(wanted) || wanted <= 0))
+		) {
+			view = null;
+			sealed = null;
+			invalidRouteUrl = true;
+			return null;
+		}
+		invalidRouteUrl = false;
 		try {
-			const wanted = requestedVersion;
-			const fetched = await getDraft(draftId);
+			const fetched = await getDraft(wantedDraft);
+			let nextSealed: FinalizedView | null = null;
+			let nextAck: Acknowledgment | null = null;
+			let nextVersions: VersionHistoryRow[] = [];
+			// A draft that is no longer finalized has nothing to verify.
+			let clearVerification = false;
 			if (fetched.status === 'finalized') {
 				// The envelope is the only permitted presentation of a
 				// finalized record (ADR 0011): if it cannot load, the page
 				// fails closed and presents nothing from live joins.
-				sealed =
+				nextSealed =
 					wanted === null
-						? await finalizedVersion(draftId)
-						: await finalizedVersionAt(draftId, wanted);
-				ack = (await getAcknowledgment(draftId)).acknowledgment;
-				versions = (await versionHistory(draftId)).versions;
+						? await finalizedVersion(wantedDraft)
+						: await finalizedVersionAt(wantedDraft, wanted);
+				nextAck = (await getAcknowledgment(wantedDraft)).acknowledgment;
+				nextVersions = (await versionHistory(wantedDraft)).versions;
 			} else {
-				sealed = null;
-				verification = null;
-				ack = null;
-				versions = [];
+				clearVerification = true;
 			}
-			if (
-				fetched.record_type === 'weekly_summary' &&
-				fetched.status !== 'finalized'
-			) {
-				linkable = (await linkableDailies(draftId)).dailies;
-			} else {
-				linkable = [];
+			let nextLinkable: SummaryLink[] = [];
+			if (fetched.record_type === 'weekly_summary' && fetched.status !== 'finalized') {
+				nextLinkable = (await linkableDailies(wantedDraft)).dailies;
+			}
+			if (editor !== origin || draftId !== wantedDraft || requestedVersion !== wanted) {
+				// The route moved on while this draft was loading: its
+				// answer belongs to a page that is gone, and publishing it
+				// would put one draft's content on another's route.
+				return null;
 			}
 			view = fetched;
-			const nextValues: Record<number, number | null> = {};
-			const nextObserved: Record<number, boolean> = {};
-			const nextModifiers: Record<number, Record<number, boolean>> = {};
-			for (const competency of fetched.form.competencies) {
-				nextValues[competency.form_competency_id] = null;
-				nextObserved[competency.form_competency_id] = false;
-				nextModifiers[competency.form_competency_id] = {};
+			sealed = nextSealed;
+			ack = nextAck;
+			versions = nextVersions;
+			linkable = nextLinkable;
+			if (clearVerification) {
+				verification = null;
 			}
-			for (const rating of fetched.content.ratings) {
-				nextValues[rating.form_competency_id] = rating.value;
-				nextObserved[rating.form_competency_id] = rating.not_observed;
-				const picked: Record<number, boolean> = {};
-				for (const id of rating.modifier_ids) {
-					picked[id] = true;
-				}
-				nextModifiers[rating.form_competency_id] = picked;
-			}
-			const nextNarratives: Record<number, string> = {};
-			for (const narrative of fetched.form.narratives) {
-				nextNarratives[narrative.form_narrative_id] = '';
-			}
-			for (const entry of fetched.content.narratives) {
-				nextNarratives[entry.form_narrative_id] = entry.text;
-			}
-			values = nextValues;
-			notObserved = nextObserved;
-			modifiers = nextModifiers;
-			narratives = nextNarratives;
-			revision = fetched.revision;
 		} catch (err) {
+			if (editor !== origin || draftId !== wantedDraft || requestedVersion !== wanted) {
+				return null;
+			}
 			view = null;
 			sealed = null;
 			error = err instanceof ApiError ? err.message : 'the server could not be reached';
+			return null;
 		}
+		return editor.adopt(view);
 	}
+
+	// The refused buffer belongs to one draft identity: a new draft gets a
+	// new controller (and the old one clears its text), so a client-side
+	// navigation that reuses this route never carries text across drafts.
+	$effect(() => {
+		void draftId;
+		// This effect follows the route identity, not the reactive editor it
+		// replaces in cleanup. Reading editor as a dependency here makes a
+		// direct draft-to-draft navigation recurse through cleanup forever.
+		const origin = untrack(() => editor);
+		// Every settled save reports here, whichever path started it.
+		origin.onSettled = received;
+		// Navigation or logout ends this controller. SvelteKit can reuse the
+		// route component for another draft, so its identity effect must
+		// explicitly end the old controller and its refused text.
+		return () => {
+			origin.destroy();
+			// A different draft must not inherit this one's working copy or
+			// its refused text.
+			view = null;
+			error = '';
+			busy = false;
+			retryingLatest = false;
+			workflowRequest = false;
+			rejectedNavigation = null;
+			editor = new DraftEditorController(
+				() => view,
+				() => !workflowRequest && !routeLeaving && (canAssign || canAuthor)
+			);
+			editor.onSettled = received;
+		};
+	});
 
 	$effect(() => {
 		void [draftId, requestedVersion];
@@ -186,143 +329,152 @@
 		return status === 'draft' || status === 'changes_requested' || status === 'returned';
 	}
 
-	let editable = $derived.by(() => {
+	let editable = $derived(
+		view !== null && !workflowRequest && !routeLeaving && openForEditing(view) &&
+		(canAssign || canAuthor)
+	);
+	let frozenContentPending = $derived.by(() => {
 		const current = view;
-		return current !== null && openStatus(current.status) && (canAssign || canAuthor);
+		return current !== null && !openForEditing(current) &&
+			(editor.saveState === 'pending' || editor.saveState === 'saving' ||
+				editor.hasPendingRecovery);
 	});
 	let mayRoute = $derived.by(() => {
 		const current = view;
 		return current !== null && (canAssign || myUserId === current.owner_user_id);
 	});
 
-	function buildContent(): DraftContent {
+	/**
+	 * Whether a workflow act must wait, and why. The refusal state lives in
+	 * the controller — set the moment a refusal is recorded, before the
+	 * reload starts — so a draft identity change takes it away with the
+	 * buffers instead of leaving this page blocked with nothing to dismiss.
+	 * It is never cleared by the act it refuses: only the writer's own save
+	 * carrying the text, or their discard, lifts it.
+	 */
+	function heldByRefusal(act: string): boolean {
+		if (editor.saveState === 'failed') {
+			error = `The draft did not save; ${act} waits until it does.`;
+			return true;
+		}
+		if (editor.unresolved) {
+			error = view === null || !openForEditing(view)
+				? `Your local recovery text is still here; compare it with the latest draft, copy anything you need elsewhere, or discard it before ${act}.`
+				: `Your refused text is still here and is not in the draft; copy anything you need into the reloaded fields and save, or discard it, before ${act}.`;
+			return true;
+		}
+		return false;
+	}
+
+	// An edit: the controller debounces and saves it, and the page renders
+	// the settled save state. A refused save reloads the winner and then
+	// keeps the refused text readable (#34).
+	function editNow(): void {
+		editor.scheduleSave();
+	}
+
+	/** Retry the unchanged working copy after an ordinary save failure. */
+	function retryFailedSave(): void {
+		const origin = editor;
 		const current = view;
-		if (current === null) {
-			return { ratings: [], narratives: [] };
-		}
-		const ratings = [];
-		for (const competency of current.form.competencies) {
-			const id = competency.form_competency_id;
-			const marked = notObserved[id] ?? false;
-			const value = marked ? null : (values[id] ?? null);
-			const picked = Object.entries(modifiers[id] ?? {})
-				.filter(([, on]) => on)
-				.map(([modifierId]) => Number(modifierId));
-			if (value !== null || marked || picked.length > 0) {
-				ratings.push({
-					form_competency_id: id,
-					value,
-					not_observed: marked,
-					modifier_ids: picked
-				});
-			}
-		}
-		const texts = [];
-		for (const narrative of current.form.narratives) {
-			const id = narrative.form_narrative_id;
-			const text = narratives[id] ?? '';
-			if (text !== '') {
-				texts.push({ form_narrative_id: id, text });
-			}
-		}
-		return { ratings, narratives: texts };
+		if (
+			current === null || current.id !== draftId || busy ||
+			!origin.hasFailedOrdinarySave || !origin.editable
+		) return;
+		error = '';
+		// The controller's normal chain owns the answer, including another
+		// failure or a stale revision that needs the winner reloaded.
+		void origin.saveNow();
 	}
 
-	// Autosave: debounced, with the save state visible so collaboration
-	// never depends on a submit button.
-	let saveState: 'idle' | 'pending' | 'saving' | 'saved' | 'failed' = $state('idle');
-	let saveTimer: ReturnType<typeof setTimeout> | null = null;
-	let inFlight: Promise<void> | null = null;
-	let staleReloaded = false;
-
-	function scheduleSave() {
-		if (!editable) {
+	// Everything the controller settled, including a real failure.
+	function received(result: SaveResult): void {
+		if (result.status === 'stale' || result.status === 'frozen' ||
+			result.status === 'unconfirmed_frozen') {
+			void recoverFromRefusal(result);
 			return;
 		}
-		saveState = 'pending';
-		if (saveTimer !== null) {
-			clearTimeout(saveTimer);
+		if (result.status === 'failed') {
+			error = `The draft did not save: ${result.message}`;
 		}
-		saveTimer = setTimeout(() => void saveNow(), 600);
 	}
 
-	// Saves are serialized into one chain: a new edit while a request is
-	// in flight marks the chain dirty, and the chain re-sends the latest
-	// state with the revision the previous save returned — overlapping
-	// requests never race each other into a false conflict.
-	let dirtyAgain = false;
-
-	function saveNow(): Promise<void> {
-		saveTimer = null;
-		if (inFlight !== null) {
-			dirtyAgain = true;
-			return inFlight;
-		}
-		saveState = 'saving';
-		const run = (async () => {
-			try {
-				// The metadata refresh stays inside the loop: an edit made
-				// while it is awaited marks the chain dirty and re-runs the
-				// save, so nothing typed during any await is dropped.
-				do {
-					dirtyAgain = false;
-					saveState = 'saving';
-					const saved = await saveDraftContent(draftId, revision, buildContent());
-					revision = saved.revision;
-					saveState = 'saved';
-					await refreshMeta();
-				} while (dirtyAgain);
-			} catch (err) {
-				if (err instanceof ApiError && err.code === 'stale_save') {
-					// Another contributor saved first: their copy wins and
-					// the page says so, rather than overwriting it.
-					staleReloaded = true;
-					await load();
-					saveState = 'idle';
-					error =
-						'Another contributor saved first; the draft reloaded with their latest content.';
-					return;
-				}
-				saveState = 'failed';
-				error = err instanceof ApiError ? err.message : 'the server could not be reached';
-			} finally {
-				inFlight = null;
-			}
-		})();
-		inFlight = run;
-		return run;
-	}
-
-	// Nothing workflow-shaped runs over unsaved edits: a pending or
-	// in-flight save lands first.
-	async function flushSaves() {
-		if (saveTimer !== null) {
-			clearTimeout(saveTimer);
-			await saveNow();
+	/** Reload the server copy and keep only local text it does not contain. */
+	async function recoverFromRefusal(result: SaveResult): Promise<void> {
+		if (result.status !== 'stale' && result.status !== 'frozen' &&
+			result.status !== 'unconfirmed_frozen') return;
+		// The controller this refusal belongs to, captured before the reload
+		// awaits: a route change replaces the controller, and this
+		// continuation must then touch nothing at all — not its buffers, not
+		// this page's error, not the guard of the draft now on screen.
+		const origin = editor;
+		const originDraft = draftId;
+		const originVersion = requestedVersion;
+		const refused = result.refused;
+		const reason = result.status === 'stale' ? 'stale_save' :
+			result.status === 'frozen' ? result.reason : 'unconfirmed_frozen';
+		// The reload hands back the working copy it replaced, so an edit
+		// made while it was in flight is still in the comparison instead of
+		// being overwritten unseen.
+		const replaced = await load();
+		if (editor !== origin || draftId !== originDraft || requestedVersion !== originVersion) {
+			// The page moved to another draft while this reload was in
+			// flight: an obsolete answer, not a failed reload.
 			return;
 		}
-		if (inFlight !== null) {
-			await inFlight;
+		const reloaded = replaced !== null;
+		// With no reloaded copy to compare against, everything local stays
+		// recoverable. Publish it before ending the pending-recovery guard.
+		origin.keepRefused(divergentBuffer(
+			refused, replaced ?? origin.snapshot(), reloaded ? view : null, reason
+		));
+		if (reloaded) {
+			origin.markReloaded();
+		} else {
+			origin.markReloadFailed();
 		}
-	}
-
-	// Refresh attribution and workflow state without clobbering what the
-	// contributor is typing.
-	async function refreshMeta() {
-		const current = view;
-		if (current === null) {
+		if (!reloaded) {
+			// A failed reload leaves the full local snapshot above. Transport
+			// did not prove whether the attempted save reached the server.
+			error = result.status === 'stale'
+				? 'The draft reloaded unsuccessfully after another contributor saved first; your unsaved text is kept below.'
+				: result.status === 'frozen'
+					? 'The server refused the save because the draft became read-only. The latest draft could not load; your local text is kept above.'
+					: 'The save could not be confirmed after the draft became read-only. The latest draft could not load; your local text is kept above.';
 			return;
 		}
+		error = result.status === 'stale'
+			? 'Another contributor saved first; the draft reloaded with their latest content.'
+			: result.status === 'frozen'
+				? 'The server refused the save because the draft became read-only. Compare any local recovery text above with the latest copy.'
+				: 'The save could not be confirmed after the draft became read-only. Compare any local recovery text above with the latest copy.';
+	}
+
+	/** Retry only the winning GET; the refused buffer remains read-only. */
+	async function reloadLatestDraft(): Promise<void> {
+		const origin = editor;
+		const wantedDraft = draftId;
+		const wantedVersion = requestedVersion;
+		if (!origin.reloadFailed || retryingLatest) return;
+		const sameOwner = () => editor === origin && draftId === wantedDraft;
+		const stillHere = () => sameOwner() && requestedVersion === wantedVersion;
+		retryingLatest = true;
 		try {
-			const fetched = await getDraft(draftId);
-			current.status = fetched.status;
-			current.owner_user_id = fetched.owner_user_id;
-			current.owner_display_name = fetched.owner_display_name;
-			current.events = fetched.events;
-			current.snapshots = fetched.snapshots;
-			current.eligible_recipients = fetched.eligible_recipients;
+			const replaced = await load();
+			if (!stillHere()) return;
+			if (replaced === null) {
+				origin.markReloadFailed();
+				error = 'The latest draft could not load. Your local recovery text remains here; try again.';
+			} else {
+				origin.markReloaded();
+				error = '';
+			}
 		} catch {
-			// The next save or reload surfaces the problem.
+			if (!stillHere()) return;
+			origin.markReloadFailed();
+			error = 'The latest draft could not load. Your local recovery text remains here; try again.';
+		} finally {
+			if (sameOwner()) retryingLatest = false;
 		}
 	}
 
@@ -336,7 +488,7 @@
 		try {
 			await transferDraft(draftId, transferTo);
 			transferTo = '';
-			await refreshMeta();
+			await editor.refreshMeta(draftId);
 		} catch (err) {
 			error = err instanceof ApiError ? err.message : 'the server could not be reached';
 		} finally {
@@ -345,30 +497,44 @@
 	}
 
 	async function submit() {
+		const origin = editor;
+		const wantedDraft = draftId;
+		const wantedVersion = requestedVersion;
+		const sameOwner = () => editor === origin && draftId === wantedDraft;
+		const stillHere = () =>
+			sameOwner() && requestedVersion === wantedVersion;
 		busy = true;
 		error = '';
 		try {
-			await flushSaves();
-			if (saveState === 'failed' || staleReloaded) {
-				// A failed save or a reload from another contributor's copy
-				// is not something to submit sight unseen.
-				staleReloaded = false;
+			await origin.flush();
+			if (!stillHere()) return;
+			if (heldByRefusal('submitting')) {
+				// A failed save, or text of the writer's own that the
+				// reloaded copy does not carry, is not something to submit
+				// sight unseen.
 				return;
 			}
-			await submitDraft(draftId, revision);
+			workflowRequest = true;
+			await submitDraft(wantedDraft, origin.revision);
+			if (!stillHere()) return;
 			await load();
 		} catch (err) {
+			if (!stillHere()) return;
 			if (err instanceof ApiError && err.code === 'stale_save') {
 				// The draft moved on since this page last saw it; show the
 				// winning copy instead of freezing it sight unseen.
 				await load();
+				if (!stillHere()) return;
 				error =
 					'Another contributor saved first; review the reloaded draft before submitting.';
 				return;
 			}
 			error = err instanceof ApiError ? err.message : 'the server could not be reached';
 		} finally {
-			busy = false;
+			if (sameOwner()) {
+				workflowRequest = false;
+				busy = false;
+			}
 		}
 	}
 
@@ -377,6 +543,7 @@
 	let reviewChoice: ReviewDecisionKind = $state('approved');
 	let reviewComment = $state('');
 	async function decide() {
+		if (frozenContentPending || heldByRefusal('reviewing')) return;
 		busy = true;
 		error = '';
 		try {
@@ -412,26 +579,39 @@
 	// sealed over a failed save, a stale reload, or a revision this
 	// page has not seen.
 	async function finalizeNow() {
+		const origin = editor;
+		const wantedDraft = draftId;
+		const wantedVersion = requestedVersion;
+		const sameOwner = () => editor === origin && draftId === wantedDraft;
+		const stillHere = () =>
+			sameOwner() && requestedVersion === wantedVersion;
 		busy = true;
 		error = '';
 		try {
-			await flushSaves();
-			if (saveState === 'failed' || staleReloaded) {
-				staleReloaded = false;
+			await origin.flush();
+			if (!stillHere()) return;
+			if (heldByRefusal('finalizing')) {
 				return;
 			}
-			await finalizeDraft(draftId, revision);
+			workflowRequest = true;
+			await finalizeDraft(wantedDraft, origin.revision);
+			if (!stillHere()) return;
 			await load();
 		} catch (err) {
+			if (!stillHere()) return;
 			if (err instanceof ApiError && err.code === 'stale_save') {
 				await load();
+				if (!stillHere()) return;
 				error =
 					'The record changed since this page last saw it; review the reloaded content before finalizing.';
 				return;
 			}
 			error = err instanceof ApiError ? err.message : 'the server could not be reached';
 		} finally {
-			busy = false;
+			if (sameOwner()) {
+				workflowRequest = false;
+				busy = false;
+			}
 		}
 	}
 
@@ -526,58 +706,94 @@
 	// Link edits ride the same optimistic token as content saves; the
 	// returned revision keeps in-flight autosaves honest.
 	async function addLink() {
+		const origin = editor;
 		const current = view;
-		if (current === null || linkChoice === '') {
+		const wantedDraft = draftId;
+		const wantedVersion = requestedVersion;
+		const chosen = linkChoice;
+		if (current === null || chosen === '') {
 			return;
 		}
+		const picked = linkable.find((row) => row.daily_version_id === chosen);
+		const sameOwner = () => editor === origin && draftId === wantedDraft;
+		const stillHere = () => sameOwner() && requestedVersion === wantedVersion;
 		busy = true;
 		error = '';
 		try {
-			await flushSaves();
-			const saved = await addSummaryLink(draftId, Number(linkChoice), revision);
-			revision = saved.revision;
-			const picked = linkable.find((row) => row.daily_version_id === linkChoice);
-			if (picked) {
+			await origin.flush();
+			if (!stillHere() || heldByRefusal('adding the link')) return;
+			workflowRequest = true;
+			const saved = await addSummaryLink(wantedDraft, Number(chosen), origin.revision);
+			if (!stillHere()) return;
+			origin.revision = saved.revision;
+			if (view === current && picked) {
 				current.summary_links = [...current.summary_links, picked];
-				linkable = linkable.filter((row) => row.daily_version_id !== linkChoice);
+				linkable = linkable.filter((row) => row.daily_version_id !== chosen);
+			} else {
+				await load();
+				if (!stillHere()) return;
 			}
-			linkChoice = '';
+			if (linkChoice === chosen) linkChoice = '';
 		} catch (err) {
+			if (!stillHere()) return;
 			if (err instanceof ApiError && err.code === 'stale_save') {
 				await load();
+				if (!stillHere()) return;
 				error = 'Another contributor saved first; the draft reloaded.';
 				return;
 			}
 			error = err instanceof ApiError ? err.message : 'the server could not be reached';
 		} finally {
-			busy = false;
+			if (sameOwner()) {
+				workflowRequest = false;
+				busy = false;
+			}
 		}
 	}
 
 	async function removeLink(link: SummaryLink) {
+		const origin = editor;
 		const current = view;
+		const wantedDraft = draftId;
+		const wantedVersion = requestedVersion;
+		const dailyVersionId = link.daily_version_id;
 		if (current === null) {
 			return;
 		}
+		const sameOwner = () => editor === origin && draftId === wantedDraft;
+		const stillHere = () => sameOwner() && requestedVersion === wantedVersion;
 		busy = true;
 		error = '';
 		try {
-			await flushSaves();
-			const saved = await removeSummaryLink(draftId, link.daily_version_id, revision);
-			revision = saved.revision;
-			current.summary_links = current.summary_links.filter(
-				(row) => row.daily_version_id !== link.daily_version_id
-			);
-			linkable = [...linkable, link];
+			await origin.flush();
+			if (!stillHere() || heldByRefusal('removing the link')) return;
+			workflowRequest = true;
+			const saved = await removeSummaryLink(wantedDraft, dailyVersionId, origin.revision);
+			if (!stillHere()) return;
+			origin.revision = saved.revision;
+			if (view === current) {
+				current.summary_links = current.summary_links.filter(
+					(row) => row.daily_version_id !== dailyVersionId
+				);
+				linkable = [...linkable, link];
+			} else {
+				await load();
+				if (!stillHere()) return;
+			}
 		} catch (err) {
+			if (!stillHere()) return;
 			if (err instanceof ApiError && err.code === 'stale_save') {
 				await load();
+				if (!stillHere()) return;
 				error = 'Another contributor saved first; the draft reloaded.';
 				return;
 			}
 			error = err instanceof ApiError ? err.message : 'the server could not be reached';
 		} finally {
-			busy = false;
+			if (sameOwner()) {
+				workflowRequest = false;
+				busy = false;
+			}
 		}
 	}
 
@@ -684,8 +900,38 @@
 	<title>Daily draft — Consolebook</title>
 </svelte:head>
 
+{#if editor.refused.length > 0}
+	<!-- The refused save kept in memory, read-only and copyable. It sits
+	     outside the loaded-copy block on purpose: a reload that failed
+	     empties that block, and this text must survive it (#34). -->
+	<section class="panel">
+		<RefusedTextPanel
+			buffers={editor.refused}
+			onDiscard={(index) => editor.discardRefused(index)}
+		/>
+	</section>
+{/if}
+
+{#if routeLeaving && navigating.complete === rejectedNavigation}
+	<section class="panel">
+		<p class="quiet">Navigation was interrupted. Resume editing to continue working on this draft.</p>
+		<button type="button" class="secondary" onclick={resumeEditing}>Resume editing this draft</button>
+	</section>
+{/if}
+
+{#if editor.reloadFailed}
+	<section class="panel">
+		<p class="quiet">The latest draft has not loaded. Reload it here before editing or using workflow actions.</p>
+		<button type="button" class="secondary" disabled={retryingLatest} onclick={reloadLatestDraft}>
+			Reload latest draft
+		</button>
+	</section>
+{/if}
+
 {#if view === null}
-	{#if error}
+	{#if invalidRouteUrl}
+		<p class="error" role="alert">Invalid draft or version URL.</p>
+	{:else if error}
 		<p class="error" role="alert">{error}</p>
 	{:else}
 		<p class="quiet">Loading…</p>
@@ -744,14 +990,17 @@
 				</span>
 				{#if openStatus(view.status)}
 					<span class="savestate" role="status">
-						{#if saveState === 'pending' || saveState === 'saving'}
+						{#if editor.saveState === 'pending' || editor.saveState === 'saving'}
 							Saving…
-						{:else if saveState === 'saved'}
+						{:else if editor.saveState === 'saved'}
 							Saved
-						{:else if saveState === 'failed'}
+						{:else if editor.saveState === 'failed'}
 							Save failed
 						{/if}
 					</span>
+					{#if editor.hasFailedOrdinarySave && editable && !busy}
+						<button type="button" class="secondary" onclick={retryFailedSave}>Retry save</button>
+					{/if}
 				{/if}
 			</div>
 		</div>
@@ -793,7 +1042,7 @@
 		{/if}
 	</section>
 
-	{#if view.viewer_may_review}
+	{#if view.viewer_may_review && !frozenContentPending && !editor.unresolved}
 		<section class="panel">
 			<h2>Review</h2>
 			<label for="review-comment">
@@ -819,7 +1068,8 @@
 		</section>
 	{/if}
 
-	{#if view.viewer_may_finalize}
+	{#if view.viewer_may_finalize && !frozenContentPending &&
+		(!editor.unresolved || openForEditing(view))}
 		<section class="panel">
 			<h2>Finalize</h2>
 			<p class="quiet">
@@ -1084,7 +1334,7 @@
 			</section>
 		{/if}
 
-		{#if view.viewer_may_amend && !viewingSuperseded}
+		{#if view.viewer_may_amend && !viewingSuperseded && !frozenContentPending && !editor.unresolved}
 			<section class="panel">
 				<h2>Amend</h2>
 				<p class="quiet">
@@ -1140,7 +1390,7 @@
 			{/if}
 			{#if editable && linkable.length > 0}
 				<div class="row route">
-					<select aria-label="Link a daily report" bind:value={linkChoice}>
+					<select aria-label="Link a daily report" bind:value={linkChoice} disabled={busy}>
 						<option value="">Link a finalized daily report…</option>
 						{#each linkable as candidate (candidate.daily_version_id)}
 							<option value={candidate.daily_version_id}>
@@ -1161,7 +1411,18 @@
 		</section>
 	{/if}
 
-	{#if view.status !== 'finalized'}
+	{#if frozenContentPending}
+		<section class="panel" role="status">
+			<h2>Local copy awaiting server comparison</h2>
+			<p>
+				The fields below show this browser's local values while the pending
+				save and latest draft load settle. These fields do not establish the server's current content.
+				You can copy the narrative text now; review actions are paused.
+			</p>
+		</section>
+	{/if}
+
+	{#if view.status !== 'finalized' || frozenContentPending}
 	<section class="panel">
 		<h2>Ratings</h2>
 		{#if view.form.competencies.length === 0}
@@ -1214,9 +1475,9 @@
 									<select
 										aria-label={`Rate ${competency.name}`}
 										disabled={!editable ||
-											notObserved[competency.form_competency_id]}
-										bind:value={values[competency.form_competency_id]}
-										onchange={scheduleSave}
+											editor.notObserved[competency.form_competency_id]}
+										bind:value={editor.values[competency.form_competency_id]}
+										onchange={editNow}
 									>
 										<option value={null}>—</option>
 										{#each competency.anchors as anchor (anchor.value)}
@@ -1230,17 +1491,17 @@
 										min={competency.min_value}
 										max={competency.max_value}
 										disabled={!editable ||
-											notObserved[competency.form_competency_id]}
-										bind:value={values[competency.form_competency_id]}
-										oninput={scheduleSave}
+											editor.notObserved[competency.form_competency_id]}
+										bind:value={editor.values[competency.form_competency_id]}
+										oninput={editNow}
 									/>
 								{:else}
 									<select
 										aria-label={`Rate ${competency.name}`}
 										disabled={!editable ||
-											notObserved[competency.form_competency_id]}
-										bind:value={values[competency.form_competency_id]}
-										onchange={scheduleSave}
+											editor.notObserved[competency.form_competency_id]}
+										bind:value={editor.values[competency.form_competency_id]}
+										onchange={editNow}
 									>
 										<option value={null}>—</option>
 										{#each numericValues(competency) as value (value)}
@@ -1257,13 +1518,13 @@
 											type="checkbox"
 											disabled={!editable}
 											bind:checked={
-												notObserved[competency.form_competency_id]
+												editor.notObserved[competency.form_competency_id]
 											}
 											onchange={() => {
-												if (notObserved[competency.form_competency_id]) {
-													values[competency.form_competency_id] = null;
+												if (editor.notObserved[competency.form_competency_id]) {
+													editor.values[competency.form_competency_id] = null;
 												}
-												scheduleSave();
+												editNow();
 											}}
 										/>
 										Not observed
@@ -1278,11 +1539,11 @@
 												type="checkbox"
 												disabled={!editable}
 												bind:checked={
-													modifiers[competency.form_competency_id][
+													editor.modifiers[competency.form_competency_id][
 														modifier.rating_modifier_id
 													]
 												}
-												onchange={scheduleSave}
+												onchange={editNow}
 											/>
 											{modifier.code}
 										</label>
@@ -1312,9 +1573,10 @@
 					<textarea
 						id={`narrative-${narrative.form_narrative_id}`}
 						rows="4"
-						disabled={!editable}
-						bind:value={narratives[narrative.form_narrative_id]}
-						oninput={scheduleSave}
+						readonly={frozenContentPending}
+						disabled={!editable && !frozenContentPending}
+						bind:value={editor.narratives[narrative.form_narrative_id]}
+						oninput={editNow}
 					></textarea>
 				</div>
 			{/each}
