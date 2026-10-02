@@ -1450,6 +1450,42 @@ async fn export_api_delivers_the_documented_bytes() {
     assert_eq!(status, StatusCode::OK);
     assert!(export_verify::verify_archive(&bytes).verified());
 
+    // The archive states the instant it was produced at, and re-exporting
+    // this scope at that instant reproduces the delivered bytes exactly:
+    // the streamed delivery and the tested producer are one path, byte for
+    // byte. (`export_stream_bytes.rs` walks the same comparison over a
+    // larger corpus and the installation scope.)
+    let (status, _, bytes) = raw_get(
+        fx.app(),
+        &format!("/api/drafts/{}/versions/2/export", s.record_id),
+        &casey,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let exported_at = export_verify::verify_archive(&bytes)
+        .exported_at
+        .expect("the archive's instant");
+    let (produced, again) = record_export::export_to(
+        &fx.pool,
+        s.casey_id,
+        Scope::Version {
+            record_id: s.record_id,
+            version_number: 2,
+        },
+        exported_at,
+        std::io::Cursor::new(Vec::new()),
+        |_| {},
+    )
+    .await
+    .expect("call");
+    let produced = produced.expect("exported");
+    assert_eq!(produced.unit_count, 1);
+    assert_eq!(
+        again.into_inner(),
+        bytes,
+        "the delivered bytes differ from the buffered export at the same instant"
+    );
+
     // The installation scope answers to export_records only.
     let (status, _, body) = raw_get(fx.app(), "/api/exports/records", &casey).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
