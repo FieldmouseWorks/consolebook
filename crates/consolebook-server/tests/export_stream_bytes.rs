@@ -1463,6 +1463,102 @@ async fn a_client_that_outlasts_every_send_window_never_sees_a_complete_transfer
     pool.close().await;
 }
 
+/// Exports are admitted up to a bound and refused beyond it, before any
+/// work is done: with every slot held by a client that reads nothing, the
+/// next request is answered `503 export_busy`; once those clients leave,
+/// their producers end, the slots return, and a fresh request is served.
+/// Without the bound the extra request would simply start one more
+/// blocking producer (#47).
+#[tokio::test(flavor = "multi_thread")]
+async fn exports_beyond_the_slot_bound_are_refused_until_a_slot_returns() {
+    // Larger than the response queue and the socket buffers together, so a
+    // client that reads nothing holds its producer rather than letting it
+    // finish into the kernel's buffers.
+    let (_tmp, pool, admin_id, record_id) = installed().await;
+    seed_versions(&pool, admin_id, record_id, 40, 1024 * 1024).await;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let app =
+        consolebook_server::http::router(consolebook_server::http::AppState { pool: pool.clone() });
+    let serving = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    let login = live_login(&addr, "avery.admin").await;
+    let request = format!(
+        "GET /api/exports/records HTTP/1.1\r\nHost: {addr}\r\nCookie: {}={}\r\nConnection: close\r\n\r\n",
+        consolebook_server::http::SESSION_COOKIE,
+        login
+    );
+
+    // Every slot is taken by a client that reads only the status line.
+    let mut holders = Vec::new();
+    for _ in 0..consolebook_server::exports_http::EXPORT_SLOTS {
+        let mut client = tokio::net::TcpStream::connect(addr).await.expect("connect");
+        tokio::io::AsyncWriteExt::write_all(&mut client, request.as_bytes())
+            .await
+            .expect("write request");
+        let status = status_line(&mut client).await;
+        assert!(status.starts_with("HTTP/1.1 200"), "{status}");
+        holders.push(client);
+    }
+
+    // One more is refused, typed, before anything was done for it.
+    let mut extra = tokio::net::TcpStream::connect(addr).await.expect("connect");
+    tokio::io::AsyncWriteExt::write_all(&mut extra, request.as_bytes())
+        .await
+        .expect("write request");
+    let mut response = Vec::new();
+    tokio::io::AsyncReadExt::read_to_end(&mut extra, &mut response)
+        .await
+        .expect("read response");
+    let (headers, body) = split_response(&response);
+    let body = String::from_utf8_lossy(body);
+    assert!(headers.starts_with("http/1.1 503"), "{headers} {body}");
+    assert!(body.contains("export_busy"), "{body}");
+
+    // The holders leave; their producers notice and give the slots back.
+    drop(holders);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let mut client = tokio::net::TcpStream::connect(addr).await.expect("connect");
+        tokio::io::AsyncWriteExt::write_all(&mut client, request.as_bytes())
+            .await
+            .expect("write request");
+        let status = status_line(&mut client).await;
+        if status.starts_with("HTTP/1.1 200") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "no slot returned after the clients left: {status}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    serving.abort();
+    pool.close().await;
+}
+
+/// The response's status line, read byte by byte so nothing past it is
+/// consumed.
+async fn status_line(client: &mut tokio::net::TcpStream) -> String {
+    let mut line = Vec::new();
+    let mut byte = [0u8; 1];
+    loop {
+        let read = tokio::io::AsyncReadExt::read(client, &mut byte)
+            .await
+            .expect("read status");
+        assert!(read == 1, "the connection closed before a status line");
+        line.push(byte[0]);
+        if line.ends_with(b"\r\n") {
+            break;
+        }
+    }
+    String::from_utf8_lossy(&line).trim_end().to_owned()
+}
+
 /// The instant the delivered archive states for itself, from its manifest.
 fn archive_instant(bytes: &[u8]) -> i64 {
     let mut archive =

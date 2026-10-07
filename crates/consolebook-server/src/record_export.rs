@@ -217,8 +217,8 @@ pub async fn export(
 /// complete export.
 ///
 /// `cancelled` reports whether the requester has already gone. It is
-/// asked before the audit, before the metadata pass, for every metadata
-/// row, and before `ready`: an abandoned request stops there with a
+/// asked before anything is read, before the audit, before the metadata
+/// pass, for every metadata row, and before `ready`: an abandoned request stops there with a
 /// [`std::io::ErrorKind::BrokenPipe`] error rather than auditing and
 /// reading a scope nobody will receive. After `ready`, the sink reports a
 /// departed client itself.
@@ -236,6 +236,9 @@ pub async fn export_to<W: Write + Seek, F: FnOnce(ArchiveProduced)>(
     cancelled: &(dyn Fn() -> bool + Send + Sync),
     ready: F,
 ) -> Result<(std::result::Result<ArchiveProduced, ExportRefusal>, W)> {
+    if cancelled() {
+        return Err(client_left());
+    }
     let audited = match authorize(pool, actor_user_id, scope).await? {
         Ok(audited) => audited,
         // The sink comes back with the refusal so the caller can flush and

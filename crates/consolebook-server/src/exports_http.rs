@@ -20,7 +20,7 @@ use axum::response::{IntoResponse, Json, Response};
 use axum::routing::get;
 use http_body::Frame;
 use time::OffsetDateTime;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{Semaphore, mpsc, oneshot};
 
 use crate::export_stream::EntryBuffer;
 use crate::http::{ApiError, AppState, CurrentUser};
@@ -57,6 +57,20 @@ pub const EXPORT_STALL_LIMIT: Duration = Duration::from_secs(10);
 /// payload pass, which has no deadline of its own beyond the per-chunk
 /// stall guard.
 const PREFLIGHT_LIMIT: Duration = Duration::from_secs(30);
+/// How many exports one process produces at a time. Each producer is a
+/// blocking thread for the length of its download, and a client that reads
+/// one chunk per stall window keeps it for as long as it likes, so without
+/// a bound an authorized caller's parallel requests grow the blocking pool
+/// to its own limit and queue closures behind it. Beyond this many, a
+/// request is refused with a typed `export_busy` answer before anything is
+/// authorized, audited, or spawned; the refusal is the client's cue to
+/// retry, not a failure of the export.
+///
+/// Public so the transport test can fill every slot.
+pub const EXPORT_SLOTS: usize = 4;
+/// The slots themselves, one per process: an export holds one from before
+/// its producer is spawned until the producer returns.
+static SLOTS: Semaphore = Semaphore::const_new(EXPORT_SLOTS);
 
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
@@ -105,6 +119,16 @@ fn export_refusal(refusal: ExportRefusal) -> ApiError {
     }
 }
 
+/// The answer when every export slot is taken: nothing was authorized,
+/// audited, or started, and the client may simply try again.
+fn export_busy() -> ApiError {
+    ApiError::new(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "export_busy",
+        format!("{EXPORT_SLOTS} exports are already in flight; retry shortly"),
+    )
+}
+
 /// The archive as a download, streamed: the documented bytes are written
 /// to the response as they are produced, so the whole corpus of stored
 /// payloads is never held (#47; ADR 0014 costs). What still scales with
@@ -122,6 +146,12 @@ fn export_refusal(refusal: ExportRefusal) -> ApiError {
 /// bytes the container writer produced, and a truncated stream cannot be
 /// mistaken for them.
 async fn deliver(state: &AppState, actor_user_id: i64, scope: Scope) -> Result<Response, ApiError> {
+    // Admission comes first: a slot is taken before any work is done, held
+    // by the producer for the whole download, and released when it ends,
+    // so at most `EXPORT_SLOTS` producers exist and none ever queues.
+    let Ok(slot) = SLOTS.try_acquire() else {
+        return Err(export_busy());
+    };
     let exported_at = OffsetDateTime::now_utc().unix_timestamp();
     let (started_tx, started_rx) = oneshot::channel();
     let (body_tx, body_rx) = mpsc::channel::<StreamItem>(BODY_CHUNKS);
@@ -138,6 +168,8 @@ async fn deliver(state: &AppState, actor_user_id: i64, scope: Scope) -> Result<R
     // out, or when the client disconnects before the response starts — and
     // stops before the audit and the metadata pass rather than after them.
     let _work = tokio::task::spawn_blocking(move || {
+        // The slot lives exactly as long as the producer.
+        let _slot = slot;
         // The probe's sender lives in this closure, so it never keeps the
         // response body open after the producer ends.
         let abandoned = body_tx.clone();
