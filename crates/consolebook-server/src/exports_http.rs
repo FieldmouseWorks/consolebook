@@ -31,8 +31,14 @@ use crate::trainee_packet::{self, PacketRefusal};
 /// response body. The bound is the backpressure: a client that stops
 /// reading blocks the producer at this many chunks rather than letting it
 /// run ahead, and a client that disconnects closes the channel, which
-/// stops the producer and releases its connection and read transaction.
+/// stops the producer. Each chunk holds at most [`BODY_CHUNK_BYTES`], so
+/// the queue holds at most 8 × 64 KiB = 512 KiB however large a record is.
 const BODY_CHUNKS: usize = 8;
+/// The most bytes one queued chunk may hold. The container writer hands
+/// the destination a whole entry at a time, and a record can be arbitrarily
+/// large, so an entry is split into pieces of this size: the queue's bound
+/// is then a bound on bytes, not only on items.
+const BODY_CHUNK_BYTES: usize = 64 * 1024;
 /// How long one chunk may wait for room in the response queue, and how long
 /// the failure detail may wait for room of its own. The queue is full for
 /// this long only when the client has stopped reading altogether, so
@@ -125,9 +131,17 @@ async fn deliver(state: &AppState, actor_user_id: i64, scope: Scope) -> Result<R
     let pool = state.pool.clone();
     // The archive is produced on a blocking thread: it streams SQLite rows
     // and writes ZIP bytes, and a slow client must not stall the runtime.
-    // The handle is dropped: the response body drives the producer, and a
-    // `spawn_blocking` task cannot be cancelled once it runs.
+    // The handle is dropped: the response body drives the producer. A
+    // `spawn_blocking` task cannot be cancelled from outside once it runs,
+    // so the producer asks for itself whether the response's receiver is
+    // gone — dropped with this handler when the preflight fails or times
+    // out, or when the client disconnects before the response starts — and
+    // stops before the audit and the metadata pass rather than after them.
     let _work = tokio::task::spawn_blocking(move || {
+        // The probe's sender lives in this closure, so it never keeps the
+        // response body open after the producer ends.
+        let abandoned = body_tx.clone();
+        let cancelled = move || abandoned.is_closed();
         // The container writer patches each entry's local header after its
         // payload, so it writes through the sink that holds the entry and
         // hands the destination an append-only stream (#47).
@@ -144,8 +158,9 @@ async fn deliver(state: &AppState, actor_user_id: i64, scope: Scope) -> Result<R
             scope,
             exported_at,
             sink,
+            &cancelled,
             |produced| {
-                // The scope is authorized, read, and audited: the response
+                // The scope is authorized, audited, and read: the response
                 // may start, and only a failure before this point can still
                 // reach the client as a typed answer.
                 if let Some(started) = started.take() {
@@ -217,9 +232,11 @@ async fn deliver(state: &AppState, actor_user_id: i64, scope: Scope) -> Result<R
         Ok(Ok(Ok(produced))) => produced,
         Ok(Ok(Err(refusal))) => return Err(export_refusal(refusal)),
         Ok(Err(_)) | Err(_) => {
-            // A `spawn_blocking` task cannot be cancelled once it runs; the
-            // producer stops on its own at its first send, because the
-            // response body's receiver is dropped with this return.
+            // The response body's receiver is dropped with this return, which
+            // the producer's probe sees: it stops at its next check — before
+            // the audit or the metadata pass if it has not reached them, at
+            // the next metadata row if it is reading — and a producer already
+            // past `ready` stops at its first send.
             return Err(ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "export_failed",
@@ -409,11 +426,23 @@ struct ChunkSink {
     /// How many bytes have been handed to the response: the position the
     /// destination has reached.
     sent: u64,
+    /// How long one chunk may wait for room before the transfer is ended.
+    stall_limit: Duration,
 }
 
 impl ChunkSink {
     fn new(sender: mpsc::Sender<StreamItem>) -> Self {
-        Self { sender, sent: 0 }
+        Self::with_stall_limit(sender, EXPORT_STALL_LIMIT)
+    }
+
+    /// A sink with its own stall bound, so the unit tests can exercise a
+    /// stalled client without waiting out the production one per chunk.
+    fn with_stall_limit(sender: mpsc::Sender<StreamItem>, stall_limit: Duration) -> Self {
+        Self {
+            sender,
+            sent: 0,
+            stall_limit,
+        }
     }
 
     /// Hands one chunk to the response body, waiting while the queue is
@@ -423,7 +452,7 @@ impl ChunkSink {
     /// reads as an incomplete download, and a client that keeps making
     /// progress — however slowly — never notices the bound.
     fn send_bytes(&mut self, bytes: Vec<u8>) -> std::io::Result<()> {
-        let deadline = std::time::Instant::now() + EXPORT_STALL_LIMIT;
+        let deadline = std::time::Instant::now() + self.stall_limit;
         self.send_within(bytes, deadline)
     }
 
@@ -452,9 +481,16 @@ impl ChunkSink {
 }
 
 impl std::io::Write for ChunkSink {
+    /// Queues at most [`BODY_CHUNK_BYTES`] of `buf` and reports how much it
+    /// took; `write_all` comes back for the rest, so a large entry becomes
+    /// many bounded chunks rather than one item the size of the record.
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.send_bytes(buf.to_vec())?;
-        Ok(buf.len())
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        let take = buf.len().min(BODY_CHUNK_BYTES);
+        self.send_bytes(buf[..take].to_vec())?;
+        Ok(take)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
@@ -700,6 +736,40 @@ mod tests {
             started.elapsed()
         );
         assert!(receiver.try_recv().is_ok());
+    }
+
+    /// The response queue is bounded in bytes, not only in items: a record
+    /// of any size reaches it in pieces of at most `BODY_CHUNK_BYTES`, so a
+    /// client that stops reading holds at most `BODY_CHUNKS` of them. A
+    /// whole entry queued as one item would let a single large record sit
+    /// in memory for a client that is not reading (#47).
+    #[tokio::test]
+    async fn a_large_entry_is_queued_in_bounded_pieces() {
+        let (sender, mut receiver) = mpsc::channel::<StreamItem>(BODY_CHUNKS);
+        let mut sink = ChunkSink::with_stall_limit(sender, Duration::from_millis(50));
+        let err = sink
+            .write_all(&vec![7u8; 1024 * 1024])
+            .expect_err("nobody reads, so the queue fills before the entry is out");
+        assert_ne!(err.kind(), std::io::ErrorKind::BrokenPipe, "{err:?}");
+        let mut queued = 0;
+        while let Ok(item) = receiver.try_recv() {
+            match item {
+                StreamItem::Chunk(bytes) => {
+                    assert!(
+                        bytes.len() <= BODY_CHUNK_BYTES,
+                        "one queued item holds {} bytes",
+                        bytes.len()
+                    );
+                    queued += bytes.len();
+                }
+                StreamItem::Failed(detail) => panic!("unexpected failure item: {detail}"),
+            }
+        }
+        assert_eq!(
+            queued,
+            BODY_CHUNKS * BODY_CHUNK_BYTES,
+            "the queue held {queued} bytes for a client that read nothing"
+        );
     }
 
     /// A client that left is reported as exactly that, so the producer can

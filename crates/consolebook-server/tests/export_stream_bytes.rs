@@ -308,6 +308,7 @@ fn export_memory_probe_child() {
             Scope::Installation,
             EXPORTED_AT,
             &mut sink,
+            &|| false,
             |_| {},
         )
         .await
@@ -617,8 +618,8 @@ impl Seek for Gate {
 
 /// An export that is mid-stream reserves no writer: the installation's
 /// other writers keep working while a download is in flight, because the
-/// export holds a read snapshot and its audit is its own committed
-/// statement rather than part of that transaction (ADR 0019; #47).
+/// export's audit is its own committed statement and no read transaction is
+/// open while the client is waited on (ADR 0019; #47).
 #[tokio::test(flavor = "multi_thread")]
 async fn a_streaming_export_holds_no_write_reservation() {
     let (_tmp, pool, admin_id, record_id) = installed().await;
@@ -641,6 +642,7 @@ async fn a_streaming_export_holds_no_write_reservation() {
                 Scope::Installation,
                 EXPORTED_AT,
                 sink,
+                &|| false,
                 |_| {},
             )
             .await
@@ -697,9 +699,10 @@ async fn reopened(database: &std::path::Path, connections: u32) -> SqlitePool {
 }
 
 /// An export never needs two connections at once, so a pool of one serves
-/// it: the audit's own short write transaction ends before the read
-/// snapshot begins. An export that held a read transaction while waiting
-/// for a second connection would time out here.
+/// it: the audit's own short write transaction ends before the metadata
+/// read begins, and that read commits before any payload is read. An export
+/// that held a read transaction while waiting for a second connection would
+/// time out here.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_one_connection_pool_serves_a_whole_export() {
     let (_tmp, pool, admin_id, record_id) = installed().await;
@@ -718,6 +721,7 @@ async fn a_one_connection_pool_serves_a_whole_export() {
         Scope::Installation,
         EXPORTED_AT,
         &mut sink,
+        &|| false,
         |_| {},
     )
     .await
@@ -729,10 +733,10 @@ async fn a_one_connection_pool_serves_a_whole_export() {
 }
 
 /// Two exports overlapping on a two-connection pool both reach their
-/// stream and finish: each holds one connection at a time, so neither waits
-/// for a connection the other holds. An export that held its read
-/// transaction while acquiring the audit's connection would leave both
-/// waiting until their acquisition timeouts.
+/// stream and finish: each holds at most one connection at a time, so
+/// neither waits for a connection the other holds. An export that held its read transaction while acquiring
+/// the audit's connection would leave both waiting until their acquisition
+/// timeouts.
 #[tokio::test(flavor = "multi_thread")]
 async fn overlapping_exports_on_a_two_connection_pool_both_complete() {
     let (_tmp, pool, admin_id, record_id) = installed().await;
@@ -755,6 +759,7 @@ async fn overlapping_exports_on_a_two_connection_pool_both_complete() {
                         Scope::Installation,
                         EXPORTED_AT,
                         gate,
+                        &|| false,
                         |_| {},
                     )
                     .await
@@ -781,17 +786,21 @@ async fn overlapping_exports_on_a_two_connection_pool_both_complete() {
     small.close().await;
 }
 
-/// A destination that holds its first entry until the test releases it.
+/// A destination that holds one write — the `hold_at`th it is given,
+/// counted from one — until the test releases it.
 struct ExportGate {
     position: u64,
     released: std::sync::mpsc::Receiver<()>,
     entered: std::sync::mpsc::Sender<()>,
     held: bool,
+    hold_at: usize,
+    writes: usize,
 }
 
 impl Write for ExportGate {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        if !self.held {
+        self.writes += 1;
+        if !self.held && self.writes == self.hold_at {
             self.held = true;
             let _ = self.entered.send(());
             let _ = self
@@ -832,6 +841,13 @@ struct GateHandle {
 }
 
 fn gate_of() -> GateHandle {
+    gate_at(1)
+}
+
+/// A held export whose destination stops on its `hold_at`th write rather
+/// than its first, so the export can be observed part way through its
+/// payloads instead of at the archive manifest.
+fn gate_at(hold_at: usize) -> GateHandle {
     let (entered_tx, arrived_rx) = std::sync::mpsc::channel();
     let (release, released) = std::sync::mpsc::channel();
     GateHandle {
@@ -840,15 +856,18 @@ fn gate_of() -> GateHandle {
             released,
             entered: entered_tx,
             held: false,
+            hold_at,
+            writes: 0,
         },
         arrived_rx,
         release,
     }
 }
 
-/// An export mid-stream holds one connection, and the installation's other
-/// work keeps running on the rest: the audit is already committed, so the
-/// download reserves no writer and no second connection.
+/// An export mid-stream holds at most one connection, idle while it waits
+/// on its client, and the installation's other work keeps running on the
+/// rest: the audit is already committed and the metadata read has ended,
+/// so the download reserves no writer and no second connection.
 #[tokio::test(flavor = "multi_thread")]
 async fn ordinary_work_progresses_while_an_export_streams() {
     let (_tmp, pool, admin_id, record_id) = installed().await;
@@ -867,13 +886,15 @@ async fn ordinary_work_progresses_while_an_export_streams() {
                 Scope::Installation,
                 EXPORTED_AT,
                 held.gate,
+                &|| false,
                 |_| {},
             )
             .await
         })
     });
-    // The export is on the wire, holding its one connection for the read
-    // snapshot; everything below runs on the other.
+    // The export is on the wire and waiting on its client with at most one
+    // connection, none of it in a transaction; everything below runs on the
+    // other.
     held.arrived_rx
         .recv_timeout(std::time::Duration::from_secs(30))
         .expect("the export reached its stream");
@@ -902,6 +923,172 @@ async fn ordinary_work_progresses_while_an_export_streams() {
     let (produced, _sink) = running.await.expect("join").expect("call");
     assert_eq!(produced.expect("exported").unit_count, 20);
     small.close().await;
+}
+
+/// A download in flight pins no WAL reader: while the client holds the
+/// export part way through its payloads — several versions already read on
+/// the connection the pass holds — a write commits and a `TRUNCATE`
+/// checkpoint folds the whole log back into the database. A read
+/// transaction held across the payloads, for the length of the download,
+/// would keep the log's end mark pinned, so the checkpoint would wait out
+/// the busy timeout and report itself blocked — and on a slow download the
+/// log would grow without bound (#47).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_download_in_flight_pins_no_wal_reader() {
+    let (_tmp, pool, admin_id, record_id) = installed().await;
+    seed_versions(&pool, admin_id, record_id, 20, PAYLOAD).await;
+
+    // The writer hands the destination the manifest, then a record and its
+    // unit manifest per version: the seventh write lands inside the fourth
+    // version, after three complete point reads.
+    let held = gate_at(7);
+    let export_pool = pool.clone();
+    let running = tokio::task::spawn_blocking(move || {
+        tokio::runtime::Handle::current().block_on(async move {
+            record_export::export_to(
+                &export_pool,
+                admin_id,
+                Scope::Installation,
+                EXPORTED_AT,
+                held.gate,
+                &|| false,
+                |_| {},
+            )
+            .await
+        })
+    });
+    held.arrived_rx
+        .recv_timeout(std::time::Duration::from_secs(30))
+        .expect("the export reached its stream");
+
+    // A write lands in the log while the client holds the download, so the
+    // checkpoint below has frames to fold back.
+    consolebook_server::audit::record(
+        &pool,
+        consolebook_server::audit::EventKind::RecordExported,
+        Some(admin_id),
+        None,
+    )
+    .await
+    .expect("a write while an export streams");
+    let (busy, log, checkpointed) =
+        sqlx::query_as::<_, (i64, i64, i64)>("PRAGMA wal_checkpoint(TRUNCATE)")
+            .fetch_one(&pool)
+            .await
+            .expect("checkpoint while an export streams");
+    assert!(
+        busy == 0 && log == checkpointed,
+        "a download in flight blocked the checkpoint: busy = {busy}, log = {log}, \
+         checkpointed = {checkpointed}"
+    );
+
+    held.release.send(()).expect("release the export");
+    let (produced, _sink) = running.await.expect("join").expect("call");
+    assert_eq!(produced.expect("exported").unit_count, 20);
+    pool.close().await;
+}
+
+/// How many exports the installation has recorded.
+async fn exports_recorded(pool: &SqlitePool) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM audit_event WHERE kind = 'record_exported'")
+        .fetch_one(pool)
+        .await
+        .expect("count recorded exports")
+}
+
+/// Whether `err` is a departed client: a broken pipe somewhere in its chain.
+fn is_client_departure(err: &anyhow::Error) -> bool {
+    err.chain()
+        .filter_map(|cause| cause.downcast_ref::<std::io::Error>())
+        .any(|io| io.kind() == std::io::ErrorKind::BrokenPipe)
+}
+
+/// A request abandoned before the export starts — its preflight timed out,
+/// or the client left before the response began — is neither audited nor
+/// read: the producer stops at its first check, reports a departed client,
+/// and hands the destination nothing (#47).
+#[tokio::test(flavor = "multi_thread")]
+async fn an_export_abandoned_before_it_starts_is_neither_audited_nor_read() {
+    let (_tmp, pool, admin_id, record_id) = installed().await;
+    seed_versions(&pool, admin_id, record_id, 20, PAYLOAD).await;
+    let before = exports_recorded(&pool).await;
+
+    let mut sink = Discard {
+        bytes: 0,
+        position: 0,
+    };
+    let mut started = false;
+    let outcome = record_export::export_to(
+        &pool,
+        admin_id,
+        Scope::Installation,
+        EXPORTED_AT,
+        &mut sink,
+        &|| true,
+        |_| started = true,
+    )
+    .await
+    .map(|(produced, _sink)| produced);
+    assert_eq!(
+        exports_recorded(&pool).await,
+        before,
+        "an export nobody would receive was recorded"
+    );
+    assert_eq!(
+        sink.bytes, 0,
+        "an abandoned export wrote to its destination"
+    );
+    assert!(!started, "an abandoned export started its delivery");
+    let Err(err) = outcome else {
+        panic!("an abandoned export completed: {outcome:?}");
+    };
+    assert!(is_client_departure(&err), "{err:?}");
+    pool.close().await;
+}
+
+/// A request abandoned while its audit is being written stops before the
+/// metadata pass: the record stands for the attempt, exactly once, and the
+/// scope is not read for a client that has gone (#47).
+#[tokio::test(flavor = "multi_thread")]
+async fn an_export_abandoned_after_its_audit_stops_before_the_metadata_pass() {
+    let (_tmp, pool, admin_id, record_id) = installed().await;
+    seed_versions(&pool, admin_id, record_id, 20, PAYLOAD).await;
+    let before = exports_recorded(&pool).await;
+
+    // The client is present for the first check and gone for every later one.
+    let checks = std::sync::atomic::AtomicUsize::new(0);
+    let probe = || checks.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0;
+    let mut sink = Discard {
+        bytes: 0,
+        position: 0,
+    };
+    let mut started = false;
+    let outcome = record_export::export_to(
+        &pool,
+        admin_id,
+        Scope::Installation,
+        EXPORTED_AT,
+        &mut sink,
+        &probe,
+        |_| started = true,
+    )
+    .await
+    .map(|(produced, _sink)| produced);
+    assert_eq!(
+        exports_recorded(&pool).await,
+        before + 1,
+        "the attempt is recorded exactly once"
+    );
+    assert_eq!(
+        sink.bytes, 0,
+        "an abandoned export wrote to its destination"
+    );
+    assert!(!started, "an abandoned export started its delivery");
+    let Err(err) = outcome else {
+        panic!("an abandoned export completed: {outcome:?}");
+    };
+    assert!(is_client_departure(&err), "{err:?}");
+    pool.close().await;
 }
 
 /// A destination that refuses to accept past `cap`, the way a client that
@@ -968,6 +1155,7 @@ async fn a_destination_that_stops_accepting_ends_the_export_instead_of_buffering
         Scope::Installation,
         EXPORTED_AT,
         &mut sink,
+        &|| false,
         |_| {},
     )
     .await;

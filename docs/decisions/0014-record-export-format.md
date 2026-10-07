@@ -131,20 +131,46 @@ may export, and what verification claims (#45; Milestone 5 slice 1).
   never held, one unit's bytes are held at a time, and the browser's own
   download helper buffers the response it saves, separately;
 - the delivery and its failure share one bounded channel between the
-  producer and the response. A client that stops reading stops the
-  producer instead of growing a queue, and a client that stops reading
-  for longer than the stall bound loses the transfer. Whether a transfer
+  producer and the response. The channel holds at most 8 items of at
+  most 64 KiB each, so what waits for a stalled client is bounded in
+  bytes (512 KiB), not only in items; a large record is handed on in
+  64 KiB pieces, and not one archive byte changes. A client that stops
+  reading stops the producer instead of growing a queue, and a client
+  that stops reading for longer than the stall bound loses the transfer.
+  A request abandoned before its response starts — the client
+  disconnects, or the preflight limit expires — is noticed by the
+  producer before the audit event is written and before the metadata
+  pass, and again during and after that pass, so nothing is recorded and
+  nothing is read for a response nobody will receive. A client that
+  leaves after the response started ends the export when the send
+  fails, and that is not logged as a production error. Whether a transfer
   was complete is an explicit fact the producer records only when the
   archive was produced and its tail flushed — not the channel closing,
   which a client that outlasted the failure signal would otherwise read
   as success. Anything else ends the body in an error: an incomplete
   download the verifier refuses, never a complete export;
-- the export holds one pooled connection at a time. Its audit event is
-  written in its own short write transaction, committed before the read
-  snapshot the manifest and payloads share, and that snapshot is a reader
-  only (ADR 0019). Exports sharing a connection pool therefore never hold
-  one connection while waiting for another, and an export never reserves
-  the writer for the length of a download;
+- the export holds no read transaction while it waits on the client, and
+  at most one pooled connection at any moment, idle between statements.
+  Its audit event is written in its own short write transaction, and the
+  metadata pass — the unit list the archive manifest carries — is one
+  short read transaction; both are committed before the response starts,
+  and neither reserves the writer (ADR 0019). The payload pass holds one
+  pooled connection for its whole length but opens no transaction on it:
+  each unit's stored bytes are read by one autocommit statement on that
+  connection, completed before the bytes are handed to the client, and the
+  re-read `record_schema`, `content_hash`, and `chain_hash` are checked
+  against the manifest's entry; a mismatch or a missing row ends the
+  transfer incomplete. What ties payload to manifest is therefore the
+  immutability of finalized versions, enforced by the database triggers
+  `evaluation_version_no_update` and `evaluation_version_no_delete`
+  (migration 0010) and checked unit by unit, not transaction isolation,
+  and the scope's membership is fixed when the manifest is read. This
+  replaces the earlier reviewed design, which held one read snapshot
+  across the manifest and the payloads; it was replaced because a download
+  paced by the client held that reader open for its whole length. A slow
+  or paused download now pins nothing in the WAL and never blocks a
+  checkpoint, and exports sharing a connection pool never hold one
+  connection while waiting for another;
 - the audit event records the export the installation produced from the
   state at its recorded instant, not the operator's receipt: a delivery
   that fails part way leaves the record, and a scope that holds nothing to

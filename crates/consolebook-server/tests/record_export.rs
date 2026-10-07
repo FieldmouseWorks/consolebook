@@ -1474,6 +1474,7 @@ async fn export_api_delivers_the_documented_bytes() {
         },
         exported_at,
         std::io::Cursor::new(Vec::new()),
+        &|| false,
         |_| {},
     )
     .await

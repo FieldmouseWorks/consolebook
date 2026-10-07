@@ -254,7 +254,14 @@ than in the terminal chunk that would have made it look complete. A
 complete transfer is an explicit fact the producer records only when the
 whole archive was produced and its tail flushed; every other ending — a
 production failure, a producer that panicked, a client that stopped
-reading long enough to lose the failure signal — fails the body. The audit event
+reading long enough to lose the failure signal — fails the body. The
+installation holds no database transaction across the transfer: the
+archive's scope is fixed when its manifest is read, and each unit's
+bytes are read and checked against the manifest's stored hashes as they
+are written, so a unit that no longer matches ends the transfer
+incomplete. "The state at its recorded instant" therefore means the
+scope and the fingerprints the manifest states, with each unit's
+immutable bytes verified against them. The audit event
 records the export the installation produced from the state at its
 recorded instant; it is not a receipt for a completed download, so a
 failed delivery is a transfer the operator repeats rather than a record
