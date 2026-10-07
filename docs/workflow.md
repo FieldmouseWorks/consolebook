@@ -179,8 +179,9 @@ collide. Parallel checks may then proceed when the PR has been authorized and
 published. If a check fails, preserve its receipt and follow the evidence-driven
 failure loop; a later green run does not erase an earlier failure.
 
-End-to-end verification uses the real binary: the browser suite starts the
-compiled server per test and drives it as an operator would, so an agent can
+End-to-end verification uses the real binary: each browser spec built on the
+shared fixture starts the compiled server for its test and drives it as an
+operator would (one small spec checks that harness itself), so an agent can
 prove a change the way a reviewer would see it rather than guess from the code.
 The "Choose context by task" index in `docs/development.md` is the lightweight
 map of what exists and where it is owned; keep both current, and prefer
