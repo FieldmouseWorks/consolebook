@@ -143,9 +143,12 @@ may export, and what verification claims (#45; Milestone 5 slice 1).
   that stops reading for longer than the stall bound loses the transfer.
   A request abandoned before its response starts — the client
   disconnects, or the preflight limit expires — is noticed by the
-  producer before anything is authorized or audited and before the
-  metadata pass, and again during and after that pass, so nothing is
-  recorded and nothing is read for a response nobody will receive. One
+  producer before anything is authorized or audited, before the metadata
+  pass, and again during and after that pass, so no more work is done for
+  a response nobody will receive. Abandonment noticed before the audit
+  records nothing; abandonment noticed after it leaves the
+  `record_exported` event, which — as below — attests the attempt the
+  installation made at that instant, not a completed delivery. One
   process produces at most four exports at a time: each producer is a
   blocking thread for the length of its download, so admission is bounded
   before any work is done and a request beyond the bound is refused with
