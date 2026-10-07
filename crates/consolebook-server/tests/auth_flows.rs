@@ -29,9 +29,7 @@ impl Fixture {
     }
 
     fn app(&self) -> axum::Router {
-        http::router(http::AppState {
-            pool: self.pool.clone(),
-        })
+        http::router(http::AppState::new(self.pool.clone()))
     }
 
     async fn issue_setup_code(&self) -> String {

@@ -1184,6 +1184,13 @@ export function installationExportPath(): string {
  * Fetches an export archive and hands it to the browser as a download, so
  * a refusal surfaces as an error instead of a saved error document.
  * Returns the server's file name.
+ *
+ * The server streams its archive, but this path still reads the whole
+ * response before handing the browser a Blob. That keeps the operator's
+ * refusal handling intact — a typed refusal arrives as a JSON body before
+ * anything is saved, and a transfer that fails part way rejects rather
+ * than saving a truncated file — at the cost of holding the archive in the
+ * browser while it downloads (#47).
  */
 export async function downloadExport(path: string): Promise<string> {
 	const response = await fetch(path);

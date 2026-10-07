@@ -13,9 +13,10 @@
 //! `export_verify`'s, which reads the manifests defined here.
 
 use std::fmt;
-use std::io::{Cursor, Write};
+use std::io::{Cursor, Seek, Write};
 
 use anyhow::{Context, Result, anyhow};
+use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqliteConnection, SqlitePool};
 use time::OffsetDateTime;
@@ -84,6 +85,10 @@ pub enum ExportRefusal {
     /// The scope exists but holds no finalized version; an empty
     /// archive is never presented as a complete export.
     NothingToExport,
+    /// Producing or delivering the archive failed after the scope was
+    /// known to hold versions. This is not an empty scope, and it is
+    /// never presented as one.
+    ExportFailed,
 }
 
 /// One unit as the archive manifest lists it.
@@ -138,6 +143,16 @@ pub struct Export {
     pub unit_count: usize,
 }
 
+/// What a produced archive states about itself. The bytes are not here:
+/// a streamed export writes them as it produces them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArchiveProduced {
+    /// The documented download name, `consolebook-<scope>-<stamp>.zip`.
+    pub file_name: String,
+    pub exported_at: i64,
+    pub unit_count: usize,
+}
+
 /// The unit directory for one version: `records/{record_id}/v{n}`.
 #[must_use]
 pub fn unit_path(record_id: i64, version_number: i64) -> String {
@@ -161,6 +176,200 @@ pub async fn export(
     .await
 }
 
+/// Exports `scope` stamped with `exported_at` (UTC unix seconds),
+/// writing the container into `sink` as it is produced (#47).
+///
+/// The archive is a pure function of the scope's rows and this instant,
+/// and its bytes are the same whichever sink receives them. Two passes
+/// produce it. The first, in one short read transaction that commits
+/// before anything is written, reads every unit's stored fingerprints —
+/// not its bytes — so the archive manifest, the container's first entry,
+/// can be written before any record byte is read. The second streams each
+/// unit's stored bytes and its unit manifest into the sink, reading each
+/// version by its key and checking it against the fingerprints the
+/// manifest already states: finalized versions are immutable and
+/// undeletable (migration `0010`), so payloads and manifest describe one
+/// state because that is checked, not because a snapshot is held. What is
+/// held is the entry metadata (one small record per unit, O(units), and
+/// the serialized manifest that lists it), one unit's bytes at a time,
+/// and the container's central directory — never the corpus of payloads.
+///
+/// No read transaction outlives the metadata pass, and no pooled connection
+/// is held while the sink waits on a client: each version is read by one
+/// autocommit statement on a connection acquired for that read and returned
+/// to the pool before the bytes are written. A download, however slow,
+/// therefore reserves no writer (ADR 0019), pins no WAL reader that would
+/// hold back a checkpoint, and holds no lease that ordinary work or another
+/// export could be starved of; the export holds at most one pooled
+/// connection at any moment, and none between reads. The price is that the
+/// point reads pass through whichever connections the pool hands out, so
+/// their SQLite page caches — at most the pool's size times the per-
+/// connection cache limit, a constant the corpus does not grow — count
+/// toward the export's memory beside the terms above.
+///
+/// The audit precedes both content passes, so a scope with nothing to
+/// export is refused before anything is recorded, and a typed refusal
+/// still reaches the caller as one. A recorded `record_exported` attests
+/// that the installation produced this export from the state at this
+/// instant; it does not attest that the operator received or saved the
+/// file, and a delivery that fails part way leaves the record it already
+/// wrote — while the client sees an incomplete transfer rather than a
+/// complete export.
+///
+/// `cancelled` reports whether the requester has already gone. It is
+/// asked before anything is read, before the audit, before the metadata
+/// pass, for every metadata row, and before `ready`: an abandoned request stops there with a
+/// [`std::io::ErrorKind::BrokenPipe`] error rather than auditing and
+/// reading a scope nobody will receive. After `ready`, the sink reports a
+/// departed client itself.
+///
+/// `ready` is called with what the archive states about itself once the
+/// scope is authorized, the export is audited, and the metadata is read: a
+/// streamed delivery starts its response there and reports a failure after
+/// that point as an incomplete transfer, never as a complete export.
+pub async fn export_to<W: Write + Seek, F: FnOnce(ArchiveProduced)>(
+    pool: &SqlitePool,
+    actor_user_id: i64,
+    scope: Scope,
+    exported_at: i64,
+    sink: W,
+    cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ready: F,
+) -> Result<(std::result::Result<ArchiveProduced, ExportRefusal>, W)> {
+    if cancelled() {
+        return Err(client_left());
+    }
+    let audited = match authorize(pool, actor_user_id, scope).await? {
+        Ok(audited) => audited,
+        // The sink comes back with the refusal so the caller can flush and
+        // close whatever destination it handed over.
+        Err(refusal) => return Ok((Err(refusal), sink)),
+    };
+    if cancelled() {
+        return Err(client_left());
+    }
+    // The audit is written first, by itself, on one connection: it must be
+    // committed before the first byte, it must never be written for a scope
+    // that holds nothing to export, and it must not be part of any read the
+    // export makes afterwards. `storage::write_tx` reserves the writer for
+    // the length of two short statements (ADR 0019).
+    {
+        let mut tx = storage::write_tx(pool)
+            .await
+            .context("beginning audit write")?;
+        if !scope_has_units(&mut tx, scope).await? {
+            // Nothing to export is never audited, and never exported empty.
+            tx.rollback().await.context("rolling back empty export")?;
+            return Ok((Err(nothing_to_export(scope)), sink));
+        }
+        audit_export(&mut *tx, actor_user_id, &audited).await?;
+        tx.commit().await.context("committing audit write")?;
+    }
+    if cancelled() {
+        return Err(client_left());
+    }
+    // One short read transaction for the installation's identity and the
+    // unit list, so the manifest describes one committed state. It commits
+    // here, before the delivery starts: nothing the client does can hold it
+    // open.
+    let (installation_id, units) = {
+        let mut tx = pool.begin().await.context("beginning export read")?;
+        let installation_id = storage::installation_id(&mut *tx).await?;
+        let units = collect_meta(&mut tx, scope, cancelled).await?;
+        tx.commit().await.context("ending export read")?;
+        (installation_id, units)
+    };
+    if units.is_empty() {
+        // The scope held units when it was audited, and a finalized version
+        // is immutable and removed only by an authorized disposition, which
+        // this installation does not yet perform. Rather than export
+        // emptiness the audit does not describe, the export fails: the
+        // caller may retry, and the record stands for the attempt.
+        return Err(anyhow!(
+            "the audited scope no longer holds a finalized version to export"
+        ));
+    }
+    if cancelled() {
+        return Err(client_left());
+    }
+    let produced = ArchiveProduced {
+        file_name: file_name(scope, exported_at)?,
+        exported_at,
+        unit_count: units.len(),
+    };
+    // The scope is authorized, the export is recorded, and the rows are
+    // read: the delivery may start now.
+    ready(produced.clone());
+    let manifest = archive_manifest(&installation_id, exported_at, scope, &units);
+    let mut writer = ArchiveWriter::new(sink, exported_at)?;
+    writer.add(ARCHIVE_MANIFEST_PATH, &canonical_json(&manifest)?)?;
+    write_units_streaming(pool, &mut writer, &units, &installation_id, exported_at).await?;
+    let sink = writer.into_sink()?;
+    Ok((Ok(produced), sink))
+}
+
+/// The error an abandoned request ends with: a departed client, which the
+/// delivery recognizes and neither logs nor signals.
+fn client_left() -> anyhow::Error {
+    anyhow::Error::from(std::io::Error::new(
+        std::io::ErrorKind::BrokenPipe,
+        "the client left before the export started",
+    ))
+}
+
+/// The refusal an empty scope earns: a version scope that names a missing
+/// version, anything else with no finalized version at all.
+fn nothing_to_export(scope: Scope) -> ExportRefusal {
+    match scope {
+        Scope::Version { .. } => ExportRefusal::NoSuchVersion,
+        Scope::Record { .. } | Scope::Enrollment { .. } | Scope::Installation => {
+            ExportRefusal::NothingToExport
+        }
+    }
+}
+
+/// Whether the scope holds at least one finalized version, read in the
+/// caller's transaction so the answer and the audit below it describe one
+/// state.
+async fn scope_has_units(conn: &mut SqliteConnection, scope: Scope) -> Result<bool> {
+    let found: Option<i64> = match scope {
+        Scope::Version {
+            record_id,
+            version_number,
+        } => sqlx::query_scalar(
+            "SELECT v.id FROM evaluation_version v
+             WHERE v.evaluation_record_id = ?1 AND v.version_number = ?2 LIMIT 1",
+        )
+        .bind(record_id)
+        .bind(version_number)
+        .fetch_optional(&mut *conn)
+        .await
+        .context("checking the version scope")?,
+        Scope::Record { record_id } => sqlx::query_scalar(
+            "SELECT v.id FROM evaluation_version v
+             WHERE v.evaluation_record_id = ?1 LIMIT 1",
+        )
+        .bind(record_id)
+        .fetch_optional(&mut *conn)
+        .await
+        .context("checking the record scope")?,
+        Scope::Enrollment { enrollment_id } => sqlx::query_scalar(
+            "SELECT v.id FROM evaluation_version v
+             JOIN evaluation_record r ON r.id = v.evaluation_record_id
+             WHERE r.enrollment_id = ?1 LIMIT 1",
+        )
+        .bind(enrollment_id)
+        .fetch_optional(&mut *conn)
+        .await
+        .context("checking the enrollment scope")?,
+        Scope::Installation => sqlx::query_scalar("SELECT v.id FROM evaluation_version v LIMIT 1")
+            .fetch_optional(&mut *conn)
+            .await
+            .context("checking the installation scope")?,
+    };
+    Ok(found.is_some())
+}
+
 /// Exports `scope` stamped with `exported_at` (UTC unix seconds). The
 /// archive is a pure function of the scope's rows and this instant.
 pub async fn export_at(
@@ -169,44 +378,25 @@ pub async fn export_at(
     scope: Scope,
     exported_at: i64,
 ) -> Result<std::result::Result<Export, ExportRefusal>> {
-    let audited = match authorize(pool, actor_user_id, scope).await? {
-        Ok(audited) => audited,
+    let (produced, bytes) = export_to(
+        pool,
+        actor_user_id,
+        scope,
+        exported_at,
+        Cursor::new(Vec::new()),
+        &|| false,
+        |_| {},
+    )
+    .await?;
+    let produced = match produced {
+        Ok(produced) => produced,
         Err(refusal) => return Ok(Err(refusal)),
     };
-    let mut conn = pool.acquire().await.context("acquiring connection")?;
-    let rows = collect(&mut conn, scope).await?;
-    drop(conn);
-    if rows.is_empty() {
-        return Ok(Err(match scope {
-            Scope::Version { .. } => ExportRefusal::NoSuchVersion,
-            Scope::Record { .. } | Scope::Enrollment { .. } | Scope::Installation => {
-                ExportRefusal::NothingToExport
-            }
-        }));
-    }
-    let installation_id = storage::installation_id(pool).await?;
-    let unit_count = rows.len();
-    let bytes = build_archive(&installation_id, exported_at, scope, rows)?;
-    // The export is audited once it exists: actor and subject, never
-    // content (docs/records-integrity.md).
-    match audited.subject {
-        Some(subject) => {
-            audit::record_for_subject(
-                pool,
-                EventKind::RecordExported,
-                Some(actor_user_id),
-                audited.trainee,
-                subject,
-            )
-            .await?;
-        }
-        None => audit::record(pool, EventKind::RecordExported, Some(actor_user_id), None).await?,
-    }
     Ok(Ok(Export {
-        file_name: file_name(scope, exported_at)?,
-        bytes,
-        exported_at,
-        unit_count,
+        file_name: produced.file_name,
+        bytes: bytes.into_inner(),
+        exported_at: produced.exported_at,
+        unit_count: produced.unit_count,
     }))
 }
 
@@ -245,6 +435,43 @@ pub async fn summary(
 struct Audited {
     subject: Option<Subject>,
     trainee: Option<i64>,
+}
+
+/// Records one export in the caller's transaction.
+///
+/// Deliberately not part of any read the export makes: an audit row
+/// committed with the payload pass would hold a write reservation for the
+/// whole download (ADR 0019). The caller runs this in its own short write
+/// transaction, before the metadata is read, so the record is committed
+/// before the first byte — and a scope that holds nothing to export never
+/// reaches it.
+async fn audit_export<'e>(
+    executor: impl sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    actor_user_id: i64,
+    audited: &Audited,
+) -> Result<()> {
+    match audited.subject {
+        Some(subject) => {
+            audit::record_for_subject(
+                executor,
+                EventKind::RecordExported,
+                Some(actor_user_id),
+                audited.trainee,
+                subject,
+            )
+            .await?;
+        }
+        None => {
+            audit::record(
+                executor,
+                EventKind::RecordExported,
+                Some(actor_user_id),
+                None,
+            )
+            .await?;
+        }
+    }
+    Ok(())
 }
 
 /// The scope's read rule, as the typed contract it already is elsewhere
@@ -336,6 +563,24 @@ macro_rules! unit_query {
     };
 }
 
+/// The same rows and order, without the stored bytes: what the archive
+/// manifest needs and nothing that would make the metadata pass read the
+/// corpus.
+macro_rules! unit_meta_query {
+    ($where:literal) => {
+        concat!(
+            "SELECT v.evaluation_record_id AS record_id, v.version_number,
+                    v.record_schema, v.content_hash,
+                    v.chain_hash, p.content_hash AS predecessor_content_hash
+             FROM evaluation_version v
+             LEFT JOIN evaluation_version p ON p.id = v.predecessor_id
+             JOIN evaluation_record r ON r.id = v.evaluation_record_id ",
+            $where,
+            " ORDER BY v.evaluation_record_id, v.version_number"
+        )
+    };
+}
+
 pub(crate) async fn collect(conn: &mut SqliteConnection, scope: Scope) -> Result<Vec<VersionRow>> {
     let rows = match scope {
         Scope::Version {
@@ -394,49 +639,192 @@ pub(crate) fn unit_entries(rows: &[VersionRow]) -> Vec<UnitEntry> {
         .collect()
 }
 
-/// Writes the container exactly as docs/formats/record-export.md lays
-/// it out: manifest first, then units in order, stored entries, the
-/// export instant as every entry's modification time, `0644`. Rows are
-/// consumed so each version's bytes are released once written; the
-/// archive is the one copy held to the end (#47 tracks streaming it).
-fn build_archive(
+/// One stored version's metadata, without its bytes: everything both
+/// manifests need. The export reads this first so the archive manifest —
+/// which must be the container's first entry — can be written before any
+/// record byte is read, while the payloads themselves stay out of memory
+/// (#47).
+type UnitMeta = UnitEntry;
+
+/// The metadata pass: every unit of the scope in archive order, with the
+/// stored fingerprints but not the stored bytes. The metadata columns are
+/// selected on their own — a `canonical_bytes` read here would double the
+/// corpus I/O and hold a blob at a time for a length and a CRC-32 the
+/// container writer computes for itself. Rows are consumed one at a time,
+/// so what this pass holds is the one small record per unit that the
+/// archive manifest has to carry. `cancelled` is asked for every row, so an
+/// abandoned request stops reading a large scope part way.
+pub(crate) async fn collect_meta(
+    conn: &mut SqliteConnection,
+    scope: Scope,
+    cancelled: &(dyn Fn() -> bool + Send + Sync),
+) -> Result<Vec<UnitMeta>> {
+    let mut rows = match scope {
+        Scope::Version {
+            record_id,
+            version_number,
+        } => sqlx::query(unit_meta_query!(
+            "WHERE v.evaluation_record_id = ?1 AND v.version_number = ?2"
+        ))
+        .bind(record_id)
+        .bind(version_number)
+        .fetch(&mut *conn),
+        Scope::Record { record_id } => {
+            sqlx::query(unit_meta_query!("WHERE v.evaluation_record_id = ?1"))
+                .bind(record_id)
+                .fetch(&mut *conn)
+        }
+        Scope::Enrollment { enrollment_id } => {
+            sqlx::query(unit_meta_query!("WHERE r.enrollment_id = ?1"))
+                .bind(enrollment_id)
+                .fetch(&mut *conn)
+        }
+        Scope::Installation => sqlx::query(unit_meta_query!("")).fetch(&mut *conn),
+    };
+    let mut units = Vec::new();
+    while let Some(row) = rows
+        .try_next()
+        .await
+        .context("reading finalized versions")?
+    {
+        if cancelled() {
+            return Err(client_left());
+        }
+        units.push(UnitMeta {
+            path: unit_path(row.get("record_id"), row.get("version_number")),
+            record_id: row.get("record_id"),
+            version_number: row.get("version_number"),
+            record_schema: row.get("record_schema"),
+            content_hash: row.get("content_hash"),
+            chain_hash: row.get("chain_hash"),
+            predecessor_content_hash: row.get("predecessor_content_hash"),
+        });
+    }
+    Ok(units)
+}
+
+/// The payload pass: streams each unit's stored bytes and its unit
+/// manifest into an already-started archive, in the manifest's order. Peak
+/// memory is one version's bytes at a time.
+///
+/// Each version is a point read by its key: one autocommit statement on a
+/// pooled connection acquired for that read alone, back in the pool before
+/// the bytes reach the writer — which may wait on the client — so a stalled
+/// download holds no lease and no transaction. The stored fingerprints must
+/// be the ones the manifest already states: a version that is gone or
+/// differs fails the export rather than shipping a payload its manifest
+/// does not describe.
+pub(crate) async fn write_units_streaming<W: Write + Seek>(
+    pool: &SqlitePool,
+    writer: &mut ArchiveWriter<W>,
+    units: &[UnitMeta],
+    installation_id: &str,
+    exported_at: i64,
+) -> Result<()> {
+    for entry in units {
+        let stored: Option<(i64, Vec<u8>, String, String)> = sqlx::query_as(
+            "SELECT record_schema, canonical_bytes, content_hash, chain_hash
+             FROM evaluation_version
+             WHERE evaluation_record_id = ?1 AND version_number = ?2",
+        )
+        .bind(entry.record_id)
+        .bind(entry.version_number)
+        .fetch_optional(pool)
+        .await
+        .with_context(|| format!("reading finalized version {}", entry.path))?;
+        let Some((record_schema, bytes, content_hash, chain_hash)) = stored else {
+            return Err(anyhow!(
+                "a finalized version the manifest lists is no longer stored: {}",
+                entry.path
+            ));
+        };
+        if record_schema != entry.record_schema
+            || content_hash != entry.content_hash
+            || chain_hash != entry.chain_hash
+        {
+            return Err(anyhow!(
+                "finalized version {} no longer matches the fingerprints its manifest states",
+                entry.path
+            ));
+        }
+        writer.add(&format!("{}/{RECORD_FILE}", entry.path), &bytes)?;
+        drop(bytes);
+        let unit = UnitManifest {
+            format: UNIT_FORMAT.to_owned(),
+            format_version: FORMAT_VERSION,
+            installation_id: installation_id.to_owned(),
+            exported_at,
+            record_id: entry.record_id,
+            version_number: entry.version_number,
+            record_schema: entry.record_schema,
+            content_hash: entry.content_hash.clone(),
+            chain_hash: entry.chain_hash.clone(),
+            predecessor_content_hash: entry.predecessor_content_hash.clone(),
+        };
+        writer.add(
+            &format!("{}/{UNIT_MANIFEST_FILE}", entry.path),
+            &canonical_json(&unit)?,
+        )?;
+    }
+    Ok(())
+}
+
+/// The archive manifest for `units`, in the container's entry order.
+pub(crate) fn archive_manifest(
     installation_id: &str,
     exported_at: i64,
     scope: Scope,
-    rows: Vec<VersionRow>,
-) -> Result<Vec<u8>> {
-    let units = unit_entries(&rows);
-    let manifest = ArchiveManifest {
+    units: &[UnitEntry],
+) -> ArchiveManifest {
+    ArchiveManifest {
         format: ARCHIVE_FORMAT.to_owned(),
         format_version: FORMAT_VERSION,
         installation_id: installation_id.to_owned(),
         exported_at,
         scope,
-        units,
-    };
-    let mut writer = ArchiveWriter::new(exported_at)?;
-    writer.add(ARCHIVE_MANIFEST_PATH, &canonical_json(&manifest)?)?;
-    writer.add_units(installation_id, exported_at, rows, &manifest.units)?;
-    writer.finish()
+        units: units.to_vec(),
+    }
 }
 
 /// The container writer every export shares: stored entries, the export
 /// instant as each entry's modification time, `0644`, entries in the
-/// order they are added.
-pub(crate) struct ArchiveWriter {
-    writer: ZipWriter<Cursor<Vec<u8>>>,
+/// order they are added. The sink need only be seekable; a streamed
+/// export passes [`crate::export_stream::EntryBuffer`], which holds one
+/// local header at a time and yields the same bytes (#47).
+pub(crate) struct ArchiveWriter<W: Write + Seek> {
+    writer: ZipWriter<W>,
     options: SimpleFileOptions,
 }
 
-impl ArchiveWriter {
-    pub(crate) fn new(exported_at: i64) -> Result<Self> {
+impl ArchiveWriter<Cursor<Vec<u8>>> {
+    /// The in-memory writer the packet and the compatibility tests use.
+    pub(crate) fn in_memory(exported_at: i64) -> Result<Self> {
+        Self::new(Cursor::new(Vec::new()), exported_at)
+    }
+
+    pub(crate) fn finish(self) -> Result<Vec<u8>> {
+        let cursor = self
+            .writer
+            .finish()
+            .context("finishing the export archive")?;
+        Ok(cursor.into_inner())
+    }
+}
+
+impl<W: Write + Seek> ArchiveWriter<W> {
+    pub(crate) fn new(sink: W, exported_at: i64) -> Result<Self> {
         Ok(Self {
-            writer: ZipWriter::new(Cursor::new(Vec::new())),
+            writer: ZipWriter::new(sink),
             options: SimpleFileOptions::default()
                 .compression_method(CompressionMethod::Stored)
                 .last_modified_time(dos_time(exported_at)?)
                 .unix_permissions(0o644),
         })
+    }
+
+    /// Finishes the container, returning the sink it wrote into.
+    pub(crate) fn into_sink(self) -> Result<W> {
+        self.writer.finish().context("finishing the export archive")
     }
 
     pub(crate) fn add(&mut self, name: &str, bytes: &[u8]) -> Result<()> {
@@ -478,14 +866,6 @@ impl ArchiveWriter {
             )?;
         }
         Ok(())
-    }
-
-    pub(crate) fn finish(self) -> Result<Vec<u8>> {
-        let cursor = self
-            .writer
-            .finish()
-            .context("finishing the export archive")?;
-        Ok(cursor.into_inner())
     }
 }
 

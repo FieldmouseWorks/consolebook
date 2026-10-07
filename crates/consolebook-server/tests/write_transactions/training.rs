@@ -336,9 +336,8 @@ async fn competing_session_requests_return_created_and_typed_conflict() {
         .await
         .expect("login token")
         .0;
-    let app = consolebook_server::http::router(consolebook_server::http::AppState {
-        pool: fx.pool.clone(),
-    });
+    let app =
+        consolebook_server::http::router(consolebook_server::http::AppState::new(fx.pool.clone()));
     let request = || {
         Request::builder().method("POST").uri(format!("/api/enrollments/{enrollment}/sessions"))
         .header(CONTENT_TYPE, "application/json")

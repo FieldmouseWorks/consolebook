@@ -193,7 +193,7 @@ async fn serve(
         .await
         .with_context(|| format!("binding {bind}"))?;
     tracing::info!(addr = %listener.local_addr()?, "listening");
-    http::serve(listener, http::AppState { pool }).await?;
+    http::serve(listener, http::AppState::new(pool)).await?;
     scheduler.abort();
     drop(lock);
     tracing::info!("stopped");

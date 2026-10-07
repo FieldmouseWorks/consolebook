@@ -122,9 +122,70 @@ may export, and what verification claims (#45; Milestone 5 slice 1).
   hash but cannot prove the predecessor's bytes — reported as *not in
   export*, never inferred; and
 - on-demand exports mean nothing on disk to dispose of and nothing to
-  resume: an installation export is one response, assembled in memory
-  while it is produced, so a very large history costs memory in
-  proportion until exports stream (tracked separately).
+  resume: an export is one response, and it is now streamed — written to
+  the response as it is produced (#47). What still scales with an
+  installation is its unit count, not its bytes: the unit metadata the
+  archive manifest lists, the serialized manifest, and the container's
+  central directory are each O(units), and the database driver buffers a
+  bounded number of rows per query. The corpus of stored payloads is
+  never held, one unit's bytes are held at a time, and the browser's own
+  download helper buffers the response it saves, separately. The point
+  reads pass through whichever pooled connections the pool hands out, so
+  their SQLite page caches — at most the pool's size times the
+  per-connection cache limit, a constant the corpus does not grow — also
+  count toward an export's memory;
+- the delivery and its failure share one bounded channel between the
+  producer and the response. The channel holds at most 8 items of at
+  most 64 KiB each, so what waits for a stalled client is bounded in
+  bytes (512 KiB), not only in items; a large record is handed on in
+  64 KiB pieces, and not one archive byte changes. A client that stops
+  reading stops the producer instead of growing a queue, and a client
+  that stops reading for longer than the stall bound loses the transfer.
+  A request abandoned before its response starts — the client
+  disconnects, or the preflight limit expires — is noticed by the
+  producer before anything is authorized or audited, before the metadata
+  pass, and again during and after that pass, so no more work is done for
+  a response nobody will receive. Abandonment noticed before the audit
+  records nothing; abandonment noticed after it leaves the
+  `record_exported` event, which — as below — attests the attempt the
+  installation made at that instant, not a completed delivery. One
+  process produces at most four exports at a time: each producer is a
+  blocking thread for the length of its download, so admission is bounded
+  before any work is done and a request beyond the bound is refused with
+  a typed `export_busy` answer (`503`) to retry, never queued. A client that
+  leaves after the response started ends the export when the send
+  fails, and that is not logged as a production error. Whether a transfer
+  was complete is an explicit fact the producer records only when the
+  archive was produced and its tail flushed — not the channel closing,
+  which a client that outlasted the failure signal would otherwise read
+  as success. Anything else ends the body in an error: an incomplete
+  download the verifier refuses, never a complete export;
+- the export holds no read transaction and no pooled connection while it
+  waits on the client. Its audit event is written in its own short write
+  transaction, and the metadata pass — the unit list the archive manifest
+  carries — is one short read transaction; both are committed before the
+  response starts, and neither reserves the writer (ADR 0019). Each unit's
+  stored bytes are then read by one autocommit statement on a connection
+  acquired for that read and returned to the pool before the bytes are
+  handed to the client, so stalled downloads — however many — hold no
+  lease that ordinary work could be starved of; and the re-read
+  `record_schema`, `content_hash`, and `chain_hash` are checked
+  against the manifest's entry; a mismatch or a missing row ends the
+  transfer incomplete. What ties payload to manifest is therefore the
+  immutability of finalized versions, enforced by the database triggers
+  `evaluation_version_no_update` and `evaluation_version_no_delete`
+  (migration 0010) and checked unit by unit, not transaction isolation,
+  and the scope's membership is fixed when the manifest is read. This
+  replaces the earlier reviewed design, which held one read snapshot
+  across the manifest and the payloads; it was replaced because a download
+  paced by the client held that reader open for its whole length. A slow
+  or paused download now pins nothing in the WAL and never blocks a
+  checkpoint, and exports sharing a connection pool never hold one
+  connection while waiting for another;
+- the audit event records the export the installation produced from the
+  state at its recorded instant, not the operator's receipt: a delivery
+  that fails part way leaves the record, and a scope that holds nothing to
+  export is refused before any record is written.
 
 ## Rejected alternatives
 

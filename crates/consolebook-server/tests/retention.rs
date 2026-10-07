@@ -636,9 +636,8 @@ async fn http_refusals_are_typed_and_private() {
         .await
         .expect("token")
         .0;
-    let app = consolebook_server::http::router(consolebook_server::http::AppState {
-        pool: fx.pool.clone(),
-    });
+    let app =
+        consolebook_server::http::router(consolebook_server::http::AppState::new(fx.pool.clone()));
     for (method, path, body) in [
         ("GET", "/api/retention/policies", serde_json::Value::Null),
         ("GET", "/api/retention/holds", serde_json::Value::Null),

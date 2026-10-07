@@ -19,7 +19,7 @@ async fn app() -> (tempfile::TempDir, axum::Router, sqlx::SqlitePool) {
     let data_dir = DataDir::new(tmp.path().join("data"));
     data_dir.ensure_layout().expect("create layout");
     let pool = storage::open(&data_dir.database()).await.expect("open");
-    let router = http::router(http::AppState { pool: pool.clone() });
+    let router = http::router(http::AppState::new(pool.clone()));
     (tmp, router, pool)
 }
 
