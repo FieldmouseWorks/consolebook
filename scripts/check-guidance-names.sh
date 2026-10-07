@@ -11,13 +11,14 @@
 set -eu
 
 # --- Scanned set -----------------------------------------------------------
-# Git pathspecs, one per line (files or directories of tracked guidance).
-# To extend: add a line. Every entry must match at least one tracked file,
-# or the guard fails closed (exit 2), so a renamed file cannot drop out.
+# Git pathspecs, one per line (files, directories, or :(glob) magic for
+# entrypoints at any depth). To extend: add a line. Every entry must match at
+# least one tracked file, or the guard fails closed (exit 2), so a renamed
+# file cannot drop out.
 SCANNED='
-AGENTS.md
+:(glob)**/AGENTS.md
 CONTRIBUTING.md
-CLAUDE.md
+:(glob)**/CLAUDE.md
 docs/workflow.md
 docs/development.md
 .agents
@@ -27,10 +28,14 @@ docs/development.md
 '
 
 # --- Pattern list ----------------------------------------------------------
-# Forbidden names, whitespace-separated. Matched case-insensitively, as whole
-# words ([A-Za-z0-9_] are word characters), as fixed strings. To extend: add a
-# lowercase word. The forbidden words appear here only, as data; the
-# allowlist below holds entrypoint file names, not forbidden words.
+# Forbidden names, whitespace-separated, matched case-insensitively as fixed
+# strings. A match counts when the character before it is not a letter or
+# digit and the character after it is not a letter. So separators such as
+# _ - . / and start of line may precede a name, and digits, _ - . may follow
+# it (version and ID suffixes still match), while plurals and longer words
+# (an "s" or other letter suffix, a letter or digit prefix) do not.
+# To extend: add a lowercase word. The forbidden words appear here only, as
+# data; the allowlist below holds entrypoint file names, not forbidden words.
 PATTERNS='
 gpt chatgpt openai codex claude anthropic opus sonnet haiku fable gemini
 copilot deepseek llama mistral grok qwen
@@ -92,12 +97,15 @@ for p in $PATTERNS; do
 	set -- "$@" -e "$p"
 done
 
-# Prefilter with git grep. Explicit flags override user config that would
-# change the output shape (color, column numbers, relative paths).
+# Prefilter with git grep: any line containing a pattern as a substring is a
+# candidate; the boundary rule is applied in awk below. --text scans files git
+# would treat as binary (attributes or NUL bytes) instead of skipping them.
+# Explicit flags override user config that would change the output shape
+# (color, column numbers, relative paths).
 set +e
 # shellcheck disable=SC2086 # word splitting of the pathspec list is intended
 hits=$(git -c grep.column=false -c grep.fullName=true \
-	grep --no-color -n -I -i -w -F "$@" -- $SCANNED)
+	grep --no-color -n --text -i -F "$@" -- $SCANNED)
 gs=$?
 set -e
 case $gs in
@@ -116,8 +124,14 @@ esac
 # hits (and any parse error) go to stderr.
 set +e
 printf '%s\n' "$hits" | GUARD_PATTERNS=$PATTERNS GUARD_ALLOW=$ALLOWLIST awk '
+function isalpha(c) {
+	return c != "" && index("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", c) > 0
+}
+function isalnum(c) {
+	return isalpha(c) || (c != "" && index("0123456789", c) > 0)
+}
 function isword(c) {
-	return c != "" && index("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_", c) > 0
+	return isalnum(c) || c == "_"
 }
 # Replace every standalone occurrence of tok in s with a space.
 function strip(s, tok,    out, i, n, pre, post) {
@@ -136,7 +150,8 @@ function strip(s, tok,    out, i, n, pre, post) {
 	}
 	return out s
 }
-# True if pattern p (lowercase) occurs in s (lowercased) as a whole word.
+# True if pattern p (lowercase) occurs in s (lowercased) with no letter or
+# digit before it and no letter after it.
 function hasword(s, p,    i, n, off, pre, post) {
 	n = length(p)
 	off = 0
@@ -144,7 +159,7 @@ function hasword(s, p,    i, n, off, pre, post) {
 		i += off
 		pre = (i > 1) ? substr(s, i - 1, 1) : ""
 		post = substr(s, i + n, 1)
-		if (!isword(pre) && !isword(post)) return 1
+		if (!isalnum(pre) && !isalpha(post)) return 1
 		off = i
 	}
 	return 0
@@ -183,16 +198,18 @@ $0 == "" { next }
 		}
 	}
 }
-END { if (parse_err) exit 3; if (bad) exit 1 }
+END { if (parse_err) exit 3; if (bad) exit 4 }
 ' >&2
 as=$?
 set -e
+# 4 is the only residual-hit status: awk implementations use 1 and 2 for
+# their own errors, which must not read as a clean or a hit result.
 case $as in
 0)
 	echo "guidance names: ok ($nfiles files scanned)"
 	exit 0
 	;;
-1)
+4)
 	echo "$me: tracked guidance names a model or vendor (see lines above); use role names, or extend the allowlist at the top of $me for a tool entrypoint file name" >&2
 	exit 1
 	;;
