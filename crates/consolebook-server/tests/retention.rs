@@ -579,7 +579,7 @@ async fn storage_refuses_mutated_history_and_invalid_shapes() {
 }
 
 #[tokio::test]
-async fn authority_and_policy_failures_leave_no_partial_state() {
+async fn authority_audit_failure_leaves_no_partial_state() {
     let fx = Fixture::new().await;
     sqlx::raw_sql("CREATE TRIGGER fail_retention_audit BEFORE INSERT ON audit_event WHEN NEW.kind LIKE 'retention_%' BEGIN SELECT RAISE(ABORT, 'injected audit failure'); END;").execute(&fx.pool).await.expect("inject");
     assert!(
@@ -599,10 +599,11 @@ async fn authority_and_policy_failures_leave_no_partial_state() {
             .expect("history")
             .is_empty()
     );
-    sqlx::query("DROP TRIGGER fail_retention_audit")
-        .execute(&fx.pool)
-        .await
-        .expect("remove");
+}
+
+#[tokio::test]
+async fn policy_audit_failure_leaves_no_partial_state() {
+    let fx = Fixture::new().await;
     fx.authorize().await;
     sqlx::raw_sql("CREATE TRIGGER fail_retention_audit BEFORE INSERT ON audit_event WHEN NEW.kind = 'retention_policy_created' BEGIN SELECT RAISE(ABORT, 'injected audit failure'); END;").execute(&fx.pool).await.expect("inject");
     assert!(

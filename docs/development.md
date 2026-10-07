@@ -2,7 +2,9 @@
 
 This map routes contributors and agents to the implementation and its
 authorities. [AGENTS.md](../AGENTS.md) owns repository rules;
-[CONTRIBUTING.md](../CONTRIBUTING.md) owns build gates and contribution workflow.
+[CONTRIBUTING.md](../CONTRIBUTING.md) owns build gates and contribution rules.
+[Workflow](workflow.md) owns task graphs, evidence, authority, and continuation;
+[roadmap](roadmap.md) is the current-state entry point.
 
 ## Choose context by task
 
@@ -83,6 +85,8 @@ authentication; `+layout.svelte` owns navigation and shared styling.
 `web/src/lib/retention/` owns policy editing, hold editing, and authority controls.
 `web/src/lib/api/signoffs.ts` owns the task-signoff read contract (#49) and
 `web/src/lib/signoffs/` its read-only presentation.
+`web/src/lib/drafts/` owns the draft working copy, its autosave chain, and the
+refused-save recovery buffer (#34; ownership boundary of #59).
 `web/src/lib/editor/` contains program-authoring components.
 
 `web/e2e/fixtures.ts` supplies each scenario's server, base URL, and setup code.
@@ -96,7 +100,7 @@ and assertions in their own specs.
 | `/` | Capability-sensitive status, notices, administration, session/review queues, installation exports |
 | `/programs/**` | Program authoring, comparison, publishing, enrollment |
 | `/enrollments/[id]` | Lifecycle, assignments, sessions, summaries, signoffs, exports |
-| `/drafts/[id]` | Authoring, review, finalized presentation, acknowledgment, amendments |
+| `/drafts/[id]` | Authoring, review, finalized presentation, acknowledgment, amendments; the draft editing controller, autosave chain, and refused-save recovery buffer live in `web/src/lib/drafts/` (#34) |
 | `/records` | Trainee's own timeline, packet downloads, and their own complete task-signoff history |
 | `/retention` | Explicit authority, versioned policies, and attributed holds; no disposition execution |
 

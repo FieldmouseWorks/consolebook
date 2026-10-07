@@ -3,6 +3,7 @@
 <!-- Every non-trivial PR names one primary issue. Keep one linkage form. -->
 Closes #
 <!-- Use `Refs #` instead when this is one slice and the issue must remain open. -->
+<!-- The primary issue owns the canonical graph and next action; link it rather than copying it. -->
 
 ## Problem And Outcome
 
@@ -19,6 +20,8 @@ What problem does this solve, and what should be true after merge?
 
 ## Verification
 
+- Candidate revision:
+- Evidence receipt links (commands, results, failures, and local/browser/hosted scope):
 - [ ] Listed the exact verification commands run below
 - [ ] Added or updated tests when behavior changed
 - [ ] Added or updated an ADR when a durable decision changed
@@ -36,4 +39,6 @@ What problem does this solve, and what should be true after merge?
 ## Review And Merge Notes
 
 - Review focus:
+- Review performed (self, independent agent, or human; distinguish them):
+- Remaining authority or effort boundary, if any:
 - User or operator impact:
