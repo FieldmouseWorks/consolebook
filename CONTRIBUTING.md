@@ -20,7 +20,7 @@ pull request. Never push repository changes directly to `main`.
 - Security reports use private advisories per [SECURITY.md](SECURITY.md).
 
 Use [the evidence-driven workflow](docs/workflow.md) for outcome definition,
-model ownership, task graphs, evidence-driven continuation, and authorization.
+roles and ownership, task graphs, evidence-driven continuation, and authorization.
 The primary issue body owns the live graph; issue comments archive completed
 snapshots and receipts. PRs link that record. Simple changes use a short plan.
 The [roadmap](docs/roadmap.md) is the current-state entry point, not a second tracker.
@@ -44,6 +44,29 @@ Keep modules focused on a domain capability. For Rust source files:
   feature work unless the fix is urgent.
 - Refactors name what moves, its new owner, persisted/public impact, and the
   focused proof. Avoid unrelated rewrites.
+
+### Correct the class, not the instance
+
+Agents and people extend the patterns they read, so the codebase is the most
+durable instruction in the repository. Whenever a review, a failing check, or a
+corrected agent exposes a recurring mistake, fix the class at the strongest rung
+that applies, and name the rung in the PR:
+
+1. **Codebase.** Make the mistake unrepresentable: a type, an exhaustive match,
+   one owning API, a schema constraint or trigger.
+2. **Mechanical enforcement.** Enforce it with the compiler, clippy, a test
+   with a negative control, or a repository guard the gates run.
+3. **Guidance.** Write it into `AGENTS.md`, this file, or the owning document —
+   knowing guidance can be skipped.
+4. **Review.** Rely on a reviewer noticing only when nothing stronger applies;
+   at any volume this is a hole, not a control.
+
+Keep one paved path per concern. A workaround, a duplicate path, or a comment
+that justifies either is a defect: each copy makes the next copy likelier.
+When an anti-pattern cannot be removed in the current slice, first add the
+guard that stops new instances, then file the cleanup with exact evidence. The
+gardening — deleting debt, keeping the single path, guarding against drift — is
+part of ordinary work, not a separate project.
 
 Decisions changing durable behavior get an ADR in `docs/decisions/`; changes
 to `PRINCIPLES.md` require one. Schema changes use forward migrations. Portable
@@ -98,7 +121,7 @@ For documentation changes, review the diff, run `git diff --check`, check change
 relative links and heading anchors, and validate any edited issue-template YAML.
 Compare documented commands with package scripts and the existing PR gate.
 When changing agent instructions, inspect the applicable global/project chain
-including `AGENTS.override.md`, and check a fresh session when the host supports
+including any tool-specific override or nested instruction file, and check a fresh session when the host supports
 it; otherwise record that limitation. These checks supplement the required
 build and browser gates above; there is no documentation-only exemption.
 

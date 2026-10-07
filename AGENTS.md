@@ -59,11 +59,18 @@ effort policy, state, exact-revision evidence, and one next action. Verified
 results unlock dependencies; failures trigger investigation and scoped repairs,
 with the approach changed when evidence calls for it.
 
-Use `gpt-6-astra` / `max` for planning, architecture, review, and integration;
-`gpt-6-sol` / `max` for complex implementation; `gpt-6-luna` / `max` for bounded
-exploration, documentation, and checks. Delegate only useful work with explicit
-ownership, then verify the artifacts. Report unavailable routes; instructions
-do not change a running model. DeepSeek remains paused pending explicit re-enable.
+Guidance names roles, never models or vendors (tool entrypoint file names
+excepted): the **integrator** owns the graph, scope, selection, review of every
+delegated result, integration, and remote writes; an **implementer** makes a
+judgment-heavy change from a fixed brief; a **reviewer** reads an exact candidate
+independently and edits nothing; a **worker** does bounded work a command can
+accept; a **verifier** runs named proof and produces receipts; a **scout** answers
+read-only questions of fact. Route by how acceptance is decided, not by how hard
+the task looks. Which model or effort fills a role is each contributor's
+machine-local preference and stays out of tracked files; record roles in
+evidence, report an unavailable route instead of substituting, and never claim
+an observed model the host does not show. Delegate only useful work with
+explicit ownership, then verify the artifacts yourself.
 
 Carry task authorization forward without asking again. Record its source and
 any owner-set effort budget in the issue; preserve that budget across children
@@ -92,6 +99,16 @@ naming the boundary first, and over 2,500 requires a reviewed decomposition
 path before major feature work unless urgent. Refactors state the new owner,
 persisted/public impact, and focused proof.
 
+**The codebase is memory.** Agents extend the patterns they read, so a
+workaround, a duplicate path, or a comment that justifies one is copied until
+it is the pattern. Correct a recurring class at the strongest rung that applies:
+(1) make it unrepresentable with types and one owning API; (2) enforce it with
+the compiler, clippy, a test, or a guard; (3) write guidance; (4) rely on review
+alone only when nothing stronger applies. Name the rung in the PR. When an
+anti-pattern cannot be removed now, first add the guard that stops new
+instances, then file the cleanup; gardening this way is ordinary work. Detail is
+in [CONTRIBUTING.md](CONTRIBUTING.md#correct-the-class-not-the-instance).
+
 Durable behavior changes require an ADR; changes to `PRINCIPLES.md` require one.
 Use forward migrations, standard Rust formatting, `thiserror` for library
 errors as they emerge, `anyhow` at application boundaries, and no `unsafe`.
@@ -103,4 +120,5 @@ This file owns the concise shared contract; `CONTRIBUTING.md` owns contribution
 rules and gates, `docs/workflow.md` owns execution procedure,
 `docs/development.md` owns the source map, and ADRs own product decisions. Tool-specific
 entrypoints (`CLAUDE.md`, `.agents/rules/`, `.github/copilot-instructions.md`)
-only point here. Keep machine preferences and session handoffs out of this file.
+only point here. Keep machine preferences — including which model fills which
+role — and session handoffs out of this file; they belong in ignored local files.

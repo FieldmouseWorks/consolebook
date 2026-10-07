@@ -60,7 +60,7 @@ body:
         Authority and source:
         Owner-set effort budget and source (if any; carries across children and resumptions):
         Continuation boundary:
-        Nodes: ID | outcome | dependencies | model/owner | inputs | acceptance | state | evidence
+        Nodes: ID | outcome | dependencies | role/owner | effort | inputs | acceptance | state | evidence
         Next action:
     validations:
       required: false

@@ -13,3 +13,8 @@
 .DS_Store
 .idea/
 .vscode/
+
+# Machine-local agent tool state and preferences (kept out of tracked guidance)
+.mcp.json
+CLAUDE.local.md
+.claude/
