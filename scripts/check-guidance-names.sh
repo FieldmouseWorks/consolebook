@@ -14,10 +14,14 @@ set -eu
 # Git pathspecs, one per line (files, directories, or :(glob) magic for
 # entrypoints at any depth). To extend: add a line. Every entry must match at
 # least one tracked file, or the guard fails closed (exit 2), so a renamed
-# file cannot drop out.
+# file cannot drop out. Root entrypoints are listed literally as well as by
+# glob, so removing a root file fails closed even when a nested copy exists;
+# overlapping entries scan each file once.
 SCANNED='
+AGENTS.md
 :(glob)**/AGENTS.md
 CONTRIBUTING.md
+CLAUDE.md
 :(glob)**/CLAUDE.md
 docs/workflow.md
 docs/development.md
@@ -44,9 +48,10 @@ copilot deepseek llama mistral grok qwen
 # --- Allowlist -------------------------------------------------------------
 # Tool entrypoint file names: they say where a tool reads instructions, not
 # which model runs. Exact, case-sensitive tokens, one per line, no whitespace.
-# A token is removed from a reported line only where it stands alone (no word
-# character on either side); the rest of the line is still tested, and no file
-# is ever skipped. To extend: add a line with the exact token.
+# A token is removed from a reported line only where the pattern rule would
+# also treat it as standing alone (no letter or digit before it, no letter
+# after it); the rest of the line is still tested, and no file is ever
+# skipped. To extend: add a line with the exact token.
 ALLOWLIST='
 CLAUDE.md
 .github/copilot-instructions.md
@@ -130,17 +135,15 @@ function isalpha(c) {
 function isalnum(c) {
 	return isalpha(c) || (c != "" && index("0123456789", c) > 0)
 }
-function isword(c) {
-	return isalnum(c) || c == "_"
-}
-# Replace every standalone occurrence of tok in s with a space.
+# Replace every occurrence of tok in s that has no letter or digit before it
+# and no letter after it (the same boundary as the hit test) with a space.
 function strip(s, tok,    out, i, n, pre, post) {
 	out = ""
 	n = length(tok)
 	while ((i = index(s, tok)) > 0) {
 		pre = (i > 1) ? substr(s, i - 1, 1) : ""
 		post = substr(s, i + n, 1)
-		if (!isword(pre) && !isword(post)) {
+		if (!isalnum(pre) && !isalpha(post)) {
 			out = out substr(s, 1, i - 1) " "
 			s = substr(s, i + n)
 		} else {
