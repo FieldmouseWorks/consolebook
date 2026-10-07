@@ -228,11 +228,24 @@ fn peak_kib() -> Option<u64> {
         .and_then(|value| value.parse().ok())
 }
 
-/// Runs `measure` in a fresh process against the database the fixture just
+/// One export measured in a fresh process.
+#[derive(Clone, Copy, Debug)]
+struct Measured {
+    units: i64,
+    archive_bytes: u64,
+    peak_growth_kib: u64,
+    /// The most the pool's SQLite page caches can hold between them: the
+    /// pool's size times each connection's cache limit. The point reads land
+    /// on whichever connections the pool hands out, so this constant — which
+    /// the corpus does not grow — is part of the export's memory and of the
+    /// bound (ADR 0014).
+    cache_ceiling_kib: u64,
+}
+
+/// Runs the probe in a fresh process against the database the fixture just
 /// wrote, so the peak it reports belongs to the export rather than to the
-/// corpus the fixture allocated. Returns `(units, archive_bytes,
-/// peak_growth_kib)`.
-fn measure_in_fresh_process(database: &std::path::Path, actor: i64) -> (i64, u64, u64) {
+/// corpus the fixture allocated.
+fn measure_in_fresh_process(database: &std::path::Path, actor: i64) -> Measured {
     let output = std::process::Command::new(std::env::current_exe().expect("test binary"))
         .args([
             "--ignored",
@@ -264,11 +277,32 @@ fn measure_in_fresh_process(database: &std::path::Path, actor: i64) -> (i64, u64
             .parse()
             .expect("a number")
     };
-    (
-        field("units=").cast_signed(),
-        field("archive_bytes="),
-        field("peak_growth_kib="),
-    )
+    Measured {
+        units: field("units=").cast_signed(),
+        archive_bytes: field("archive_bytes="),
+        peak_growth_kib: field("peak_growth_kib="),
+        cache_ceiling_kib: field("cache_ceiling_kib="),
+    }
+}
+
+/// What the pool's page caches may hold between them, read from the pool
+/// itself: `PRAGMA cache_size` is a KiB limit when negative and a page count
+/// otherwise (SQLite's documented encoding).
+async fn cache_ceiling_kib(pool: &SqlitePool) -> u64 {
+    let cache_size: i64 = sqlx::query_scalar("PRAGMA cache_size")
+        .fetch_one(pool)
+        .await
+        .expect("cache_size");
+    let per_connection_kib = if cache_size < 0 {
+        cache_size.unsigned_abs()
+    } else {
+        let page_size: i64 = sqlx::query_scalar("PRAGMA page_size")
+            .fetch_one(pool)
+            .await
+            .expect("page_size");
+        (cache_size * page_size).unsigned_abs() / 1024
+    };
+    u64::from(pool.options().get_max_connections()) * per_connection_kib
 }
 
 const PROBE_DB: &str = "CONSOLEBOOK_EXPORT_PROBE_DB";
@@ -316,10 +350,11 @@ fn export_memory_probe_child() {
         let produced = produced.expect("exported");
         let after = peak_kib().expect("a reported peak");
         println!(
-            "probe units={} archive_bytes={} peak_growth_kib={}",
+            "probe units={} archive_bytes={} peak_growth_kib={} cache_ceiling_kib={}",
             produced.unit_count,
             returned.bytes,
-            after.saturating_sub(before)
+            after.saturating_sub(before),
+            cache_ceiling_kib(&pool).await
         );
         pool.close().await;
     });
@@ -328,7 +363,7 @@ fn export_memory_probe_child() {
 /// A scratch installation with a published program, an enrolled trainee,
 /// an assigned trainer, one daily record, and `count` finalized versions
 /// of `size` bytes each, exported in a fresh process.
-async fn measured(count: i64, size: usize) -> Option<(i64, u64, u64)> {
+async fn measured(count: i64, size: usize) -> Option<Measured> {
     if peak_kib().is_none() {
         eprintln!("this platform reports no process peak: the memory bound is skipped");
         return None;
@@ -343,10 +378,13 @@ async fn measured(count: i64, size: usize) -> Option<(i64, u64, u64)> {
 }
 
 /// The installation export's memory is bounded by the entry metadata, one
-/// record, and the container's directory — never by the corpus — and every
-/// byte reaches the sink. The three exports below separate the two terms:
-/// `small` and `heavy` share a unit count and differ fourfold in payload,
-/// and `wide` shares `small`'s payload and differs fourfold in units.
+/// record, the container's directory, and the pool's page caches — never
+/// by the corpus — and every byte reaches the sink. The three exports below
+/// separate the terms: `small` and `heavy` share a unit count and differ
+/// fourfold in payload, and `wide` shares `small`'s payload and differs
+/// eightfold in units. Which pooled connections the point reads land on,
+/// and so how many page caches warm, varies from run to run; the ceiling
+/// the probe reads from the pool is the constant that covers every case.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_installation_export_is_bounded_by_its_entries_not_by_the_corpus() {
     let small = measured(500, PAYLOAD).await.expect("a measured peak");
@@ -354,52 +392,62 @@ async fn an_installation_export_is_bounded_by_its_entries_not_by_the_corpus() {
     let wide = measured(4_000, PAYLOAD).await.expect("a measured peak");
     eprintln!("small: {small:?}\nheavy: {heavy:?}\nwide: {wide:?}");
     // The measurement is real, and the corpora really differ.
-    assert_eq!(small.0, 500);
-    assert_eq!(heavy.0, 500);
-    assert_eq!(wide.0, 4_000);
+    assert_eq!(small.units, 500);
+    assert_eq!(heavy.units, 500);
+    assert_eq!(wide.units, 4_000);
     assert!(
-        heavy.1 > 3 * small.1,
+        heavy.archive_bytes > 3 * small.archive_bytes,
         "the heavy corpus is only {} bytes against {}",
-        heavy.1,
-        small.1
+        heavy.archive_bytes,
+        small.archive_bytes
     );
     assert!(
-        wide.1 > 3 * small.1,
+        wide.archive_bytes > 3 * small.archive_bytes,
         "the wide corpus is only {} bytes against {}",
-        wide.1,
-        small.1
+        wide.archive_bytes,
+        small.archive_bytes
     );
-    // An absolute bound: buffering even the smallest corpus would exceed
-    // it, and the sink discards what it receives.
+    let caches = small.cache_ceiling_kib;
+    assert_eq!(heavy.cache_ceiling_kib, caches);
+    assert_eq!(wide.cache_ceiling_kib, caches);
     assert!(
-        small.2 < 16 * 1024,
-        "the export grew by {} KiB for a {} byte archive",
-        small.2,
-        small.1
+        caches > 0 && caches < 16 * 1024,
+        "the pool's page caches may hold {caches} KiB, which is not the small constant this proof assumes"
+    );
+    // An absolute bound beside the caches: the sink discards what it
+    // receives, and buffering even the smallest corpus (8.7 MB) would
+    // exceed it.
+    assert!(
+        small.peak_growth_kib < 8 * 1024 + caches,
+        "the export grew by {} KiB for a {} byte archive (caches {caches} KiB)",
+        small.peak_growth_kib,
+        small.archive_bytes
     );
     // Four times the payload at the same unit count: memory does not
-    // follow the corpus.
+    // follow the corpus. The caches may warm differently between the two
+    // runs; the extra 24 MB of payload may not show at all.
     assert!(
-        heavy.2 < small.2 + 4 * 1024,
-        "four times the payload grew the peak from {} KiB to {} KiB",
-        small.2,
-        heavy.2
+        heavy.peak_growth_kib < small.peak_growth_kib + 4 * 1024 + caches,
+        "four times the payload grew the peak from {} KiB to {} KiB (caches {caches} KiB)",
+        small.peak_growth_kib,
+        heavy.peak_growth_kib
     );
     // Eight times the units: the entries' metadata, their JSON manifest,
     // and the container's directory grow — a per-unit constant of a few
     // kilobytes, which ADR 0014 names as the format's one linear term —
     // while the corpus, which is eight times larger again, does not.
+    let more_units = (wide.units - small.units).cast_unsigned();
     assert!(
-        (wide.2 - small.2) * 1024 < 4 * 1024 * (wide.0 - small.0).cast_unsigned(),
-        "the peak grew by {} KiB for {} more units",
-        wide.2 - small.2,
-        wide.0 - small.0
+        (wide.peak_growth_kib - small.peak_growth_kib) * 1024
+            < 4 * 1024 * more_units + caches * 1024,
+        "the peak grew by {} KiB for {more_units} more units (caches {caches} KiB)",
+        wide.peak_growth_kib - small.peak_growth_kib
     );
     assert!(
-        wide.2 * 4 < wide.1 / 1024,
-        "the export held {} KiB of a {} byte archive",
-        wide.2,
-        wide.1
+        (wide.peak_growth_kib - caches.min(wide.peak_growth_kib)) * 4 < wide.archive_bytes / 1024,
+        "the export held {} KiB of a {} byte archive (caches {caches} KiB)",
+        wide.peak_growth_kib,
+        wide.archive_bytes
     );
 }
 
@@ -733,8 +781,9 @@ async fn a_one_connection_pool_serves_a_whole_export() {
 }
 
 /// Two exports overlapping on a two-connection pool both reach their
-/// stream and finish: each holds at most one connection at a time, so
-/// neither waits for a connection the other holds. An export that held its read transaction while acquiring
+/// stream and finish: each holds at most one connection at a time, and none
+/// while it waits on its client, so neither waits for a connection the
+/// other holds. An export that held its read transaction while acquiring
 /// the audit's connection would leave both waiting until their acquisition
 /// timeouts.
 #[tokio::test(flavor = "multi_thread")]
@@ -865,10 +914,10 @@ fn gate_from(hold_from: u64) -> GateHandle {
     }
 }
 
-/// An export mid-stream holds at most one connection, idle while it waits
-/// on its client, and the installation's other work keeps running on the
-/// rest: the audit is already committed and the metadata read has ended,
-/// so the download reserves no writer and no second connection.
+/// An export mid-stream holds no connection while it waits on its client,
+/// and the installation's other work keeps running: the audit is already
+/// committed and the metadata read has ended, so the download reserves no
+/// writer and no lease.
 #[tokio::test(flavor = "multi_thread")]
 async fn ordinary_work_progresses_while_an_export_streams() {
     let (_tmp, pool, admin_id, record_id) = installed().await;
@@ -893,9 +942,8 @@ async fn ordinary_work_progresses_while_an_export_streams() {
             .await
         })
     });
-    // The export is on the wire and waiting on its client with at most one
-    // connection, none of it in a transaction; everything below runs on the
-    // other.
+    // The export is on the wire and waiting on its client, holding no
+    // connection; everything below runs on the pool it left free.
     held.arrived_rx
         .recv_timeout(std::time::Duration::from_secs(30))
         .expect("the export reached its stream");
@@ -927,8 +975,8 @@ async fn ordinary_work_progresses_while_an_export_streams() {
 }
 
 /// A download in flight pins no WAL reader: while the client holds the
-/// export part way through its payloads — several versions already read on
-/// the connection the pass holds — a write commits and a `TRUNCATE`
+/// export part way through its payloads — several versions already read and
+/// their connections returned — a write commits and a `TRUNCATE`
 /// checkpoint folds the whole log back into the database. A read
 /// transaction held across the payloads, for the length of the download,
 /// would keep the log's end mark pinned, so the checkpoint would wait out
@@ -941,7 +989,7 @@ async fn a_download_in_flight_pins_no_wal_reader() {
 
     // Everything but the payloads is small, so a write landing beyond three
     // payloads' worth of bytes comes after at least three versions' records
-    // — and their point reads — have passed through the held connection.
+    // — and their point reads — have been read and written.
     let held = gate_from(3 * PAYLOAD as u64);
     let export_pool = pool.clone();
     let running = tokio::task::spawn_blocking(move || {
@@ -1090,6 +1138,81 @@ async fn an_export_abandoned_after_its_audit_stops_before_the_metadata_pass() {
     };
     assert!(is_client_departure(&err), "{err:?}");
     pool.close().await;
+}
+
+/// Every client stalling mid-payload starves nobody: two exports hold their
+/// downloads part way through their records on a two-connection pool —
+/// every lease the pool has, had either export kept its connection across
+/// the wait — and an ordinary write and read still complete at once. An
+/// export that held its payload connection while waiting on its client
+/// would leave both leases taken, and the ordinary work below would wait
+/// out the pool's acquisition timeout (#47).
+#[tokio::test(flavor = "multi_thread")]
+async fn ordinary_work_progresses_while_every_client_stalls_mid_payload() {
+    let (_tmp, pool, admin_id, record_id) = installed().await;
+    seed_versions(&pool, admin_id, record_id, 20, PAYLOAD).await;
+    let database = pool.connect_options().get_filename().to_owned();
+    pool.close().await;
+    let small = reopened(std::path::Path::new(&database), 2).await;
+
+    let first = gate_from(3 * PAYLOAD as u64);
+    let second = gate_from(3 * PAYLOAD as u64);
+    let running: Vec<_> = [first.gate, second.gate]
+        .into_iter()
+        .map(|gate| {
+            let pool = small.clone();
+            tokio::task::spawn_blocking(move || {
+                tokio::runtime::Handle::current().block_on(async move {
+                    record_export::export_to(
+                        &pool,
+                        admin_id,
+                        Scope::Installation,
+                        EXPORTED_AT,
+                        gate,
+                        &|| false,
+                        |_| {},
+                    )
+                    .await
+                })
+            })
+        })
+        .collect();
+    first
+        .arrived_rx
+        .recv_timeout(std::time::Duration::from_secs(30))
+        .expect("the first export is mid-payload");
+    second
+        .arrived_rx
+        .recv_timeout(std::time::Duration::from_secs(30))
+        .expect("the second export is mid-payload");
+
+    let started = std::time::Instant::now();
+    consolebook_server::audit::record(
+        &small,
+        consolebook_server::audit::EventKind::RecordExported,
+        Some(admin_id),
+        None,
+    )
+    .await
+    .expect("an ordinary write while every client stalls");
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM evaluation_version")
+        .fetch_one(&small)
+        .await
+        .expect("an ordinary read while every client stalls");
+    assert_eq!(count, 20);
+    let waited = started.elapsed();
+    assert!(
+        waited < std::time::Duration::from_secs(1),
+        "ordinary work waited {waited:?} behind stalled exports"
+    );
+
+    first.release.send(()).expect("release the first");
+    second.release.send(()).expect("release the second");
+    for export in running {
+        let (produced, _sink) = export.await.expect("join").expect("call");
+        assert_eq!(produced.expect("exported").unit_count, 20);
+    }
+    small.close().await;
 }
 
 /// A destination that refuses to accept past `cap`, the way a client that

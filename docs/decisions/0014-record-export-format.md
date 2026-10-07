@@ -129,7 +129,11 @@ may export, and what verification claims (#45; Milestone 5 slice 1).
   central directory are each O(units), and the database driver buffers a
   bounded number of rows per query. The corpus of stored payloads is
   never held, one unit's bytes are held at a time, and the browser's own
-  download helper buffers the response it saves, separately;
+  download helper buffers the response it saves, separately. The point
+  reads pass through whichever pooled connections the pool hands out, so
+  their SQLite page caches — at most the pool's size times the
+  per-connection cache limit, a constant the corpus does not grow — also
+  count toward an export's memory;
 - the delivery and its failure share one bounded channel between the
   producer and the response. The channel holds at most 8 items of at
   most 64 KiB each, so what waits for a stalled client is bounded in
@@ -149,16 +153,16 @@ may export, and what verification claims (#45; Milestone 5 slice 1).
   which a client that outlasted the failure signal would otherwise read
   as success. Anything else ends the body in an error: an incomplete
   download the verifier refuses, never a complete export;
-- the export holds no read transaction while it waits on the client, and
-  at most one pooled connection at any moment, idle between statements.
-  Its audit event is written in its own short write transaction, and the
-  metadata pass — the unit list the archive manifest carries — is one
-  short read transaction; both are committed before the response starts,
-  and neither reserves the writer (ADR 0019). The payload pass holds one
-  pooled connection for its whole length but opens no transaction on it:
-  each unit's stored bytes are read by one autocommit statement on that
-  connection, completed before the bytes are handed to the client, and the
-  re-read `record_schema`, `content_hash`, and `chain_hash` are checked
+- the export holds no read transaction and no pooled connection while it
+  waits on the client. Its audit event is written in its own short write
+  transaction, and the metadata pass — the unit list the archive manifest
+  carries — is one short read transaction; both are committed before the
+  response starts, and neither reserves the writer (ADR 0019). Each unit's
+  stored bytes are then read by one autocommit statement on a connection
+  acquired for that read and returned to the pool before the bytes are
+  handed to the client, so stalled downloads — however many — hold no
+  lease that ordinary work could be starved of; and the re-read
+  `record_schema`, `content_hash`, and `chain_hash` are checked
   against the manifest's entry; a mismatch or a missing row ends the
   transfer incomplete. What ties payload to manifest is therefore the
   immutability of finalized versions, enforced by the database triggers

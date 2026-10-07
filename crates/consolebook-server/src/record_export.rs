@@ -194,14 +194,18 @@ pub async fn export(
 /// the serialized manifest that lists it), one unit's bytes at a time,
 /// and the container's central directory — never the corpus of payloads.
 ///
-/// No read transaction outlives the metadata pass. The payload pass holds
-/// one pooled connection but opens no transaction on it: each version is
-/// read by one autocommit statement that completes before its bytes are
-/// written, so while the sink waits on a client the connection is idle and
-/// no read is open. A download, however slow, therefore reserves no writer
-/// (ADR 0019), pins no WAL reader that would hold back a checkpoint, and
-/// never makes another export wait for a connection; the export holds at
-/// most one pooled connection at any moment.
+/// No read transaction outlives the metadata pass, and no pooled connection
+/// is held while the sink waits on a client: each version is read by one
+/// autocommit statement on a connection acquired for that read and returned
+/// to the pool before the bytes are written. A download, however slow,
+/// therefore reserves no writer (ADR 0019), pins no WAL reader that would
+/// hold back a checkpoint, and holds no lease that ordinary work or another
+/// export could be starved of; the export holds at most one pooled
+/// connection at any moment, and none between reads. The price is that the
+/// point reads pass through whichever connections the pool hands out, so
+/// their SQLite page caches — at most the pool's size times the per-
+/// connection cache limit, a constant the corpus does not grow — count
+/// toward the export's memory beside the terms above.
 ///
 /// The audit precedes both content passes, so a scope with nothing to
 /// export is refused before anything is recorded, and a typed refusal
@@ -700,13 +704,13 @@ pub(crate) async fn collect_meta(
 /// manifest into an already-started archive, in the manifest's order. Peak
 /// memory is one version's bytes at a time.
 ///
-/// Each version is a point read by its key: one autocommit statement on one
-/// pooled connection held for the whole pass, so the connection's page
-/// cache is the only one the corpus passes through, and no transaction is
-/// open when the bytes reach the writer — which may wait on the client. The
-/// stored fingerprints must be the ones the manifest already states: a
-/// version that is gone or differs fails the export rather than shipping a
-/// payload its manifest does not describe.
+/// Each version is a point read by its key: one autocommit statement on a
+/// pooled connection acquired for that read alone, back in the pool before
+/// the bytes reach the writer — which may wait on the client — so a stalled
+/// download holds no lease and no transaction. The stored fingerprints must
+/// be the ones the manifest already states: a version that is gone or
+/// differs fails the export rather than shipping a payload its manifest
+/// does not describe.
 pub(crate) async fn write_units_streaming<W: Write + Seek>(
     pool: &SqlitePool,
     writer: &mut ArchiveWriter<W>,
@@ -714,10 +718,6 @@ pub(crate) async fn write_units_streaming<W: Write + Seek>(
     installation_id: &str,
     exported_at: i64,
 ) -> Result<()> {
-    let mut conn = pool
-        .acquire()
-        .await
-        .context("acquiring the export's payload connection")?;
     for entry in units {
         let stored: Option<(i64, Vec<u8>, String, String)> = sqlx::query_as(
             "SELECT record_schema, canonical_bytes, content_hash, chain_hash
@@ -726,7 +726,7 @@ pub(crate) async fn write_units_streaming<W: Write + Seek>(
         )
         .bind(entry.record_id)
         .bind(entry.version_number)
-        .fetch_optional(&mut *conn)
+        .fetch_optional(pool)
         .await
         .with_context(|| format!("reading finalized version {}", entry.path))?;
         let Some((record_schema, bytes, content_hash, chain_hash)) = stored else {
