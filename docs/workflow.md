@@ -12,10 +12,11 @@ for people and agents, not a scheduler, dispatcher, or unattended restart.
   prerequisites; this page does not replace or waive them.
 - [The roadmap](roadmap.md) owns current product and milestone state. It is a
   status summary, not an authorized queue of work.
-- The primary GitHub issue owns the task graph and acceptance criteria. For
-  this setup, [issue #71](https://github.com/FieldmouseWorks/consolebook/issues/71)
-  is canonical. Comments may preserve dated progress and receipts; the PR
-  links the issue and describes the change without a competing live graph.
+- The primary GitHub issue owns the task graph and acceptance criteria;
+  [issue #71](https://github.com/FieldmouseWorks/consolebook/issues/71), now
+  closed, is the worked setup example. Comments may preserve dated progress
+  and receipts; the PR links the issue and describes the change without a
+  competing live graph.
 - The current PR and review threads own review feedback and hosted results.
   The [PR gate](../.github/workflows/pr-gate.yml) defines current hosted web,
   Rust, and browser checks.
@@ -29,17 +30,18 @@ does not grant it. Explicit authorization carries across sessions until it is
 revoked or the task leaves scope. Credentials prove access, not permission.
 This document grants no authority.
 
-For setup issue #71, the owner's request authorizes scoped local edits and
-checks, an issue-linked branch and PR, issue/PR evidence updates, isolated
+As the worked example, setup issue #71's grant authorized scoped local edits
+and checks, an issue-linked branch and PR, issue/PR evidence updates, isolated
 setup work, and cleanup of owned processes and scratch resources; the issue
-records that grant. No merge, deployment, non-PR publication, paid-service, or unrelated-cleanup
-authority was granted. Later tasks must use their current authorization.
+records that grant. No merge, deployment, non-PR publication, paid-service, or
+unrelated-cleanup authority was granted by it. Every task records its own
+current authorization the same way.
 
 For an authorized merge, verify the exact merged main revision, archive and
 read back the issue evidence, then clean up owned branches, worktrees, and
 processes. Deploy only when explicitly authorized. Without merge authority,
-finish the reviewable work and leave one concrete decision. This setup ends at
-a PR ready for the maintainer; preserve owned work until approval arrives.
+finish the reviewable work and leave one concrete decision: a PR ready for
+the maintainer, with owned work preserved until approval arrives.
 
 Use invented agencies, people, incidents, identifiers, and narratives. Keep
 operational records, personal data, and credentials out of issues, commits,
@@ -58,7 +60,7 @@ Give each node a stable ID and these fields:
 ID:
 Outcome: observable result
 Depends on: IDs, or —
-Owner / model: named owner; requested route and observed model at max, if exposed
+Owner / role: named owner and role; the requested route is recorded as a role, never a model identifier
 Inputs: issue, files, revision, and other source records
 Acceptance: observable condition and check
 State: pending | ready | active | blocked | verified
@@ -76,33 +78,37 @@ back the completed graph snapshot.
 Graph edits record progress; they do not change acceptance, authority, or an
 owner-set budget. Missing evidence is a specific blocker, not a completed check.
 
-## Model routes and ownership
+## Roles and ownership
 
-Use the model route assigned to the task and record the requested model and
-reasoning level accurately. The project routes work as follows:
+Guidance names roles; each session maps them to whatever it runs, and that
+mapping is a machine-local preference kept out of tracked files. Record the
+requested route as a role, never a model identifier; observed runtime evidence
+follows the receipt rules below.
 
-| Work | Route |
-| --- | --- |
-| Overall planning, architecture, difficult tradeoffs, review, and integration | GPT-6 Astra (`gpt-6-astra`) / max |
-| Complex implementation, substantial refactoring, or difficult debugging | GPT-6 Sol (`gpt-6-sol`) / max |
-| Bounded exploration, documentation, routine checks, and mechanical edits | GPT-6 Luna (`gpt-6-luna`) / max |
+| Role | Owns | Acceptance is decided by |
+| --- | --- | --- |
+| integrator | the graph, scope, selection of ready nodes, review of every delegated result, integration, and every remote write (receipts included) | the integrator's own verification |
+| implementer | a judgment-heavy change from a fixed brief with named file ownership | review plus the brief's checks |
+| reviewer | an independent, read-only reading of an exact candidate; edits nothing | findings with evidence |
+| worker | bounded work a command can accept: mechanical edits, suite runs, mechanical documentation sweeps (renames, link checks) | the named command |
+| verifier | named proof or gate runs on a frozen candidate; produces the receipt the integrator posts | the receipt |
+| scout | read-only questions of fact: locations, counts, log triage, classification | quoted evidence |
 
-The primary owner maintains the graph, scope, and acceptance; reviews
-contributions and independently verifies results. Astra selects only ready
-nodes whose dependencies are verified. Delegated owners get a narrow outcome,
-explicit file or responsibility ownership, inputs, acceptance, and any
-owner-set budget. Preserve others' changes. Run work concurrently only
-with independent inputs and ownership; inspect every result, including failures.
+Route by how a node's acceptance is decided, not by how difficult it looks: a
+command decides it → worker, verifier, or scout; judgment decides it →
+implementer or reviewer; design decides it → the integrator with whatever plan
+review the session has. The integrator selects only ready nodes whose
+dependencies are verified. Delegated owners get a narrow outcome, explicit file
+or responsibility ownership, inputs, acceptance, and any owner-set budget.
+Preserve others' changes. Run work concurrently only with independent inputs
+and ownership; inspect every result, including failures.
 
-Record requested routing separately from runtime evidence. A configuration
-setting or model catalog entry does not prove which model handled a turn. Do
-not silently substitute a route or describe a requested route as an observed
-invocation. If the host cannot expose the actual route, say that precisely.
-
-DeepSeek remains paused. Use it only if the owner explicitly re-enables it,
-under the current supervised-use instructions. Record substantive results
-and independent checks in the issue or existing evaluation record. Editing an
-instruction file does not change an already running conversation's model.
+A delegate's completion claim is a pointer to review, not verification. Record
+requested routing separately from runtime evidence: a configuration setting
+does not prove which model handled a turn, so do not describe a requested route
+as an observed invocation, and if the host cannot expose the actual route, say
+that precisely. Report an unavailable route instead of substituting silently.
+Editing an instruction file does not change an already running conversation.
 
 ## Effort and continuation
 
@@ -158,7 +164,7 @@ finish independent preparation, and ask only for the decision needed to proceed.
    no automatic exemption from the repository's required gates.
 8. **Review the evidence.** Inspect the final diff and relevant raw logs.
    Review behavior against acceptance, not just the success summary. Label
-   self-review, independent model review, human review, and automated checks
+   self-review, independent reviewer-role review, human review, and automated checks
    accurately; one is not evidence that another happened. Fix in-scope causes
    and record exact evidence for separate issues.
 9. **Publish and close the graph.** When authorized, publish the PR and link it
@@ -172,6 +178,13 @@ ensure builds, browser profiles, databases, ports, and output paths cannot
 collide. Parallel checks may then proceed when the PR has been authorized and
 published. If a check fails, preserve its receipt and follow the evidence-driven
 failure loop; a later green run does not erase an earlier failure.
+
+End-to-end verification uses the real binary: the browser suite starts the
+compiled server per test and drives it as an operator would, so an agent can
+prove a change the way a reviewer would see it rather than guess from the code.
+The "Choose context by task" index in `docs/development.md` is the lightweight
+map of what exists and where it is owned; keep both current, and prefer
+extending them over writing one-off scripts for a session.
 
 ## Receipts and resuming
 
@@ -200,20 +213,27 @@ observed results, carry forward any owner-set budget and its usage without
 inventing a counter, and state one next action. Stale evidence or an agent's
 completion claim alone does not satisfy acceptance.
 
-## Instruction loading and workflow changes
+## Instruction entrypoints and workflow changes
 
-Codex selects global `AGENTS.override.md` when present, otherwise global
-`AGENTS.md`, then reads from the project root toward the current directory. It
-loads at most one file per directory, preferring `AGENTS.override.md` over
-`AGENTS.md`; check nested instructions. Generic Markdown is not an entrypoint:
-active project instructions must link here or the user must request this
-page. See the official
-[AGENTS.md configuration guide](https://learn.chatgpt.com/docs/agent-configuration/agents-md).
+`AGENTS.md` is the one project contract. Each agent tool loads it through its
+own thin entrypoint — `CLAUDE.md`, `.agents/rules/consolebook.md`,
+`.github/copilot-instructions.md` — and those files only point to it. Tools
+differ in which files they load and in what order (some read a nested or
+override file per directory); check the tool's own documentation and any nested
+instructions rather than assuming. Generic Markdown is not an entrypoint:
+active project instructions must link here or the user must request this page.
 
 When an acceptance criterion requires checking effective instructions in a
-fresh session, perform that probe in a genuinely fresh Codex session or record
-the precise host limitation. Do not claim that editing instructions changed
-the already running session.
+fresh session, perform that probe in a genuinely fresh session of the tool in
+question or record the precise host limitation. Do not claim that editing
+instructions changed the already running session.
+
+Verification here is the real binary: the browser suite starts the compiled
+server per test and drives it as an operator would, so an agent can prove a
+change the way a reviewer would see it rather than guess from the code. The
+task index in `docs/development.md` is the lightweight map of what exists and
+where it is owned; keep both current, and prefer extending them over writing
+one-off scripts for a session.
 
 Improve this procedure only from a specific observed problem. Record the
 problem and proposed scope in the existing issue, make a small reviewable
