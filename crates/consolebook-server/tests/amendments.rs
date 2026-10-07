@@ -76,9 +76,7 @@ impl Fixture {
     }
 
     fn app(&self) -> axum::Router {
-        consolebook_server::http::router(consolebook_server::http::AppState {
-            pool: self.pool.clone(),
-        })
+        consolebook_server::http::router(consolebook_server::http::AppState::new(self.pool.clone()))
     }
 
     async fn login(&self, username: &str, password: &str) -> String {

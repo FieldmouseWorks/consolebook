@@ -43,9 +43,7 @@ impl Fixture {
     }
 
     fn app(&self) -> axum::Router {
-        http::router(http::AppState {
-            pool: self.pool.clone(),
-        })
+        http::router(http::AppState::new(self.pool.clone()))
     }
 
     /// Creates a user with no capability grants who can sign in.

@@ -1104,9 +1104,11 @@ async fn an_export_abandoned_after_its_audit_stops_before_the_metadata_pass() {
     seed_versions(&pool, admin_id, record_id, 20, PAYLOAD).await;
     let before = exports_recorded(&pool).await;
 
-    // The client is present for the first check and gone for every later one.
+    // The client is present for the two checks before the audit — before
+    // authorization and before the audit's own transaction — and gone for
+    // every later one, the first of which precedes the metadata pass.
     let checks = std::sync::atomic::AtomicUsize::new(0);
-    let probe = || checks.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0;
+    let probe = || checks.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= 2;
     let mut sink = Discard {
         bytes: 0,
         position: 0,
@@ -1326,7 +1328,7 @@ async fn the_export_response_carries_the_buffered_archive_over_the_wire() {
         .expect("bind");
     let addr = listener.local_addr().expect("addr");
     let app =
-        consolebook_server::http::router(consolebook_server::http::AppState { pool: pool.clone() });
+        consolebook_server::http::router(consolebook_server::http::AppState::new(pool.clone()));
     let serving = tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });
@@ -1417,7 +1419,7 @@ async fn a_client_that_outlasts_every_send_window_never_sees_a_complete_transfer
         .expect("bind");
     let addr = listener.local_addr().expect("addr");
     let app =
-        consolebook_server::http::router(consolebook_server::http::AppState { pool: pool.clone() });
+        consolebook_server::http::router(consolebook_server::http::AppState::new(pool.clone()));
     let serving = tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });
@@ -1482,7 +1484,7 @@ async fn exports_beyond_the_slot_bound_are_refused_until_a_slot_returns() {
         .expect("bind");
     let addr = listener.local_addr().expect("addr");
     let app =
-        consolebook_server::http::router(consolebook_server::http::AppState { pool: pool.clone() });
+        consolebook_server::http::router(consolebook_server::http::AppState::new(pool.clone()));
     let serving = tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });

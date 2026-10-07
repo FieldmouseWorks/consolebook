@@ -37,6 +37,24 @@ pub const SESSION_COOKIE: &str = "consolebook_session";
 #[derive(Clone)]
 pub struct AppState {
     pub pool: SqlitePool,
+    /// The export admission slots this installation hands out
+    /// (`exports_http::EXPORT_SLOTS`): owned by the state rather than the
+    /// process, so each server — and each test's server — bounds its own
+    /// producers.
+    pub export_slots: std::sync::Arc<tokio::sync::Semaphore>,
+}
+
+impl AppState {
+    /// A state over `pool` with a fresh set of export slots.
+    #[must_use]
+    pub fn new(pool: SqlitePool) -> Self {
+        Self {
+            pool,
+            export_slots: std::sync::Arc::new(tokio::sync::Semaphore::new(
+                crate::exports_http::EXPORT_SLOTS,
+            )),
+        }
+    }
 }
 
 pub fn router(state: AppState) -> Router {

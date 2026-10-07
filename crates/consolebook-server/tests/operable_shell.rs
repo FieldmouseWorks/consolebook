@@ -61,7 +61,7 @@ async fn open_existing_refuses_to_create() {
 async fn health_endpoint_reports_ok_with_database() {
     let (_tmp, data_dir) = temp_data_dir();
     let pool = storage::open(&data_dir.database()).await.expect("open");
-    let app = http::router(http::AppState { pool });
+    let app = http::router(http::AppState::new(pool));
 
     let response = app
         .oneshot(
@@ -91,7 +91,7 @@ async fn health_endpoint_degrades_when_database_is_gone() {
     let (_tmp, data_dir) = temp_data_dir();
     let pool = storage::open(&data_dir.database()).await.expect("open");
     pool.close().await;
-    let app = http::router(http::AppState { pool });
+    let app = http::router(http::AppState::new(pool));
 
     let response = app
         .oneshot(

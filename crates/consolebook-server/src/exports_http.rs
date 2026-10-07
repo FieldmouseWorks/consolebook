@@ -20,7 +20,7 @@ use axum::response::{IntoResponse, Json, Response};
 use axum::routing::get;
 use http_body::Frame;
 use time::OffsetDateTime;
-use tokio::sync::{Semaphore, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot};
 
 use crate::export_stream::EntryBuffer;
 use crate::http::{ApiError, AppState, CurrentUser};
@@ -66,11 +66,10 @@ const PREFLIGHT_LIMIT: Duration = Duration::from_secs(30);
 /// authorized, audited, or spawned; the refusal is the client's cue to
 /// retry, not a failure of the export.
 ///
-/// Public so the transport test can fill every slot.
+/// The slots live on [`AppState`], one set per server: an export holds one
+/// from before its producer is spawned until the producer returns. Public
+/// so the transport test can fill every slot.
 pub const EXPORT_SLOTS: usize = 4;
-/// The slots themselves, one per process: an export holds one from before
-/// its producer is spawned until the producer returns.
-static SLOTS: Semaphore = Semaphore::const_new(EXPORT_SLOTS);
 
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
@@ -149,7 +148,7 @@ async fn deliver(state: &AppState, actor_user_id: i64, scope: Scope) -> Result<R
     // Admission comes first: a slot is taken before any work is done, held
     // by the producer for the whole download, and released when it ends,
     // so at most `EXPORT_SLOTS` producers exist and none ever queues.
-    let Ok(slot) = SLOTS.try_acquire() else {
+    let Ok(slot) = state.export_slots.clone().try_acquire_owned() else {
         return Err(export_busy());
     };
     let exported_at = OffsetDateTime::now_utc().unix_timestamp();
