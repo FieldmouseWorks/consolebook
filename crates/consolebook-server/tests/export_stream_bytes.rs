@@ -786,21 +786,22 @@ async fn overlapping_exports_on_a_two_connection_pool_both_complete() {
     small.close().await;
 }
 
-/// A destination that holds one write — the `hold_at`th it is given,
-/// counted from one — until the test releases it.
+/// A destination that holds the first write landing at or beyond
+/// `hold_from` bytes until the test releases it. The container writer
+/// hands the manifest, then each version's record and unit manifest, in
+/// order, so a position threshold says how much of the corpus precedes
+/// the hold without depending on how many writes an entry takes.
 struct ExportGate {
     position: u64,
     released: std::sync::mpsc::Receiver<()>,
     entered: std::sync::mpsc::Sender<()>,
     held: bool,
-    hold_at: usize,
-    writes: usize,
+    hold_from: u64,
 }
 
 impl Write for ExportGate {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.writes += 1;
-        if !self.held && self.writes == self.hold_at {
+        if !self.held && self.position >= self.hold_from {
             self.held = true;
             let _ = self.entered.send(());
             let _ = self
@@ -841,13 +842,14 @@ struct GateHandle {
 }
 
 fn gate_of() -> GateHandle {
-    gate_at(1)
+    gate_from(0)
 }
 
-/// A held export whose destination stops on its `hold_at`th write rather
-/// than its first, so the export can be observed part way through its
-/// payloads instead of at the archive manifest.
-fn gate_at(hold_at: usize) -> GateHandle {
+/// A held export whose destination stops on the first write at or beyond
+/// `hold_from` bytes rather than on its first, so the export can be
+/// observed part way through its payloads instead of at the archive
+/// manifest.
+fn gate_from(hold_from: u64) -> GateHandle {
     let (entered_tx, arrived_rx) = std::sync::mpsc::channel();
     let (release, released) = std::sync::mpsc::channel();
     GateHandle {
@@ -856,8 +858,7 @@ fn gate_at(hold_at: usize) -> GateHandle {
             released,
             entered: entered_tx,
             held: false,
-            hold_at,
-            writes: 0,
+            hold_from,
         },
         arrived_rx,
         release,
@@ -938,10 +939,10 @@ async fn a_download_in_flight_pins_no_wal_reader() {
     let (_tmp, pool, admin_id, record_id) = installed().await;
     seed_versions(&pool, admin_id, record_id, 20, PAYLOAD).await;
 
-    // The writer hands the destination the manifest, then a record and its
-    // unit manifest per version: the seventh write lands inside the fourth
-    // version, after three complete point reads.
-    let held = gate_at(7);
+    // Everything but the payloads is small, so a write landing beyond three
+    // payloads' worth of bytes comes after at least three versions' records
+    // — and their point reads — have passed through the held connection.
+    let held = gate_from(3 * PAYLOAD as u64);
     let export_pool = pool.clone();
     let running = tokio::task::spawn_blocking(move || {
         tokio::runtime::Handle::current().block_on(async move {
