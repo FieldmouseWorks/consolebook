@@ -49,14 +49,16 @@ copilot deepseek llama mistral grok qwen
 # --- Allowlist -------------------------------------------------------------
 # Tool entrypoint file names: they say where a tool reads instructions, not
 # which model runs. Exact, case-sensitive tokens, one per line, no whitespace.
-# A token is removed from a reported line only where it stands alone: the
-# character before it is not a letter or digit, and either the token ends the
-# line or the next character is not a letter, digit, or _ ; if that next
-# character is . or - (sentence punctuation), the one after it must also not
-# be a letter, digit, or _ . So "See CLAUDE.md." strips, while CLAUDE.md5,
-# CLAUDE.md_x, CLAUDE.md.backup, and CLAUDE.md-old do not. The rest of the
-# line is still tested, and no file is ever skipped. To extend: add a line
-# with the exact token.
+# A token is removed from a reported line only where it stands alone:
+#   before it: start of line, a space or tab, or one of  / ` ( [ { " ' < * , ; :
+#   after it:  end of line, or a character that is not a letter, digit, or _ ;
+#              if that character is . or - (sentence punctuation), the one
+#              after it must also not be a letter, digit, or _ .
+# So web/CLAUDE.md, ./CLAUDE.md, (CLAUDE.md), **CLAUDE.md**, and "See
+# CLAUDE.md." strip, while MY_CLAUDE.md, x.CLAUDE.md, old-CLAUDE.md,
+# CLAUDE.md5, CLAUDE.md_x, CLAUDE.md.backup, and CLAUDE.md-old do not.
+# Longer tokens are stripped first. The rest of the line is still tested, and
+# no file is ever skipped. To extend: add a line with the exact token.
 ALLOWLIST='
 CLAUDE.md
 .github/copilot-instructions.md
@@ -212,28 +214,36 @@ function isalnum(c) {
 function isword(c) {
 	return isalnum(c) || c == "_"
 }
-# Replace with a space every occurrence of tok in s that stands alone: no
-# letter or digit before it; after it, end of line or a character that is not
-# a letter, digit, or _ ; and when that character is . or - the next one must
-# also not be a letter, digit, or _ (sentence punctuation, not an extension).
-function strip(s, tok,    out, i, n, pre, post, post2, ok) {
+# True if c may precede an allowlisted token: start of line (""), space,
+# tab, or one of  / ` ( [ { " <apostrophe> < * , ; :  (\047 is the apostrophe).
+function isleftsep(c) {
+	return c == "" || index(" \t/`([{\"\047<*,;:", c) > 0
+}
+# Replace with a space every occurrence of tok in s that stands alone. Before
+# it: isleftsep. After it: end of line or a character that is not a letter,
+# digit, or _ ; when that character is . or - the next one must also not be
+# a letter, digit, or _ (sentence punctuation, not an extension). Neighbors
+# are always read from the original line s.
+function strip(s, tok,    out, i, n, off, pre, post, post2, ok) {
 	out = ""
 	n = length(tok)
-	while ((i = index(s, tok)) > 0) {
+	off = 0
+	while ((i = index(substr(s, off + 1), tok)) > 0) {
+		i += off
 		pre = (i > 1) ? substr(s, i - 1, 1) : ""
 		post = substr(s, i + n, 1)
 		post2 = substr(s, i + n + 1, 1)
-		ok = !isalnum(pre) && !isword(post)
+		ok = isleftsep(pre) && !isword(post)
 		if (ok && (post == "." || post == "-") && isword(post2)) ok = 0
 		if (ok) {
-			out = out substr(s, 1, i - 1) " "
-			s = substr(s, i + n)
+			out = out substr(s, off + 1, i - 1 - off) " "
+			off = i + n - 1
 		} else {
-			out = out substr(s, 1, i)
-			s = substr(s, i + 1)
+			out = out substr(s, off + 1, i - off)
+			off = i
 		}
 	}
-	return out s
+	return out substr(s, off + 1)
 }
 # True if pattern p (lowercase) occurs in s (lowercased) with no letter or
 # digit before it and no letter after it.
