@@ -48,10 +48,14 @@ copilot deepseek llama mistral grok qwen
 # --- Allowlist -------------------------------------------------------------
 # Tool entrypoint file names: they say where a tool reads instructions, not
 # which model runs. Exact, case-sensitive tokens, one per line, no whitespace.
-# A token is removed from a reported line only where the pattern rule would
-# also treat it as standing alone (no letter or digit before it, no letter
-# after it); the rest of the line is still tested, and no file is ever
-# skipped. To extend: add a line with the exact token.
+# A token is removed from a reported line only where it stands alone: the
+# character before it is not a letter or digit, and either the token ends the
+# line or the next character is not a letter, digit, or _ ; if that next
+# character is . or - (sentence punctuation), the one after it must also not
+# be a letter, digit, or _ . So "See CLAUDE.md." strips, while CLAUDE.md5,
+# CLAUDE.md_x, CLAUDE.md.backup, and CLAUDE.md-old do not. The rest of the
+# line is still tested, and no file is ever skipped. To extend: add a line
+# with the exact token.
 ALLOWLIST='
 CLAUDE.md
 .github/copilot-instructions.md
@@ -79,6 +83,24 @@ for entry in $SCANNED; do
 		exit 2
 	fi
 done
+
+# Fail closed: a tracked scanned file missing from the working tree would be
+# silently skipped by git grep, so refuse to scan until it is restored.
+set +e
+# shellcheck disable=SC2086 # word splitting of the pathspec list is intended
+deleted=$(git ls-files --deleted -- $SCANNED)
+st=$?
+set -e
+if [ "$st" -ne 0 ]; then
+	echo "$me: listing deleted files failed (status $st)" >&2
+	exit 2
+fi
+if [ -n "$deleted" ]; then
+	printf '%s\n' "$deleted" | while IFS= read -r path; do
+		echo "$me: tracked scanned file is missing from the working tree: $path" >&2
+	done
+	exit 2
+fi
 
 # Count the scanned files, and refuse paths containing ':' because hit lines
 # are parsed as path:line:text.
@@ -135,15 +157,23 @@ function isalpha(c) {
 function isalnum(c) {
 	return isalpha(c) || (c != "" && index("0123456789", c) > 0)
 }
-# Replace every occurrence of tok in s that has no letter or digit before it
-# and no letter after it (the same boundary as the hit test) with a space.
-function strip(s, tok,    out, i, n, pre, post) {
+function isword(c) {
+	return isalnum(c) || c == "_"
+}
+# Replace with a space every occurrence of tok in s that stands alone: no
+# letter or digit before it; after it, end of line or a character that is not
+# a letter, digit, or _ ; and when that character is . or - the next one must
+# also not be a letter, digit, or _ (sentence punctuation, not an extension).
+function strip(s, tok,    out, i, n, pre, post, post2, ok) {
 	out = ""
 	n = length(tok)
 	while ((i = index(s, tok)) > 0) {
 		pre = (i > 1) ? substr(s, i - 1, 1) : ""
 		post = substr(s, i + n, 1)
-		if (!isalnum(pre) && !isalpha(post)) {
+		post2 = substr(s, i + n + 1, 1)
+		ok = !isalnum(pre) && !isword(post)
+		if (ok && (post == "." || post == "-") && isword(post2)) ok = 0
+		if (ok) {
 			out = out substr(s, 1, i - 1) " "
 			s = substr(s, i + n)
 		} else {
