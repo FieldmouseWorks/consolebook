@@ -82,6 +82,7 @@ use a compatible supported Node.js release. Node.js is build-time only.
 From the repository root, run in this order:
 
 ```sh
+scripts/check-guidance-names.sh
 (cd web && npm ci && npm run check && npm run build)
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
@@ -89,6 +90,11 @@ cargo test --workspace
 cargo build -p consolebook-server
 (cd web && npx playwright install chromium && npm run e2e)
 ```
+
+`scripts/check-guidance-names.sh` is the rung-2 guard for one recurring
+class: tracked agent guidance naming specific models or vendors instead of
+roles. Its scanned set, pattern list, and entrypoint-name allowlist live at
+the top of the script, with instructions for extending them.
 
 The explicit build supplies `target/debug/consolebook-server` for the browser
 tests. The shared fixture starts a scratch installation per test on an

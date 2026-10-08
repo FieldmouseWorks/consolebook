@@ -35,6 +35,9 @@ tests show what is implemented. [Roadmap](roadmap.md) owns milestone status.
 `crates/consolebook-server/migrations/` own schema, constraints, and triggers.
 Read both when changing a persisted contract.
 
+`scripts/` holds repository guards that the gates run before the build;
+`CONTRIBUTING.md` lists each one in the local command sequence.
+
 Packet membership and timeline verification tests live in
 `tests/trainee_packet/pin_history.rs`; the parent packet test module owns
 shared fixtures and archive-editing helpers.
