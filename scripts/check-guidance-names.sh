@@ -5,6 +5,12 @@
 # Usage: scripts/check-guidance-names.sh   (from anywhere in the repository)
 # Exit:  0 clean, 1 residual hits (printed as path:line: text), 2 error.
 #
+# Scan contract: locally the guard scans tracked guidance as it exists in the
+# working tree and in the index (hits from the index are marked "(staged)"),
+# so a name staged for commit fails even if the working tree no longer has
+# it. In CI it scans the checked-out commit. Untracked files, stash entries,
+# and other refs are not scanned.
+#
 # Depends only on git, a POSIX awk, and mktemp (for git grep's stderr).
 # Deliberately no system grep: its alternation behavior differs between
 # implementations.
@@ -165,13 +171,14 @@ for p in $PATTERNS; do
 	set -- "$@" -e "$p"
 done
 
-# Prefilter with git grep: any line containing a pattern as a substring is a
-# candidate; the boundary rule is applied in awk below. --text scans files git
-# would treat as binary (attributes or NUL bytes) instead of skipping them.
-# Explicit flags override user config that would change the output shape
-# (color, column numbers, relative paths). git grep can report an unreadable
-# file (permissions, a path replaced by a directory or symlink) on stderr and
-# still exit 0 or 1, so any stderr output fails closed regardless of status.
+# Prefilter with git grep, twice: once over the working tree and once over
+# the index (--cached), with identical flags. Any line containing a pattern as
+# a substring is a candidate; the boundary rule is applied in awk below.
+# --text scans files git would treat as binary (attributes or NUL bytes)
+# instead of skipping them. Explicit flags override user config that would
+# change the output shape (color, column numbers, relative paths). git grep
+# can report an unreadable file on stderr and still exit 0 or 1, so any
+# stderr output from either pass fails closed regardless of status.
 errf=$(mktemp) || {
 	echo "$me: mktemp failed" >&2
 	exit 2
@@ -180,31 +187,44 @@ trap 'rm -f "$errf"' EXIT
 trap 'exit 2' HUP INT TERM
 set +e
 # shellcheck disable=SC2086 # word splitting of the pathspec list is intended
-hits=$(git -c grep.column=false -c grep.fullName=true \
+hits_wt=$(git -c grep.column=false -c grep.fullName=true \
 	grep --no-color -n --text -i -F "$@" -- $SCANNED 2>"$errf")
-gs=$?
+gs_wt=$?
+# shellcheck disable=SC2086 # word splitting of the pathspec list is intended
+hits_ix=$(git -c grep.column=false -c grep.fullName=true \
+	grep --cached --no-color -n --text -i -F "$@" -- $SCANNED 2>>"$errf")
+gs_ix=$?
 set -e
 if [ -s "$errf" ]; then
 	awk -v me="$me" '{ print me ": git grep reported: " $0 }' "$errf" >&2
-	echo "$me: git grep wrote to stderr (status $gs); refusing to pass" >&2
+	echo "$me: git grep wrote to stderr (status $gs_wt working tree, $gs_ix index); refusing to pass" >&2
 	exit 2
 fi
-case $gs in
-0) ;;
-1)
+for gs in "$gs_wt" "$gs_ix"; do
+	case $gs in
+	0 | 1) ;;
+	*)
+		echo "$me: git grep failed (status $gs_wt working tree, $gs_ix index)" >&2
+		exit 2
+		;;
+	esac
+done
+if [ "$gs_wt" -eq 1 ] && [ "$gs_ix" -eq 1 ]; then
 	echo "guidance names: ok ($nfiles files scanned)"
 	exit 0
-	;;
-*)
-	echo "$me: git grep failed (status $gs)" >&2
-	exit 2
-	;;
-esac
+fi
 
-# Re-test each reported line after stripping allowlisted tokens. Residual
-# hits (and any parse error) go to stderr.
+# Re-test each reported line after stripping allowlisted tokens. Working-tree
+# candidates come first, then a sentinel line (it has no colon, so it cannot
+# be a git grep line), then index candidates, which are marked "(staged)".
+# A missing sentinel is a parse error. Residual hits (and any parse error) go
+# to stderr.
 set +e
-printf '%s\n' "$hits" | GUARD_PATTERNS=$PATTERNS GUARD_ALLOW=$ALLOWLIST awk '
+{
+	[ "$gs_wt" -ne 0 ] || printf '%s\n' "$hits_wt"
+	printf '%s\n' '=index='
+	[ "$gs_ix" -ne 0 ] || printf '%s\n' "$hits_ix"
+} | GUARD_PATTERNS=$PATTERNS GUARD_ALLOW=$ALLOWLIST awk '
 function isalpha(c) {
 	return c != "" && index("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", c) > 0
 }
@@ -268,7 +288,10 @@ BEGIN {
 			if (length(allow[b]) > length(allow[a])) { t = allow[a]; allow[a] = allow[b]; allow[b] = t }
 	bad = 0
 	parse_err = 0
+	sentinel = 0
+	mark = ""
 }
+$0 == "=index=" && !sentinel { sentinel = 1; mark = "(staged) "; next }
 $0 == "" { next }
 {
 	i = index($0, ":")
@@ -287,13 +310,17 @@ $0 == "" { next }
 	t = tolower(t)
 	for (k = 1; k <= npat; k++) {
 		if (hasword(t, tolower(pat[k]))) {
-			print path ":" line ": " text
+			print path ":" line ": " mark text
 			bad = 1
 			break
 		}
 	}
 }
-END { if (parse_err) exit 3; if (bad) exit 4 }
+END {
+	if (!parse_err && !sentinel) { print "candidate stream ended before the index sentinel"; parse_err = 1 }
+	if (parse_err) exit 3
+	if (bad) exit 4
+}
 ' >&2
 as=$?
 set -e
