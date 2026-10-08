@@ -55,16 +55,20 @@ copilot deepseek llama mistral grok qwen
 # --- Allowlist -------------------------------------------------------------
 # Tool entrypoint file names: they say where a tool reads instructions, not
 # which model runs. Exact, case-sensitive tokens, one per line, no whitespace.
-# A token is removed from a reported line only where it stands alone:
+# A token is removed from a reported line only where it stands alone, judged
+# by an explicit delimiter list on each side; any other neighbor blocks it.
 #   before it: start of line, a space or tab, or one of  / ` ( [ { " ' < * , ; :
-#   after it:  end of line, or a character that is not a letter, digit, or _ ;
-#              if that character is . or - (sentence punctuation), the one
-#              after it must also not be a letter, digit, or _ .
-# So web/CLAUDE.md, ./CLAUDE.md, (CLAUDE.md), **CLAUDE.md**, and "See
-# CLAUDE.md." strip, while MY_CLAUDE.md, x.CLAUDE.md, old-CLAUDE.md,
-# CLAUDE.md5, CLAUDE.md_x, CLAUDE.md.backup, and CLAUDE.md-old do not.
-# Longer tokens are stripped first. The rest of the line is still tested, and
-# no file is ever skipped. To extend: add a line with the exact token.
+#   after it:  end of line, a space or tab, or one of  ` ) ] } " ' > * , ; : ! ?
+#              or a run of one or more . followed by one of those terminators
+#              (sentence end or ellipsis), or - followed by end of line, a
+#              space, or a tab (a dash aside).
+# So web/CLAUDE.md, ./CLAUDE.md, (CLAUDE.md), **CLAUDE.md**, "See
+# CLAUDE.md.", "CLAUDE.md...", and "CLAUDE.md - the shim" strip, while
+# MY_CLAUDE.md, x.CLAUDE.md, old-CLAUDE.md, CLAUDE.md5, CLAUDE.md_x,
+# CLAUDE.md.backup, CLAUDE.md-old, CLAUDE.md/sub, CLAUDE.md@x, CLAUDE.md~x,
+# CLAUDE.md+x, and CLAUDE.md#x do not. Longer tokens are stripped first. The
+# rest of the line is still tested, and no file is ever skipped. To extend:
+# add a line with the exact token.
 ALLOWLIST='
 CLAUDE.md
 .github/copilot-instructions.md
@@ -231,30 +235,44 @@ function isalpha(c) {
 function isalnum(c) {
 	return isalpha(c) || (c != "" && index("0123456789", c) > 0)
 }
-function isword(c) {
-	return isalnum(c) || c == "_"
-}
 # True if c may precede an allowlisted token: start of line (""), space,
 # tab, or one of  / ` ( [ { " <apostrophe> < * , ; :  (\047 is the apostrophe).
 function isleftsep(c) {
 	return c == "" || index(" \t/`([{\"\047<*,;:", c) > 0
 }
-# Replace with a space every occurrence of tok in s that stands alone. Before
-# it: isleftsep. After it: end of line or a character that is not a letter,
-# digit, or _ ; when that character is . or - the next one must also not be
-# a letter, digit, or _ (sentence punctuation, not an extension). Neighbors
-# are always read from the original line s.
-function strip(s, tok,    out, i, n, off, pre, post, post2, ok) {
+# True if c ends an allowlisted token outright: end of line (""), space,
+# tab, or one of  ` ) ] } " <apostrophe> > * , ; : ! ?  (\047 is the apostrophe).
+function isrightterm(c) {
+	return c == "" || index(" \t`)]}\"\047>*,;:!?", c) > 0
+}
+# True if the text of s from position j on may follow an allowlisted token:
+# isrightterm; or a run of . followed by isrightterm; or - followed by end of
+# line, space, or tab. Anything else (letters, digits, _ / @ ~ + # = | ...)
+# returns false.
+function isrightsep(s, j,    c) {
+	c = substr(s, j, 1)
+	if (isrightterm(c)) return 1
+	if (c == ".") {
+		while (substr(s, j, 1) == ".") j++
+		return isrightterm(substr(s, j, 1))
+	}
+	if (c == "-") {
+		c = substr(s, j + 1, 1)
+		return c == "" || c == " " || c == "\t"
+	}
+	return 0
+}
+# Replace with a space every occurrence of tok in s that stands alone:
+# isleftsep before it and isrightsep after it. Neighbors are always read from
+# the original line s.
+function strip(s, tok,    out, i, n, off, pre, ok) {
 	out = ""
 	n = length(tok)
 	off = 0
 	while ((i = index(substr(s, off + 1), tok)) > 0) {
 		i += off
 		pre = (i > 1) ? substr(s, i - 1, 1) : ""
-		post = substr(s, i + n, 1)
-		post2 = substr(s, i + n + 1, 1)
-		ok = isleftsep(pre) && !isword(post)
-		if (ok && (post == "." || post == "-") && isword(post2)) ok = 0
+		ok = isleftsep(pre) && isrightsep(s, i + n)
 		if (ok) {
 			out = out substr(s, off + 1, i - 1 - off) " "
 			off = i + n - 1
