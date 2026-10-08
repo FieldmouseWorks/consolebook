@@ -5,8 +5,9 @@
 # Usage: scripts/check-guidance-names.sh   (from anywhere in the repository)
 # Exit:  0 clean, 1 residual hits (printed as path:line: text), 2 error.
 #
-# Depends only on git and a POSIX awk. Deliberately no system grep: its
-# alternation behavior differs between implementations.
+# Depends only on git, a POSIX awk, and mktemp (for git grep's stderr).
+# Deliberately no system grep: its alternation behavior differs between
+# implementations.
 
 set -eu
 
@@ -102,19 +103,57 @@ if [ -n "$deleted" ]; then
 	exit 2
 fi
 
-# Count the scanned files, and refuse paths containing ':' because hit lines
-# are parsed as path:line:text.
+# Fail closed: a tracked scanned path whose working-tree copy is no longer a
+# regular file (replaced by a directory, or a type change such as a symlink)
+# is skipped by git grep without any error, so refuse to scan it.
 set +e
 # shellcheck disable=SC2086 # word splitting of the pathspec list is intended
-nfiles=$(git ls-files -- $SCANNED | awk '
-	index($0, ":") { print "unsupported tracked path (contains a colon): " $0; bad = 1 }
-	END { if (bad) exit 2; print NR }
+changed=$(git diff-files --name-status --diff-filter=DT -- $SCANNED)
+st=$?
+set -e
+if [ "$st" -ne 0 ]; then
+	echo "$me: comparing the working tree with the index failed (status $st)" >&2
+	exit 2
+fi
+if [ -n "$changed" ]; then
+	printf '%s\n' "$changed" | awk -v me="$me" '{
+		tab = index($0, "\t")
+		print me ": tracked scanned path is not a regular file in the working tree (status " substr($0, 1, tab - 1) "): " substr($0, tab + 1)
+	}' >&2
+	exit 2
+fi
+
+# Count the scanned files (each path once, even with several index stages).
+# Fail closed on any entry that is not a regular file (mode 100644 or
+# 100755): git grep does not follow a symlink or descend into a submodule, so
+# such an entry would pass unread. Also refuse paths containing ':' because
+# hit lines are parsed as path:line:text.
+set +e
+# shellcheck disable=SC2086 # word splitting of the pathspec list is intended
+nfiles=$(git ls-files -s -- $SCANNED | awk -v me="$me" '
+	{
+		tab = index($0, "\t")
+		if (tab == 0) { print me ": unparseable ls-files line: " $0; bad = 1; next }
+		split(substr($0, 1, tab - 1), f, " ")
+		path = substr($0, tab + 1)
+		if (f[1] != "100644" && f[1] != "100755") {
+			print me ": scanned path is not a regular file (mode " f[1] "): " path
+			bad = 1
+		}
+		if (index(path, ":")) {
+			print me ": unsupported tracked path (contains a colon): " path
+			bad = 1
+		}
+		if (!(path in seen)) { seen[path] = 1; n++ }
+	}
+	END { if (bad) exit 2; print n + 0 }
 ')
 st=$?
 set -e
 if [ "$st" -ne 0 ]; then
-	echo "$me: listing tracked files failed (status $st)" >&2
 	[ -z "$nfiles" ] || printf '%s\n' "$nfiles" >&2
+	[ "$st" -eq 2 ] && [ -n "$nfiles" ] ||
+		echo "$me: listing tracked files failed (status $st)" >&2
 	exit 2
 fi
 
@@ -128,13 +167,26 @@ done
 # candidate; the boundary rule is applied in awk below. --text scans files git
 # would treat as binary (attributes or NUL bytes) instead of skipping them.
 # Explicit flags override user config that would change the output shape
-# (color, column numbers, relative paths).
+# (color, column numbers, relative paths). git grep can report an unreadable
+# file (permissions, a path replaced by a directory or symlink) on stderr and
+# still exit 0 or 1, so any stderr output fails closed regardless of status.
+errf=$(mktemp) || {
+	echo "$me: mktemp failed" >&2
+	exit 2
+}
+trap 'rm -f "$errf"' EXIT
+trap 'exit 2' HUP INT TERM
 set +e
 # shellcheck disable=SC2086 # word splitting of the pathspec list is intended
 hits=$(git -c grep.column=false -c grep.fullName=true \
-	grep --no-color -n --text -i -F "$@" -- $SCANNED)
+	grep --no-color -n --text -i -F "$@" -- $SCANNED 2>"$errf")
 gs=$?
 set -e
+if [ -s "$errf" ]; then
+	awk -v me="$me" '{ print me ": git grep reported: " $0 }' "$errf" >&2
+	echo "$me: git grep wrote to stderr (status $gs); refusing to pass" >&2
+	exit 2
+fi
 case $gs in
 0) ;;
 1)
