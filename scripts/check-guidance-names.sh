@@ -323,6 +323,9 @@ $0 == "" { next }
 	path = substr($0, 1, i - 1)
 	line = substr(rest, 1, j - 1)
 	text = substr(rest, j + 1)
+	# A CRLF working tree leaves one trailing carriage return on each line;
+	# drop it so a token at the end of the line still meets end of line.
+	if (substr(text, length(text), 1) == "\r") text = substr(text, 1, length(text) - 1)
 	t = text
 	for (a = 1; a <= nallow; a++) t = strip(t, allow[a])
 	t = tolower(t)
