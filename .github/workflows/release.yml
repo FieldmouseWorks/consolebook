@@ -116,7 +116,7 @@ jobs:
           sudo install/install.sh --from "dist/consolebook-linux-${{ matrix.arch }}.tar.gz" \
             --backup-dir /srv/consolebook-copies | tee copies.log
           grep -q 'Backups are also copied to /srv/consolebook-copies' copies.log
-          grep -q '^ReadWritePaths=/srv/consolebook-copies$' /etc/systemd/system/consolebook.service.d/paths.conf
+          grep -q '^ReadWritePaths=-/srv/consolebook-copies$' /etc/systemd/system/consolebook.service.d/paths.conf
           # Both directories belong to the service account (0750); inspect as root.
           for i in $(seq 1 150); do
             sudo sh -c 'ls /srv/consolebook-copies/consolebook-*.db' >/dev/null 2>&1 && break
@@ -126,6 +126,17 @@ jobs:
           copy=$(sudo sh -c 'ls /srv/consolebook-copies/consolebook-*.db' | tail -n 1)
           sudo cmp "$copy" "/var/lib/consolebook/backups/$(basename "$copy")"
           sudo journalctl -u consolebook --no-pager | grep -q 'backup copied off the server and verified'
+          # A share that is gone at the next start (reboot, failed mount) must
+          # not stop the service: it starts and keeps backing up locally.
+          sudo umount /srv/consolebook-copies
+          sudo rmdir /srv/consolebook-copies
+          sudo systemctl restart consolebook
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.2:7771/api/health >/dev/null 2>&1 && break
+            sleep 1
+          done
+          systemctl is-active consolebook
+          curl -fsS http://127.0.0.2:7771/api/health
 
       # Jobs share archives through a draft release, published once all pass.
       - name: Upload to the draft release

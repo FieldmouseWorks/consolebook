@@ -321,7 +321,9 @@ install -d -m 0755 "$DROPIN_DIR"
 	echo "# Written by install.sh from $ENV_FILE; rerun the installer to change."
 	echo "[Service]"
 	echo "ReadWritePaths=$DATA"
-	if [ -n "$COPY" ]; then echo "ReadWritePaths=$COPY"; fi
+	# Optional ("-"): a share missing at start must not stop the service;
+	# backups stay local and health reports the copy location unreachable.
+	if [ -n "$COPY" ]; then echo "ReadWritePaths=-$COPY"; fi
 } >"$DROPIN"
 systemctl daemon-reload
 systemctl enable consolebook >/dev/null 2>&1
