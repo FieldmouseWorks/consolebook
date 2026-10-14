@@ -24,6 +24,14 @@ directory, web/playwright.config.ts writes a JSON report there, and the step
 passes only when that report exists and counts at least one expected test
 and no unexpected ones.
 
+Threat model: the runner catches honest drift (a gate that stops reaching
+the suite, a suite that finds no tests, a masked failure, a candidate that
+changes mid-run). It trusts the reviewed gate definition and repository code
+it executes: whoever can edit CONTRIBUTING.md can also edit this script, the
+Playwright config, or the tests, so no check here can authenticate a gate
+written to deceive it. The receipt records CONTRIBUTING.md's hash so review
+can see which definition ran.
+
 Receipts: each run writes a new directory under .proof/ (ignored, never
 deleted or overwritten here) holding receipt.json, receipt.md, one log per
 step, and the web asset manifest. Failed and interrupted runs keep theirs.
@@ -327,18 +335,26 @@ def stop_group(proc: subprocess.Popen) -> None:
     Each step leads its own process group, so subshells, `npx`, and test
     servers are signalled with it: SIGTERM first, then SIGKILL for whatever
     is left, so nothing in the group can still change the candidate after
-    the runner snapshots it.
+    the runner snapshots it. The SIGKILL pass runs even when a repeated
+    interrupt cuts the grace period short, with interrupts held until the
+    group is gone.
     """
-    for sig, grace in ((signal.SIGTERM, 10), (signal.SIGKILL, None)):
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+        proc.wait(timeout=10)
+    except (ProcessLookupError, subprocess.TimeoutExpired):
+        pass
+    finally:
+        held = {signal.SIGINT, signal.SIGTERM}
+        signal.pthread_sigmask(signal.SIG_BLOCK, held)
         try:
-            os.killpg(proc.pid, sig)
-        except ProcessLookupError:
-            break
-        try:
-            proc.wait(timeout=grace)
-        except subprocess.TimeoutExpired:
-            continue
-    proc.wait()
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            proc.wait()
+        finally:
+            signal.pthread_sigmask(signal.SIG_UNBLOCK, held)
 
 
 def run_step(cmd: str, root: Path, env: dict, log_path: Path) -> int:
@@ -644,6 +660,13 @@ def self_test(root: Path) -> int:
         time.sleep(3)
         check(not marker.exists(),
               "a child that ignores SIGTERM is stopped before it can change the candidate")
+        marker = base / "late-write-2"
+        run_sequence([f"trap '' TERM; kill -TERM $PPID; sleep 0.5; kill -TERM $PPID; "
+                      f"sleep 2; touch '{marker}'"],
+                     root, base, chromium=None, invocation=inv, artifacts=False)
+        time.sleep(3)
+        check(not marker.exists(),
+              "a repeated SIGTERM during the grace period still ends the group")
 
     print("candidate: untracked names are read exactly, not as quoted display text")
     with tempfile.TemporaryDirectory() as tmp:
