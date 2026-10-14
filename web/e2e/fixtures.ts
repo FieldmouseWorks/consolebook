@@ -1,7 +1,17 @@
-import { test as base, expect } from '@playwright/test';
+import { test as base, expect, type Page } from '@playwright/test';
 import { startServer } from './server';
 
 export { expect };
+
+/**
+ * Signs out and waits until the server has ended the session. The shell
+ * keeps a signed-in browser out of /login and /reset, so navigating on
+ * before the logout completes races that redirect.
+ */
+export async function signOut(page: Page): Promise<void> {
+	await page.getByRole('button', { name: 'Sign out' }).click();
+	await expect(page).toHaveURL(/\/login$/);
+}
 
 export const test = base.extend<{
 	server: Awaited<ReturnType<typeof startServer>>;

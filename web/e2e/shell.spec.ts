@@ -2,7 +2,7 @@
 // issue reset code → reset password → sign back in → sign out.
 // All fixture data is invented.
 
-import { expect, test } from './fixtures';
+import { expect, signOut, test } from './fixtures';
 
 const PASSWORD = 'invented-passphrase-1';
 const NEW_PASSWORD = 'rotated-passphrase-2';
@@ -53,8 +53,7 @@ test('full shell lifecycle', async ({ page, setupCode }) => {
 	await page.goto('/reset');
 	// Still signed in → guard bounces to status; sign out first.
 	await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible();
-	await page.getByRole('button', { name: 'Sign out' }).click();
-	await expect(page).toHaveURL(/\/login$/);
+	await signOut(page);
 
 	await page.getByRole('link', { name: 'Use a password reset code' }).click();
 	await expect(page).toHaveURL(/\/reset$/);
@@ -129,8 +128,7 @@ test("the administrator's home walks the first day", async ({ page, setupCode })
 
 	// The checklist is the administrator's; a trainee never sees it.
 	const traineeCode = ((await page.locator('p.code-out code').textContent()) ?? '').trim();
-	await page.getByRole('button', { name: 'Sign out' }).click();
-	await expect(page).toHaveURL(/\/login$/);
+	await signOut(page);
 	await page.goto('/reset');
 	await page.getByLabel('Username').fill('taylor.trainee');
 	await page.getByLabel('Reset code').fill(traineeCode);
