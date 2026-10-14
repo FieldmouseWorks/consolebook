@@ -14,6 +14,9 @@ export default defineConfig({
 		? [[process.env.CI ? 'dot' : 'list'], ['json', { outputFile: report }]]
 		: undefined,
 	use: {
+		// A failure keeps its trace in test-results/, so an intermittent
+		// failure brings its own evidence (#83).
+		trace: 'retain-on-failure',
 		// Prefer an environment-provided Chromium (CONSOLEBOOK_E2E_CHROMIUM)
 		// over downloading a browser per Playwright version.
 		launchOptions: process.env.CONSOLEBOOK_E2E_CHROMIUM
