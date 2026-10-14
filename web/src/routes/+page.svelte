@@ -318,6 +318,7 @@
 		<div class="cardhead">
 			<h2>Getting started</h2>
 			<span class="count">{setupDone} of {setupSteps.length} steps done</span>
+			<a class="guided" href="/welcome">Guided setup</a>
 		</div>
 		<ol class="steps">
 			{#each setupSteps as step (step.label)}
@@ -876,6 +877,10 @@
 	}
 	button.linkish:hover {
 		text-decoration: underline;
+	}
+	a.guided {
+		font-weight: 600;
+		font-size: 0.9rem;
 	}
 	ol.steps {
 		list-style: none;
