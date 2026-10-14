@@ -266,6 +266,13 @@ bind=$(sed -n 's/^CONSOLEBOOK_BIND=//p' "$ENV_FILE" | tail -n 1)
 bind=${bind:-$DEFAULT_LISTEN}
 port=${bind##*:}
 host=${bind%:*}
+# Where this machine can reach the service: the bound address itself, or
+# loopback when it listens on every interface.
+case "$host" in
+0.0.0.0) local_host=127.0.0.1 ;;
+"[::]") local_host="[::1]" ;;
+*) local_host=$host ;;
+esac
 
 say "Installed $("$BIN" --version)."
 
@@ -293,11 +300,11 @@ systemctl enable consolebook >/dev/null 2>&1
 systemctl restart consolebook
 
 i=0
-until probe "http://127.0.0.1:$port/api/health" >/dev/null; do
+until probe "http://$local_host:$port/api/health" >/dev/null; do
 	i=$((i + 1))
 	if [ "$i" -ge 30 ]; then
 		systemctl --no-pager status consolebook >&2 || true
-		fail "the service did not answer on port $port within 30 seconds; see: journalctl -u consolebook"
+		fail "the service did not answer at $local_host:$port within 30 seconds; see: journalctl -u consolebook"
 	fi
 	sleep 1
 done
@@ -312,7 +319,7 @@ case "$host" in
 esac
 
 say ""
-if probe "http://127.0.0.1:$port/api/instance" | grep -q '"initialized":false'; then
+if probe "http://$local_host:$port/api/instance" | grep -q '"initialized":false'; then
 	code=$(runuser -u "$ACCOUNT" -- env CONSOLEBOOK_DATA_DIR="$DATA" "$BIN" setup-code 2>/dev/null) ||
 		fail "could not create a setup code; run: sudo -u $ACCOUNT CONSOLEBOOK_DATA_DIR=$DATA $BIN setup-code"
 	say "Consolebook is running. Finish setup in a web browser:"

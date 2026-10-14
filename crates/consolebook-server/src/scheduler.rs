@@ -37,7 +37,7 @@ const COPY_RETRY: Duration = Duration::from_mins(15);
 /// Runs the automatic-backup loop until the process exits. Failures are
 /// logged, surfaced to administrators as in-app notices, and retried on
 /// the schedule; they never crash the server. With a copy directory, each
-/// validated snapshot is then copied off the server (ADR 0023), and a copy
+/// validated snapshot is then copied off the server (ADR 0024), and a copy
 /// that failed or fell behind is retried every [`COPY_RETRY`].
 pub async fn run(settings: BackupSettings, pool: SqlitePool) {
     let data_dir = &settings.data_dir;

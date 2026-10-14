@@ -95,7 +95,7 @@ test("the administrator's home walks the first day", async ({ page, setupCode })
 	const checklist = page.locator('section.setup');
 	await expect(checklist.getByRole('heading', { name: 'Getting started' })).toBeVisible();
 	await expect(checklist.getByText('0 of 8 steps done')).toBeVisible();
-	// Without a copy directory, backups are flagged until fixed (ADR 0023).
+	// Without a copy directory, backups are flagged until fixed (ADR 0024).
 	const backups = page.locator('#backups');
 	await expect(backups.getByRole('alert')).toContainText("only on this server's own disk");
 	await expect(backups.locator('pre')).toContainText('--backup-dir');

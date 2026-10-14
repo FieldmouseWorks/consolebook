@@ -3,16 +3,14 @@ name: release
 # Builds static Linux release archives, proves the installer end to end on a
 # real systemd host (fresh install, setup code, upgrade), and on a version tag
 # publishes them as a GitHub release. docs/releasing.md owns the procedure;
-# ADR 0022 owns what a version means.
+# ADR 0022 owns what a version means. It runs on every pull request, not only
+# installer changes: any Rust, dependency, or web change can break the static
+# musl build, and that must fail before merge, not after a tag is pushed.
 on:
   push:
     tags: ['v*']
   pull_request:
     branches: [main]
-    paths:
-      - 'install/**'
-      - 'scripts/package-release.sh'
-      - '.github/workflows/release.yml'
   workflow_dispatch:
 
 permissions:
@@ -76,15 +74,19 @@ jobs:
           grep -q "\"commit\":\"$(git rev-parse --short=12 HEAD)\"" health.json
           systemctl is-active consolebook
           test "$(stat -c %U /var/lib/consolebook)" = consolebook
+      # The upgrade also moves the service to a specific, non-default
+      # address, so the installer's own health probe must follow the bind.
       - name: Installer, upgrade in place
         run: |
-          sudo install/install.sh --from "dist/consolebook-linux-${{ matrix.arch }}.tar.gz" | tee upgrade.log
+          sudo install/install.sh --from "dist/consolebook-linux-${{ matrix.arch }}.tar.gz" \
+            --listen 127.0.0.2:7771 | tee upgrade.log
           grep -q 'Setup code' upgrade.log  # still uninitialized, so a fresh code is offered
           grep -q 'WARNING: backups are kept only' upgrade.log
+          grep -q 'http://127.0.0.2:7771/' upgrade.log
           systemctl is-active consolebook
-          curl -fsS http://127.0.0.1:7770/api/instance
+          curl -fsS http://127.0.0.2:7771/api/instance
       # The sandboxed service must be able to write the copy directory and
-      # must copy its first validated snapshot there (ADR 0023).
+      # must copy its first validated snapshot there (ADR 0024).
       - name: Installer, backup copies off the data disk
         run: |
           sudo install/install.sh --from "dist/consolebook-linux-${{ matrix.arch }}.tar.gz" \

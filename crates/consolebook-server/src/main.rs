@@ -58,7 +58,7 @@ enum Command {
         )]
         backup_keep: u64,
         /// Also copy each validated backup here: a second disk or a mounted
-        /// network share, so backups survive the loss of this one (ADR 0023).
+        /// network share, so backups survive the loss of this one (ADR 0024).
         #[arg(long, env = "CONSOLEBOOK_BACKUP_COPY_DIR")]
         backup_copy_dir: Option<PathBuf>,
     },
@@ -74,7 +74,7 @@ enum Command {
             value_parser = clap::value_parser!(u64).range(1..)
         )]
         keep: u64,
-        /// Also copy the new backup here (ADR 0023).
+        /// Also copy the new backup here (ADR 0024).
         #[arg(long, env = "CONSOLEBOOK_BACKUP_COPY_DIR")]
         backup_copy_dir: Option<PathBuf>,
     },

@@ -17,6 +17,21 @@ one step running `npm run e2e` is replaced by the system-browser line from the
 block in that section that sets CONSOLEBOOK_E2E_CHROMIUM=/path/to/chromium.
 Anything else about those blocks changing makes this script fail closed.
 
+The parser cannot prove a shell line reaches the suite (`exit 0 && npm run
+e2e` would read as an invocation), so the browser step must also leave
+runtime evidence: the runner points CONSOLEBOOK_E2E_REPORT at the receipt
+directory, web/playwright.config.ts writes a JSON report there, and the step
+passes only when that report exists and counts at least one expected test
+and no unexpected ones.
+
+Threat model: the runner catches honest drift (a gate that stops reaching
+the suite, a suite that finds no tests, a masked failure, a candidate that
+changes mid-run). It trusts the reviewed gate definition and repository code
+it executes: whoever can edit CONTRIBUTING.md can also edit this script, the
+Playwright config, or the tests, so no check here can authenticate a gate
+written to deceive it. The receipt records CONTRIBUTING.md's hash so review
+can see which definition ran.
+
 Receipts: each run writes a new directory under .proof/ (ignored, never
 deleted or overwritten here) holding receipt.json, receipt.md, one log per
 step, and the web asset manifest. Failed and interrupted runs keep theirs.
@@ -32,7 +47,9 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
@@ -44,6 +61,8 @@ SCHEMA = "consolebook-proof-receipt/1"
 SECTION = "## Build and verification"
 E2E_MARKER = "npm run e2e"
 BROWSER_VAR = "CONSOLEBOOK_E2E_CHROMIUM"
+REPORT_VAR = "CONSOLEBOOK_E2E_REPORT"
+REPORT_NAME = "e2e-report.json"
 BROWSER_PLACEHOLDER = "/path/to/chromium"
 RECEIPT_ROOT = ".proof"
 BINARY = "target/debug/consolebook-server"
@@ -61,7 +80,39 @@ class SetupError(Exception):
 # --- Sequence source ---------------------------------------------------------
 
 
-def parse_sequence(text: str) -> tuple[list[str], str | None]:
+def runs_e2e(line: str) -> bool:
+    """Whether a gate line invokes the browser suite so that its failure counts.
+
+    The line is lexed like a shell would (quotes, and `#` comments, which
+    are dropped) and split into commands only at `&&`, the one operator
+    that passes a failure through. Any other operator (`;`, `||`, `|`, `&`,
+    which can each hide a failed suite) stays inside its command, so that
+    command can never equal the marker. One command, after grouping
+    parentheses and leading `NAME=value` assignments, must be exactly
+    `npm run e2e`. Anything the lexer cannot read is refused, never accepted.
+    """
+    lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return False
+    command: list[str] = []
+    for token in [*tokens, "&&"]:
+        if token in ("(", ")"):
+            continue
+        if token != "&&":
+            command.append(token)
+            continue
+        while command and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", command[0], re.DOTALL):
+            command.pop(0)
+        if command == E2E_MARKER.split():
+            return True
+        command = []
+    return False
+
+
+def parse_sequence(text: str) -> tuple[list[str], str]:
     """Return (gate steps, system-browser line or None) from CONTRIBUTING.md text."""
     lines = text.splitlines()
     try:
@@ -94,7 +145,7 @@ def parse_sequence(text: str) -> tuple[list[str], str | None]:
     if not steps:
         raise SetupError("CONTRIBUTING.md: the gate block has no commands")
     # A receipt that says "passed" must include the browser suite exactly once.
-    e2e = sum(E2E_MARKER in s for s in steps)
+    e2e = sum(runs_e2e(s) for s in steps)
     if e2e != 1:
         raise SetupError(
             f"CONTRIBUTING.md: expected one gate step running '{E2E_MARKER}', found {e2e}"
@@ -103,26 +154,24 @@ def parse_sequence(text: str) -> tuple[list[str], str | None]:
     browser_lines = [
         s for block in blocks[1:] for s in block if f"{BROWSER_VAR}=" in s
     ]
-    if len(browser_lines) > 1:
+    if len(browser_lines) != 1:
         raise SetupError(
             f"CONTRIBUTING.md: expected one {BROWSER_VAR}= line, found {len(browser_lines)}"
         )
-    if browser_lines and E2E_MARKER not in browser_lines[0]:
+    if not runs_e2e(browser_lines[0]):
         raise SetupError(
             f"CONTRIBUTING.md: the {BROWSER_VAR}= line must run '{E2E_MARKER}'"
         )
-    return steps, (browser_lines[0] if browser_lines else None)
+    return steps, browser_lines[0]
 
 
-def with_system_browser(steps: list[str], browser_line: str | None, chromium: str) -> list[str]:
+def with_system_browser(steps: list[str], browser_line: str, chromium: str) -> list[str]:
     """Swap the browser step for CONTRIBUTING.md's system-browser line."""
-    if browser_line is None:
-        raise SetupError(f"CONTRIBUTING.md documents no {BROWSER_VAR}= line to use")
     if browser_line.count(BROWSER_PLACEHOLDER) != 1:
         raise SetupError(
             f"CONTRIBUTING.md: the {BROWSER_VAR}= line must contain '{BROWSER_PLACEHOLDER}' once"
         )
-    hits = [i for i, s in enumerate(steps) if E2E_MARKER in s]
+    hits = [i for i, s in enumerate(steps) if runs_e2e(s)]
     if len(hits) != 1:
         raise SetupError(
             f"CONTRIBUTING.md: expected one gate step running '{E2E_MARKER}', found {len(hits)}"
@@ -153,20 +202,44 @@ def git(root: Path, *args: str) -> bytes:
     ).stdout
 
 
+def status_entries(root: Path) -> list[tuple[str, str]]:
+    """`git status` as (two-letter code, path) pairs, paths unquoted.
+
+    Reads the NUL-separated form, so names with spaces, quotes, or non-ASCII
+    characters arrive exactly as on disk; a rename's or copy's second (source)
+    path is folded into its entry. Either column can carry the rename: `X` for
+    a staged one, `Y` for a worktree rename of an intent-to-add file.
+    """
+    raw = git(root, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+    fields = raw.decode("utf-8", errors="surrogateescape").split("\0")
+    entries: list[tuple[str, str]] = []
+    i = 0
+    while i < len(fields):
+        record = fields[i]
+        i += 1
+        if not record:
+            continue
+        code, path = record[:2], record[3:]
+        if any(c in "RC" for c in code):
+            path = f"{fields[i]} -> {path}"
+            i += 1
+        entries.append((code, path))
+    return entries
+
+
 def candidate_state(root: Path) -> dict:
     """Revision, tree, and dirty state: what the receipt's results are about."""
-    status = git(root, "status", "--porcelain=v1", "--untracked-files=all").decode()
+    entries = status_entries(root)
     untracked = {}
-    for line in status.splitlines():
-        if line.startswith("?? "):
-            rel = line[3:]
+    for code, rel in entries:
+        if code == "??":
             p = root / rel
             untracked[rel] = sha256_file(p) if p.is_file() else None
     return {
         "head": git(root, "rev-parse", "HEAD").decode().strip(),
         "tree": git(root, "rev-parse", "HEAD^{tree}").decode().strip(),
-        "dirty": bool(status.strip()),
-        "status": status.splitlines(),
+        "dirty": bool(entries),
+        "status": [f"{code} {path}" for code, path in entries],
         "tracked_diff_sha256": hashlib.sha256(git(root, "diff", "HEAD", "--binary")).hexdigest(),
         "untracked_sha256": untracked,
     }
@@ -251,11 +324,53 @@ def new_receipt_dir(base: Path, head: str, dirty: bool) -> Path:
     raise SetupError(f"could not create a fresh receipt directory under {base}")
 
 
+_interrupted = False
+# How long a stopped step's group gets to exit on SIGTERM before SIGKILL.
+STOP_GRACE_S = 10.0
+
+
+def _interrupt(_signum: int, _frame: object) -> None:
+    """Ctrl-C or SIGTERM (a cancelled CI job or container stop) ends a run.
+
+    Only the first one raises. A repeat cannot preempt the cleanup that the
+    first set off (stopping the step's process group, writing the receipt),
+    wherever it lands, so it is absorbed.
+    """
+    global _interrupted
+    if _interrupted:
+        return
+    _interrupted = True
+    raise KeyboardInterrupt
+
+
+def stop_group(proc: subprocess.Popen) -> None:
+    """Ends a step and everything it started before the receipt is written.
+
+    Each step leads its own process group, so subshells, `npx`, and test
+    servers are signalled with it: SIGTERM first, then SIGKILL for whatever
+    is left, so nothing in the group can still change the candidate after
+    the runner snapshots it. A repeated interrupt cannot cut this short:
+    `_interrupt` raises only once per run.
+    """
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+        proc.wait(timeout=STOP_GRACE_S)
+    except (ProcessLookupError, subprocess.TimeoutExpired):
+        pass
+    finally:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        proc.wait()
+
+
 def run_step(cmd: str, root: Path, env: dict, log_path: Path) -> int:
     with log_path.open("wb") as log:
         proc = subprocess.Popen(
             ["sh", "-c", cmd], cwd=root, env=env,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            start_new_session=True,
         )
         try:
             assert proc.stdout is not None
@@ -265,9 +380,25 @@ def run_step(cmd: str, root: Path, env: dict, log_path: Path) -> int:
                 log.write(chunk)
             return proc.wait()
         except KeyboardInterrupt:
-            proc.terminate()
-            proc.wait()
+            stop_group(proc)
             raise
+
+
+def e2e_evidence(report: Path) -> tuple[dict | None, str | None]:
+    """The browser suite's own account of a run, or why there is none."""
+    if not report.is_file():
+        return None, f"the browser suite left no report ({REPORT_VAR}); it did not run"
+    try:
+        stats = json.loads(report.read_text())["stats"]
+        counts = {k: int(stats[k]) for k in ("expected", "unexpected", "flaky", "skipped")}
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        return None, f"the browser suite's report is unreadable: {e}"
+    evidence = {"report": report.name, "sha256": sha256_file(report), **counts}
+    if counts["expected"] < 1:
+        return evidence, "the browser suite ran no tests"
+    if counts["unexpected"]:
+        return evidence, f"the browser suite reported {counts['unexpected']} unexpected results"
+    return evidence, None
 
 
 def run_sequence(
@@ -284,6 +415,8 @@ def run_sequence(
         env[BROWSER_VAR] = chromium
     before = candidate_state(root)
     out_dir = new_receipt_dir(receipts, before["head"], before["dirty"])
+    report = out_dir / REPORT_NAME
+    env[REPORT_VAR] = str(report)
     contributing = root / "CONTRIBUTING.md"
 
     receipt: dict = {
@@ -313,6 +446,9 @@ def run_sequence(
           f"{'system Chromium at ' + chromium if chromium else 'Playwright-managed Chromium'}")
     print(f"{ME}: receipt directory: {out_dir}")
 
+    global _interrupted
+    _interrupted = False
+    previous = {sig: signal.signal(sig, _interrupt) for sig in (signal.SIGINT, signal.SIGTERM)}
     t0 = time.monotonic()
     # "passed" is set only when every step ran and exited 0; any other end,
     # including an unexpected exception, leaves a non-passing receipt.
@@ -338,8 +474,15 @@ def run_sequence(
                     step["log_sha256"] = sha256_file(log)
             step["exit_status"] = code
             step["status"] = "passed" if code == 0 else "failed"
-            print(f"<== [{i}/{n}] exit {code} in {step['duration_s']:.1f}s", flush=True)
-            if code != 0:
+            if runs_e2e(step["command"]):
+                step["e2e"], problem = e2e_evidence(report)
+                if problem:
+                    step["problem"] = problem
+                    if code == 0:
+                        step["status"], code = "failed", None
+                        print(f"{ME}: {problem}", file=sys.stderr)
+            print(f"<== [{i}/{n}] exit {step['exit_status']} in {step['duration_s']:.1f}s", flush=True)
+            if step["status"] != "passed":
                 result, failed = "failed", i
                 break
         else:
@@ -348,17 +491,28 @@ def run_sequence(
         result = "interrupted"
         print(f"\n{ME}: interrupted; writing the receipt", file=sys.stderr)
     finally:
-        receipt["finished_at"] = now()
-        receipt["duration_s"] = round(time.monotonic() - t0, 3)
-        receipt["result"] = result
-        receipt["failed_step"] = failed
-        after = candidate_state(root)
-        receipt["candidate_unchanged_during_run"] = after == before
-        if after != before:
-            receipt["candidate_after"] = after
-        receipt["browser"] = browser_identity(root, chromium) if artifacts else None
-        receipt["artifacts"] = collect_artifacts(root, out_dir, receipt["steps"]) if artifacts else {}
-        write_receipt(receipt, out_dir)
+        # A second Ctrl-C or SIGTERM must not cut the receipt short: both are
+        # held until it is written, then delivered.
+        held = {signal.SIGINT, signal.SIGTERM}
+        signal.pthread_sigmask(signal.SIG_BLOCK, held)
+        try:
+            receipt["finished_at"] = now()
+            receipt["duration_s"] = round(time.monotonic() - t0, 3)
+            receipt["result"] = result
+            receipt["failed_step"] = failed
+            after = candidate_state(root)
+            receipt["candidate_unchanged_during_run"] = after == before
+            if after != before:
+                receipt["candidate_after"] = after
+            receipt["browser"] = browser_identity(root, chromium) if artifacts else None
+            receipt["artifacts"] = (
+                collect_artifacts(root, out_dir, receipt["steps"]) if artifacts else {}
+            )
+            write_receipt(receipt, out_dir)
+        finally:
+            for sig, handler in previous.items():
+                signal.signal(sig, handler)
+            signal.pthread_sigmask(signal.SIG_UNBLOCK, held)
     return receipt, out_dir
 
 
@@ -397,6 +551,14 @@ def render_markdown(r: dict) -> str:
     arts = r.get("artifacts") or {}
     binary = arts.get("binary")
     manifest = arts.get("web_build_manifest")
+    suite = next((s for s in r["steps"] if "e2e" in s or "problem" in s), None)
+    if suite is None:
+        suite_line = "not run"
+    else:
+        e = suite.get("e2e") or {}
+        counts = (f"{e['expected']} expected, {e['unexpected']} unexpected, {e['flaky']} flaky, "
+                  f"{e['skipped']} skipped; report sha256 `{e['sha256']}`") if e else "no report"
+        suite_line = counts + (f" — {suite['problem']}" if suite.get("problem") else "")
     return f"""### Local proof receipt — {r['result']}
 
 - Candidate: `{c['head']}` tree `{c['tree']}`{' (dirty)' if c['dirty'] else ''}; unchanged during run: {r['candidate_unchanged_during_run']}
@@ -409,6 +571,7 @@ def render_markdown(r: dict) -> str:
 - Toolchain: {r['toolchain']['rustc']}; node {r['toolchain']['node']}; npm {r['toolchain']['npm']}
 - Binary: {f"`{binary['path']}` sha256 `{binary['sha256']}`" if binary else 'not built by this run'}
 - Web build manifest: {f"{manifest['files']} files, sha256 `{manifest['sha256']}`" if manifest else 'not built by this run'}
+- Browser suite: {suite_line}
 
 | # | Command | Status | Exit | Seconds | Log sha256 (prefix) |
 | --- | --- | --- | --- | --- | --- |
@@ -448,6 +611,29 @@ def self_test(root: Path) -> int:
         check(r["result"] == "passed" and r["failed_step"] is None, "result passed")
         check(d2 != d and (d / "receipt.json").is_file(), "earlier failed receipt kept")
 
+    print("browser suite: a passing exit is not enough without the suite's own report")
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        r, d = run_sequence([f"exit 0 && {E2E_MARKER}", "echo never"], root, base,
+                            chromium=None, invocation=inv, artifacts=False)
+        check(r["result"] == "failed" and r["failed_step"] == 1
+              and "did not run" in r["steps"][0].get("problem", ""),
+              "an unreachable suite fails its step for lack of a report")
+        check(r["steps"][1]["status"] == "not-run", "the chain stops there")
+        check("did not run" in (d / "receipt.md").read_text(), "the summary names the problem")
+
+        def fake(stats: str) -> str:
+            return f"printf '{{\"stats\":{stats}}}' > \"${REPORT_VAR}\" && exit 0 && {E2E_MARKER}"
+
+        r, _ = run_sequence([fake('{"expected":0,"unexpected":0,"flaky":0,"skipped":4}')],
+                            root, base, chromium=None, invocation=inv, artifacts=False)
+        check(r["result"] == "failed" and "no tests" in r["steps"][0].get("problem", ""),
+              "a report that ran no tests fails the step")
+        r, _ = run_sequence([fake('{"expected":3,"unexpected":0,"flaky":0,"skipped":0}')],
+                            root, base, chromium=None, invocation=inv, artifacts=False)
+        check(r["result"] == "passed" and r["steps"][0]["e2e"]["expected"] == 3,
+              "a report of passing tests passes and is recorded")
+
     print("error control: an unexpected exception records an error, never a pass")
     global run_step
     real_step = run_step
@@ -470,6 +656,101 @@ def self_test(root: Path) -> int:
         check(saved["result"] == "error" and saved["failed_step"] == 1, "result error at step 1")
         check([s["status"] for s in saved["steps"]] == ["error", "not-run"], "statuses error, not-run")
 
+    print("termination control: SIGTERM mid-run keeps an interrupted receipt")
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        r, d = run_sequence(["kill -TERM $PPID; sleep 5", "echo never"], root, base,
+                            chromium=None, invocation=inv, artifacts=False)
+        saved = json.loads((d / "receipt.json").read_text())
+        check(saved["result"] == "interrupted" and saved["failed_step"] == 1,
+              "result interrupted at step 1")
+        check([s["status"] for s in saved["steps"]] == ["interrupted", "not-run"],
+              "statuses interrupted, not-run")
+        check(all(signal.getsignal(sig) is not _interrupt
+                  for sig in (signal.SIGINT, signal.SIGTERM)),
+              "the previous SIGINT and SIGTERM handlers are restored")
+        global _interrupted
+        _interrupted = False
+        try:
+            _interrupt(signal.SIGTERM, None)
+            check(False, "the first interrupt raises")
+        except KeyboardInterrupt:
+            check(True, "the first interrupt raises")
+        try:
+            _interrupt(signal.SIGINT, None)
+            check(True, "a repeat is absorbed, so it cannot preempt cleanup")
+        except KeyboardInterrupt:
+            check(False, "a repeat is absorbed, so it cannot preempt cleanup")
+        marker = base / "late-write"
+        run_sequence([f"(trap '' TERM; sleep 2; touch '{marker}') & kill -TERM $PPID; wait"],
+                     root, base, chromium=None, invocation=inv, artifacts=False)
+        time.sleep(3)
+        check(not marker.exists(),
+              "a child that ignores SIGTERM is stopped before it can change the candidate")
+        marker = base / "late-write-2"
+        global STOP_GRACE_S
+        real_grace, STOP_GRACE_S = STOP_GRACE_S, 1.0
+        try:
+            run_sequence([f"trap '' TERM; kill -TERM $PPID; sleep 0.3; kill -TERM $PPID; "
+                          f"sleep 2; touch '{marker}'"],
+                         root, base, chromium=None, invocation=inv, artifacts=False)
+        finally:
+            STOP_GRACE_S = real_grace
+        time.sleep(2.5)
+        check(not marker.exists(),
+              "a repeated SIGTERM cannot skip the kill: nothing writes after the grace period")
+
+    print("termination control: a second Ctrl-C while finalizing still leaves the receipt")
+    global candidate_state
+    real_state = candidate_state
+    calls = []
+
+    def interrupting_state(where: Path) -> dict:
+        calls.append(where)
+        if len(calls) == 2:
+            os.kill(os.getpid(), signal.SIGINT)
+        return real_state(where)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        candidate_state = interrupting_state
+        try:
+            run_sequence(["kill -INT $PPID; sleep 5"], root, base,
+                         chromium=None, invocation=inv, artifacts=False)
+            check(False, "the held second interrupt is delivered after the receipt")
+        except KeyboardInterrupt:
+            check(True, "the held second interrupt is delivered after the receipt")
+        finally:
+            candidate_state = real_state
+        (d,) = list(base.iterdir())
+        check((d / "receipt.json").is_file()
+              and json.loads((d / "receipt.json").read_text())["result"] == "interrupted",
+              "the receipt is written and records the interruption")
+
+    print("candidate: untracked names are read exactly, not as quoted display text")
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        subprocess.run(["git", "-C", str(repo), "-c", "user.name=Invented", "-c",
+                        "user.email=invented@example.invalid", "commit", "-q",
+                        "--allow-empty", "-m", "invented"], check=True)
+        name = "caf\u00e9 'notes'.txt"
+        (repo / name).write_text("invented")
+        state = candidate_state(repo)
+        check(state["untracked_sha256"].get(name) == hashlib.sha256(b"invented").hexdigest(),
+              "a non-ASCII untracked file is hashed under its real name")
+        (repo / "README").write_text("invented readme\n")
+        subprocess.run(["git", "-C", str(repo), "add", "README"], check=True)
+        subprocess.run(["git", "-C", str(repo), "-c", "user.name=Invented", "-c",
+                        "user.email=invented@example.invalid", "commit", "-q",
+                        "-m", "invented"], check=True)
+        (repo / "README").rename(repo / "renamed")
+        subprocess.run(["git", "-C", str(repo), "add", "-N", "renamed"], check=True)
+        (repo / "zzz-after").write_text("invented")
+        state = candidate_state(repo)
+        check(" R README -> renamed" in state["status"] and "zzz-after" in state["untracked_sha256"],
+              "a worktree rename keeps its source and the untracked file after it")
+
     print("artifacts: hashed only when their producing step passed in this run")
     step = {"command": f"x && {BINARY_PRODUCER}", "status": "not-run"}
     check(not produced([step], BINARY_PRODUCER), "a not-run build yields no binary hash")
@@ -477,7 +758,18 @@ def self_test(root: Path) -> int:
 
     print("parser: reads CONTRIBUTING.md and fails closed on drift")
     steps, alt = parse_sequence((root / "CONTRIBUTING.md").read_text())
-    check(sum(E2E_MARKER in s for s in steps) == 1, "one browser step in the gate block")
+    check(sum(runs_e2e(s) for s in steps) == 1, "one browser step in the gate block")
+    check(runs_e2e(f"(cd web && npx playwright install chromium && {E2E_MARKER})")
+          and runs_e2e(f"(cd web && {BROWSER_VAR}=/c {E2E_MARKER})"),
+          "invocations of the suite are recognized")
+    check(not runs_e2e(f"echo {E2E_MARKER}") and not runs_e2e("npm run e2e-other"),
+          "text that only mentions the suite is not an invocation")
+    check(not any(runs_e2e(line) for line in [
+              f": # ; {E2E_MARKER}", f"{E2E_MARKER} | true", f"{E2E_MARKER}; true",
+              f"{E2E_MARKER} || true", f"{E2E_MARKER} & true", f"(cd web && '{E2E_MARKER}"]),
+          "commented-out, failure-masking, or unreadable lines are refused")
+    check(runs_e2e(f"(cd web && {BROWSER_VAR}='/opt/x y/chromium' {E2E_MARKER})"),
+          "a quoted assignment with spaces still counts")
     swapped = with_system_browser(steps, alt, "/opt/x y/chromium")
     check(any(f"{BROWSER_VAR}='/opt/x y/chromium'" in s for s in swapped)
           and not any(BROWSER_PLACEHOLDER in s for s in swapped),
@@ -493,6 +785,10 @@ def self_test(root: Path) -> int:
         ("a system-browser line that skips the suite",
          f"{SECTION}\n```sh\n(cd web && {E2E_MARKER})\n```\n\n```sh\n"
          f"echo {BROWSER_VAR}={BROWSER_PLACEHOLDER}\n```\n"),
+        ("no system-browser alternative", f"{SECTION}\n```sh\n(cd web && {E2E_MARKER})\n```\n"),
+        ("a gate step that only mentions the suite",
+         f"{SECTION}\n```sh\necho {E2E_MARKER}\n```\n\n```sh\n"
+         f"(cd web && {BROWSER_VAR}={BROWSER_PLACEHOLDER} {E2E_MARKER})\n```\n"),
     ]:
         try:
             parse_sequence(text)

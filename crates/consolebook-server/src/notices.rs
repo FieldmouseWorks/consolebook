@@ -16,7 +16,7 @@ use crate::capabilities::Capability;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NoticeKind {
     BackupFailed,
-    /// A validated backup could not be copied off the server (ADR 0023).
+    /// A validated backup could not be copied off the server (ADR 0024).
     BackupCopyFailed,
     AssignmentCreated,
     DraftOwnershipReceived,

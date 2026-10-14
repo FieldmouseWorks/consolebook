@@ -348,7 +348,7 @@ export function getSetupProgress(): Promise<SetupProgress> {
 	return request('/api/getting-started');
 }
 
-/** Where off-server backup copies stand (ADR 0023). */
+/** Where off-server backup copies stand (ADR 0024). */
 export type BackupCopyStatus =
 	| { state: 'not_configured' }
 	| { state: 'unreachable'; directory: string; problem: string }

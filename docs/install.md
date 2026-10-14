@@ -6,7 +6,8 @@ systemd (Ubuntu, Debian, RHEL, Rocky, Alma, Fedora, and similar), x86_64 or
 arm64, and an administrator account that can use `sudo`.
 
 Consolebook is pre-alpha. Use invented data until your agency has decided it is
-ready for real records.
+ready for real records. [ADR 0024](decisions/0023-linux-installation-lifecycle.md)
+records the locations, service account, and upgrade behavior this page relies on.
 
 ## 1. Install
 
@@ -113,7 +114,7 @@ startup refuses to run against data it cannot verify.
 Consolebook takes a validated backup automatically (every 24 hours by default,
 keeping 14) into `backups/` inside the data directory. With a backup copy
 directory, each validated backup is then copied there and checked byte for byte
-before it counts (ADR 0023). Copies that fail are retried every 15 minutes and
+before it counts (ADR 0024). Copies that fail are retried every 15 minutes and
 reported to administrators on their home page. The administrator's home shows
 when the newest backup ran and whether the copy is current.
 

@@ -1,6 +1,6 @@
 # ADR 0006: Backup scheduling, retention, and restore
 
-- **Status:** Accepted; amended by [ADR 0023](0023-off-server-backup-copies.md) (copies off the server)
+- **Status:** Accepted; amended by [ADR 0024](0024-off-server-backup-copies.md) (copies off the server)
 - **Date:** 2026-08-28
 
 ## Context

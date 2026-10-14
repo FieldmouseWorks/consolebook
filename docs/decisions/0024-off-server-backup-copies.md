@@ -1,4 +1,4 @@
-# ADR 0023: Backup copies off the server, and backup health
+# ADR 0024: Backup copies off the server, and backup health
 
 - **Status:** Accepted
 - **Date:** 2026-10-14
@@ -70,8 +70,9 @@ administrator's home shows backup health, with a warning that stays until
 copies are current. The Getting started checklist has a step that is done
 only when they are, and the guided setup shows the status with the exact
 command to fix it. The service cannot rewrite its own configuration (the
-systemd unit allows writes only to its data and copy directories), so the
-browser explains and the installer configures. Using the application is
+systemd unit allows writes only to its data and copy directories; ADR 0023),
+so the browser explains and the installer configures, adding the copy
+directory to the unit through a drop-in as ADR 0023 requires. Using the application is
 never blocked by a missing copy: a trainer locked out because a share is down
 would be a second incident, not a safeguard.
 

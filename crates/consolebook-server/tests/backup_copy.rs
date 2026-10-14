@@ -1,4 +1,4 @@
-//! Backup copies off the server and backup health (ADR 0023). All fixtures
+//! Backup copies off the server and backup health (ADR 0024). All fixtures
 //! are invented.
 
 use std::path::Path;

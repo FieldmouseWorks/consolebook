@@ -44,7 +44,7 @@ first Milestone 5 slices ([roadmap](docs/roadmap.md)).
   optional guided setup: people in a batch with a printable sign-in sheet,
   and an editable example program.
 - Backup copies off the server (`--backup-dir` / `CONSOLEBOOK_BACKUP_COPY_DIR`,
-  ADR 0023): each validated backup is copied to a second disk or share and
+  ADR 0024): each validated backup is copied to a second disk or share and
   verified byte for byte; backup health on the administrator's home, with a
   warning until copies are current; `--data-dir` to place the data.
 - An interface that leads each role with its own work, shows who is signed in

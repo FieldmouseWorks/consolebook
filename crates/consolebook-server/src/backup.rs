@@ -6,7 +6,7 @@
 //! with its directory, audited, and finally subject to retention pruning.
 //! The scheduler in `scheduler.rs` drives this automatically from `serve`;
 //! the `backup` command drives it manually. Copies off the server are
-//! `backup_copy.rs` (ADR 0023).
+//! `backup_copy.rs` (ADR 0024).
 
 use std::fs::File;
 use std::path::{Path, PathBuf};

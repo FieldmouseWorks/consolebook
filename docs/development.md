@@ -15,7 +15,7 @@ tests show what is implemented. [Roadmap](roadmap.md) owns milestone status.
 | Task | Start in `crates/consolebook-server/src/` | Supporting context |
 | --- | --- | --- |
 | Process, storage, diagnostics | `main.rs`, `data_dir.rs`, `storage.rs`, `doctor.rs` | [Architecture](architecture.md), [ADR 0003](decisions/0003-sqlite-connection-invariants.md), [ADR 0016](decisions/0016-read-only-diagnostics.md) |
-| Backups and restore | `backup.rs`, `backup_copy.rs`, `scheduler.rs`, `restore.rs`, `serve_lock.rs` | [ADR 0006](decisions/0006-backup-scheduling-and-restore.md), [ADR 0023](decisions/0023-off-server-backup-copies.md) |
+| Backups and restore | `backup.rs`, `backup_copy.rs`, `scheduler.rs`, `restore.rs`, `serve_lock.rs` | [ADR 0006](decisions/0006-backup-scheduling-and-restore.md), [ADR 0024](decisions/0024-off-server-backup-copies.md) |
 | Setup, login, recovery | `setup.rs`, `users.rs`, `sessions.rs`, `secrets.rs` | [ADR 0004](decisions/0004-local-authentication.md) |
 | Capabilities and assignments | `capabilities.rs`, `assignments.rs`, `draft_access.rs` | [ADR 0010](decisions/0010-service-owned-authorization-boundary.md), [Domain model](domain-model.md) |
 | Program configuration | `programs.rs`, `programs/content.rs`, `programs/persistence.rs`, `program_export.rs` | [ADR 0007](decisions/0007-program-version-configuration-model.md), [Program format](formats/program-version-export.md) |
@@ -29,7 +29,7 @@ tests show what is implemented. [Roadmap](roadmap.md) owns milestone status.
 | Retention policy and holds | `retention.rs`, `retention/`, `retention_http.rs` | [ADR 0020](decisions/0020-retention-policy-and-hold-administration.md), [Operator guide](retention.md); disposition execution remains [#64](https://github.com/FieldmouseWorks/consolebook/issues/64) |
 | Web shell and HTTP | `http.rs`, `web_assets.rs`, `notices.rs`, domain `*_http.rs` modules | [ADR 0005](decisions/0005-embedded-web-interface.md), web map below |
 | Versions and releases | `lib.rs` (`VERSION`, `BUILD_COMMIT`), `../build.rs`, `tests/release_version.rs` | [ADR 0022](decisions/0022-product-versioning.md), [Releasing](releasing.md), [Changelog](../CHANGELOG.md) |
-| Install, packaging, setup checklist | `getting_started.rs`, `../../../install/`, `../../../scripts/package-release.sh` | [Install guide](install.md), [Releasing](releasing.md), [release workflow](../.github/workflows/release.yml) |
+| Install, packaging, setup checklist | `getting_started.rs`, `../../../install/`, `../../../scripts/package-release.sh` | [ADR 0024](decisions/0023-linux-installation-lifecycle.md), [Install guide](install.md), [Releasing](releasing.md), [release workflow](../.github/workflows/release.yml) |
 | Preview operations | Separate host installation | [Preview runbook](preview.md) |
 
 `lib.rs` exposes the library modules. Integration tests in

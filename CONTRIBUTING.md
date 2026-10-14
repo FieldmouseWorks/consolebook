@@ -121,7 +121,9 @@ Linux browser dependencies can be installed with
 Run Unix diagnostic permission tests as an unprivileged user; they assert that
 filesystem permissions deny writes, which a privileged runner can bypass.
 The [pr-gate workflow](.github/workflows/pr-gate.yml) runs the web, Rust, and
-browser checks on pull requests. Focused local tests help development but do
+browser checks on pull requests, and the [release workflow](.github/workflows/release.yml)
+builds the static Linux archives and installs and upgrades them on a systemd
+runner. Focused local tests help development but do
 not replace required gates. Preserve exact failure evidence and report only
 commands actually run; an unexplained failure is not a reason to retry.
 

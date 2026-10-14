@@ -1,4 +1,4 @@
-//! Backup copies off the server, and backup health (ADR 0023).
+//! Backup copies off the server, and backup health (ADR 0024).
 //!
 //! A local snapshot in `backups/` shares a disk with the database it
 //! protects. When a copy directory is configured (a second disk or a mounted

@@ -599,7 +599,7 @@ async fn getting_started(
     }
 }
 
-/// Backup health for administrators (ADR 0023).
+/// Backup health for administrators (ADR 0024).
 async fn backup_status(
     State(state): State<AppState>,
     current: CurrentUser,

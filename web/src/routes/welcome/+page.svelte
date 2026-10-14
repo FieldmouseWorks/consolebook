@@ -26,7 +26,7 @@
 
 	let step: 1 | 2 | 3 | 4 = $state(1);
 
-	// ---- backups (ADR 0023): shown, never configured from the browser
+	// ---- backups (ADR 0024): shown, never configured from the browser
 	let backups: BackupStatus | null = $state(null);
 	let backupsError = $state('');
 	async function loadBackups() {
