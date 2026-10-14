@@ -109,6 +109,21 @@ definition, keeps `/var/lib/consolebook` and your settings, restarts the
 service, and prints the address. The database is upgraded on start, and
 startup refuses to run against data it cannot verify.
 
+## Moving the data directory
+
+The installer will not point an installation that has records at a different
+directory: the service would start a new, empty installation there and the
+records would seem to vanish. Move them deliberately instead:
+
+```sh
+sudo systemctl stop consolebook
+sudo mv /var/lib/consolebook /srv/consolebook        # keeps backups/ with it
+curl -fsSL https://raw.githubusercontent.com/FieldmouseWorks/consolebook/main/install/install.sh | sudo sh -s -- --data-dir /srv/consolebook
+```
+
+The rerun records the new location, grants the service access to it, and
+starts it; `doctor` checks the moved database.
+
 ## Backups and recovery
 
 Consolebook takes a validated backup automatically (every 24 hours by default,

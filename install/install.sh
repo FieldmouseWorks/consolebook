@@ -166,8 +166,14 @@ env_value() {
 		sed -n "s/^$1=//p" "$ENV_FILE" | tail -n 1
 	fi
 }
-effective_data=${data_dir:-$(env_value CONSOLEBOOK_DATA_DIR)}
-effective_data=${effective_data:-$DEFAULT_DATA}
+current_data=$(env_value CONSOLEBOOK_DATA_DIR)
+current_data=${current_data:-$DEFAULT_DATA}
+# Pointing an installation that has records at another directory would start
+# a new, empty one in its place; moving data is a deliberate, manual step.
+if [ -n "$data_dir" ] && [ "${data_dir%/}" != "${current_data%/}" ] && [ -f "$current_data/consolebook.db" ]; then
+	fail "this installation's records are in $current_data; --data-dir would start an empty installation in $data_dir instead. To move them: stop the service, move $current_data (with its backups) to $data_dir, then rerun with --data-dir $data_dir (see docs/install.md)"
+fi
+effective_data=${data_dir:-$current_data}
 effective_copy=${backup_dir:-$(env_value CONSOLEBOOK_BACKUP_COPY_DIR)}
 if [ -n "$effective_copy" ]; then
 	case "$effective_copy/" in

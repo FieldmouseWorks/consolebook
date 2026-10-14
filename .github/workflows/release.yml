@@ -74,6 +74,18 @@ jobs:
           grep -q "\"commit\":\"$(git rev-parse --short=12 HEAD)\"" health.json
           systemctl is-active consolebook
           test "$(stat -c %U /var/lib/consolebook)" = consolebook
+      # An installation with records is never pointed at a new, empty data
+      # directory; the refusal changes nothing.
+      - name: Installer, refuses to strand the data directory
+        run: |
+          if sudo install/install.sh --from "dist/consolebook-linux-${{ matrix.arch }}.tar.gz" \
+            --data-dir /srv/elsewhere 2>refused-data.log; then
+            echo "a data-directory change was accepted" >&2; exit 1
+          fi
+          grep -q 'would start an empty installation' refused-data.log
+          test ! -e /srv/elsewhere
+          systemctl is-active consolebook
+          sudo grep -q '^CONSOLEBOOK_DATA_DIR=/var/lib/consolebook$' /etc/consolebook/consolebook.env
       # The upgrade also moves the service to a specific, non-default
       # address, so the installer's own health probe must follow the bind.
       - name: Installer, upgrade in place

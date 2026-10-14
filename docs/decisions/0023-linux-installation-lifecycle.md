@@ -36,7 +36,10 @@ Other platforms build from source until they are packaged.
 
 The settings file is the operator's: the installer creates it once and
 afterwards changes only the line an option names (`--listen`, `--data-dir`,
-`--backup-dir`). The unit file
+`--backup-dir`). It refuses to change the data directory of an installation
+whose current directory holds a database, because the service would start an
+empty installation in its place; moving records is a manual step the install
+guide documents. The unit file
 is the product's: each install replaces it, so hardening and fixes reach
 existing installations. Local changes to the unit belong in a systemd drop-in.
 
