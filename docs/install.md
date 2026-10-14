@@ -6,16 +6,25 @@ systemd (Ubuntu, Debian, RHEL, Rocky, Alma, Fedora, and similar), x86_64 or
 arm64, and an administrator account that can use `sudo`.
 
 Consolebook is pre-alpha. Use invented data until your agency has decided it is
-ready for real records. [ADR 0023](decisions/0023-linux-installation-lifecycle.md)
+ready for real records. [ADR 0024](decisions/0023-linux-installation-lifecycle.md)
 records the locations, service account, and upgrade behavior this page relies on.
 
 ## 1. Install
 
-Run one command on the server:
+First, decide where a **second copy of every backup** will live: another disk
+in the server, or a network share (NAS) mounted on it, say at
+`/mnt/backups/consolebook`, and mount it before installing. Consolebook backs
+itself up automatically, but a backup on the same disk as the records dies with
+that disk. Then run one command on the server:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/FieldmouseWorks/consolebook/main/install/install.sh | sudo sh
+curl -fsSL https://raw.githubusercontent.com/FieldmouseWorks/consolebook/main/install/install.sh | sudo sh -s -- --backup-dir /mnt/backups/consolebook
 ```
+
+Leaving out `--backup-dir` still installs, but the installer ends with a
+warning and the administrator's home keeps one up until copies are flowing.
+There is no database server to install: the database is one SQLite file that
+Consolebook creates, upgrades, and checks itself.
 
 It downloads the latest release for your machine, checks its SHA-256, and
 installs:
@@ -23,7 +32,8 @@ installs:
 | What | Where |
 | --- | --- |
 | The program | `/usr/local/bin/consolebook` |
-| Your data and automatic backups | `/var/lib/consolebook` |
+| Your data and automatic backups | `/var/lib/consolebook` (`--data-dir` to choose another) |
+| A copy of every backup | the `--backup-dir` you gave |
 | Settings | `/etc/consolebook/consolebook.env` |
 | The service | `consolebook` (starts at boot) |
 
@@ -71,7 +81,10 @@ sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook consolebook setup-
 
 ## 3. First day: from empty to a training session
 
-Your home page shows a **Getting started** checklist that links each step:
+Your home page shows a **Getting started** checklist that links each step.
+*Guided setup*, linked from it, does the first steps for you: it adds people in
+a batch and prints their sign-in sheet, starts an editable program from an
+invented example, and shows backup health. Or work through the list by hand:
 
 1. **Add people.** Under *Add a person*, create a coordinator, your trainers,
    and a trainee. Each gets a one-time code; pass it to them in person. They
@@ -96,11 +109,44 @@ definition, keeps `/var/lib/consolebook` and your settings, restarts the
 service, and prints the address. The database is upgraded on start, and
 startup refuses to run against data it cannot verify.
 
+## Moving the data directory
+
+The installer will not point an installation that has records at a different
+directory: the service would start a new, empty installation there and the
+records would seem to vanish. Move them deliberately instead:
+
+```sh
+sudo systemctl stop consolebook
+sudo mv /var/lib/consolebook /srv/consolebook        # keeps backups/ with it
+curl -fsSL https://raw.githubusercontent.com/FieldmouseWorks/consolebook/main/install/install.sh | sudo sh -s -- --data-dir /srv/consolebook
+```
+
+The rerun records the new location, grants the service access to it, and
+starts it; `doctor` checks the moved database.
+
 ## Backups and recovery
 
-Consolebook takes a validated backup automatically (every 24 hours by default)
-into `/var/lib/consolebook/backups`. Copy that directory off the server on your
-own schedule; a backup on the same disk does not survive the disk.
+Consolebook takes a validated backup automatically (every 24 hours by default,
+keeping 14) into `backups/` inside the data directory. With a backup copy
+directory, each validated backup is then copied there and checked byte for byte
+before it counts (ADR 0024). Copies that fail are retried every 15 minutes and
+reported to administrators on their home page. The administrator's home shows
+when the newest backup ran and whether the copy is current.
+
+To add or change the copy directory later, mount it and rerun the installer:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/FieldmouseWorks/consolebook/main/install/install.sh | sudo sh -s -- --backup-dir /mnt/backups/consolebook
+```
+
+On a network share, make sure the `consolebook` account can write it (for
+example a CIFS mount with `uid=consolebook`), and mount it at boot (`/etc/fstab`
+or a systemd mount unit). The copy directory must already exist on another
+filesystem than the data directory: the installer refuses it otherwise, and
+never creates it. If the share is not mounted later, its mount point is just an
+empty local directory; Consolebook refuses to copy there, keeps backups local,
+and reports the copy location as unreachable until the share is back. Copies are plain SQLite files: protect the share the way
+you protect the server.
 
 ```sh
 sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook consolebook backup    # take one now
@@ -114,6 +160,10 @@ sudo systemctl stop consolebook
 sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook consolebook restore /var/lib/consolebook/backups/<snapshot>
 sudo systemctl start consolebook
 ```
+
+If the server's disk is gone, install on a new machine with the same
+`--backup-dir`, stop the service, and restore the newest file from the copy
+directory the same way.
 
 ## Day to day
 

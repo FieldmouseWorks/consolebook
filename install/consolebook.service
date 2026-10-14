@@ -28,7 +28,8 @@ ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
 LockPersonality=true
-ReadWritePaths=/var/lib/consolebook
+# Optional here: install.sh adds the configured data and copy directories.
+ReadWritePaths=-/var/lib/consolebook
 
 [Install]
 WantedBy=multi-user.target

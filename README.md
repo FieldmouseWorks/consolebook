@@ -18,7 +18,10 @@ curl -fsSL https://raw.githubusercontent.com/FieldmouseWorks/consolebook/main/in
 ```
 
 It prints the address and a setup code; finish in the browser, and the home
-page walks you through the first day. Run the same command to upgrade.
+page walks you through the first day. Run the same command to upgrade. Give it
+`-s -- --backup-dir /mnt/your-second-disk` (after `sudo sh`) so every automatic
+backup is also copied off the server's own disk; without it, the installer and
+the administrator's home both warn until you do.
 [docs/install.md](docs/install.md) covers network access, backups, and the rest.
 
 ## Product goals

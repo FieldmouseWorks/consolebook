@@ -59,9 +59,14 @@ test('guided setup adds people and starts from the example program', async ({
 		'Example Telecommunicator Program'
 	);
 
+	// The backups step shows the same health and the fix, never a form.
+	await page.goto('/welcome');
+	await page.getByRole('button', { name: '3. Backups' }).click();
+	await expect(page.getByRole('alert')).toContainText("only on this server's own disk");
+
 	// Home's checklist has moved on: people and a program.
 	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
-	await expect(page.locator('section.setup').getByText('2 of 7 steps done')).toBeVisible();
+	await expect(page.locator('section.setup').getByText('2 of 8 steps done')).toBeVisible();
 
 	// Offering the example twice is refused by name, in plain words.
 	await page.goto('/welcome');

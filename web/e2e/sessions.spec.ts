@@ -3,7 +3,7 @@
 // closing with a disposition, and the trainer's own session list. All
 // fixture data is invented.
 
-import { expect, test } from './fixtures';
+import { expect, signOut, test } from './fixtures';
 
 const PASSWORD = 'invented-passphrase-1';
 const TRAINER_PASSWORD = 'trainer-passphrase-3';
@@ -133,7 +133,7 @@ test('record, close, and read sessions with local time semantics', async ({ page
 
 	// The trainer signs in and finds the sessions on their own list.
 	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
-	await page.getByRole('button', { name: 'Sign out' }).click();
+	await signOut(page);
 	await page.goto(`/reset`);
 	await page.getByLabel('Username').fill('jordan.trainer');
 	await page.getByLabel('Reset code').fill(trainer.reset_code);
