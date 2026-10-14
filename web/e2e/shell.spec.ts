@@ -86,6 +86,7 @@ test("the administrator's home walks the first day", async ({ page, setupCode })
 	await page.getByLabel('Administrator display name').fill('Avery Admin');
 	await page.getByLabel('Administrator password').fill(PASSWORD);
 	await page.getByRole('button', { name: 'Initialize installation' }).click();
+	await expect(page).toHaveURL(/\/login$/);
 	await page.getByLabel('Username').fill('avery.admin');
 	await page.getByLabel('Password').fill(PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
@@ -121,11 +122,13 @@ test("the administrator's home walks the first day", async ({ page, setupCode })
 	// The checklist is the administrator's; a trainee never sees it.
 	const traineeCode = ((await page.locator('p.code-out code').textContent()) ?? '').trim();
 	await page.getByRole('button', { name: 'Sign out' }).click();
+	await expect(page).toHaveURL(/\/login$/);
 	await page.goto('/reset');
 	await page.getByLabel('Username').fill('taylor.trainee');
 	await page.getByLabel('Reset code').fill(traineeCode);
 	await page.getByLabel('New password').fill(NEW_PASSWORD);
 	await page.getByRole('button', { name: 'Set new password' }).click();
+	await expect(page).toHaveURL(/\/login$/);
 	await page.getByLabel('Username').fill('taylor.trainee');
 	await page.getByLabel('Password').fill(NEW_PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
