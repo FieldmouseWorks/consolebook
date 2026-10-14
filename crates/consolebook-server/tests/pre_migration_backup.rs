@@ -10,6 +10,7 @@ use sqlx::SqlitePool;
 use sqlx::migrate::Migrator;
 
 use consolebook_server::backup;
+use consolebook_server::backup_copy;
 use consolebook_server::data_dir::DataDir;
 use consolebook_server::storage::{self, MIGRATOR};
 
@@ -92,6 +93,27 @@ async fn an_upgrade_backs_up_the_old_schema_before_migrating() {
             .is_none(),
         "nothing is pending once migrated"
     );
+}
+
+#[tokio::test]
+async fn the_pre_migration_backup_is_the_one_copied_off_the_server() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let data_dir = DataDir::new(tmp.path().join("data"));
+    data_dir.ensure_layout().expect("layout");
+    older_installation(&data_dir).await;
+    let report = backup::before_migrating(&data_dir, 14)
+        .await
+        .expect("backup")
+        .expect("a migration is pending");
+    storage::open(&data_dir.database()).await.expect("migrate");
+
+    // The scheduler's first tick: the snapshot is fresh, so no new backup
+    // is due, and catch-up copies the newest one, which is this snapshot.
+    let share = tempfile::tempdir_in("/dev/shm").expect("these tests need /dev/shm (a tmpfs)");
+    let copy = backup_copy::catch_up(&data_dir, share.path(), 14)
+        .expect("copy")
+        .expect("the snapshot was not yet copied");
+    assert_eq!(copy.copy.file_name(), report.snapshot.file_name());
 }
 
 #[tokio::test]
