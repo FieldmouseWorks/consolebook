@@ -125,7 +125,9 @@ pub fn copy_snapshot(snapshot: &Path, copy_dir: &Path, keep: usize) -> Result<Co
 
 /// Copies the newest local snapshot when the copy directory lacks it, so a
 /// copy that failed (or a copy directory added later) catches up without
-/// waiting for the next backup. Returns `None` when there is nothing to do.
+/// waiting for the next backup. When the newest copy is already there, it
+/// finishes retention instead, which a prune that failed after its copy
+/// left undone. Returns `None` when no copy was made.
 pub fn catch_up(data_dir: &DataDir, copy_dir: &Path, keep: usize) -> Result<Option<CopyReport>> {
     let Some(newest) = backup::snapshots(data_dir)?.pop() else {
         return Ok(None);
@@ -133,10 +135,14 @@ pub fn catch_up(data_dir: &DataDir, copy_dir: &Path, keep: usize) -> Result<Opti
     let name = newest
         .file_name()
         .context("snapshot path has no file name")?;
-    if copy_dir.join(name).exists() {
-        return Ok(None);
+    if !copy_dir.join(name).exists() {
+        return copy_snapshot(&newest, copy_dir, keep).map(Some);
     }
-    copy_snapshot(&newest, copy_dir, keep).map(Some)
+    if let Some(problem) = shares_filesystem(copy_dir, &data_dir.backups())? {
+        bail!("backup copy directory {}: {problem}", copy_dir.display());
+    }
+    backup::prune_in(copy_dir, keep)?;
+    Ok(None)
 }
 
 const SAME_FILESYSTEM: &str = "is on the same filesystem as the local backups, so it is not \

@@ -198,8 +198,29 @@ async fn catch_up_copies_only_what_the_copy_directory_lacks() {
         backup_copy::catch_up(&fx.data_dir, &copy_dir, 2)
             .expect("current")
             .is_none(),
-        "a current copy directory is left alone"
+        "a current copy directory is not copied to again"
     );
+
+    // A prune that failed after its copy is finished by the next catch-up.
+    for old in [
+        "consolebook-20200101T000000Z.db",
+        "consolebook-20200102T000000Z.db",
+        "consolebook-20200103T000000Z.db",
+    ] {
+        std::fs::write(copy_dir.join(old), b"invented older copy").expect("seed");
+    }
+    assert!(
+        backup_copy::catch_up(&fx.data_dir, &copy_dir, 2)
+            .expect("retention")
+            .is_none()
+    );
+    let names: Vec<String> = backup::snapshots_in(&copy_dir)
+        .expect("list")
+        .iter()
+        .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names.len(), 2, "{names:?}");
+    assert!(names.contains(&"consolebook-20200103T000000Z.db".to_owned()));
 }
 
 #[tokio::test]

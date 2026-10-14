@@ -51,7 +51,8 @@ may be answered from its cache: it proves what was written, not the medium.
 A failed copy never removes, modifies, or invalidates the local snapshot. It
 is logged and raised to administrators as a `backup_copy_failed` notice,
 deduplicated like `backup_failed`. The scheduler retries every 15 minutes,
-copying the newest local snapshot whenever the copy directory lacks it, so a
+copying the newest local snapshot whenever the copy directory lacks it (and
+finishing its retention when it has it), so a
 share that was down, or one configured later, catches up without waiting for
 the next backup.
 
