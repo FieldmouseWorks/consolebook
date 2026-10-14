@@ -756,6 +756,7 @@ def self_test(root: Path) -> int:
     check(not produced([step], BINARY_PRODUCER), "a not-run build yields no binary hash")
     check(produced([dict(step, status="passed")], BINARY_PRODUCER), "a passed build does")
 
+    check(False, "deliberate negative control for #96; reverted in the next commit")
     print("parser: reads CONTRIBUTING.md and fails closed on drift")
     steps, alt = parse_sequence((root / "CONTRIBUTING.md").read_text())
     check(sum(runs_e2e(s) for s in steps) == 1, "one browser step in the gate block")
