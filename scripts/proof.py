@@ -48,6 +48,10 @@ BROWSER_PLACEHOLDER = "/path/to/chromium"
 RECEIPT_ROOT = ".proof"
 BINARY = "target/debug/consolebook-server"
 WEB_BUILD = "web/build"
+# An artifact is hashed only when a step containing its producer passed in
+# this run; otherwise a leftover from an earlier build would pass as evidence.
+BINARY_PRODUCER = "cargo build -p consolebook-server"
+WEB_BUILD_PRODUCER = "npm run build"
 
 
 class SetupError(Exception):
@@ -321,16 +325,24 @@ def run_sequence(
         if after != before:
             receipt["candidate_after"] = after
         receipt["browser"] = browser_identity(root, chromium) if artifacts else None
-        receipt["artifacts"] = collect_artifacts(root, out_dir) if artifacts else {}
+        receipt["artifacts"] = collect_artifacts(root, out_dir, receipt["steps"]) if artifacts else {}
         write_receipt(receipt, out_dir)
     return receipt, out_dir
 
 
-def collect_artifacts(root: Path, out_dir: Path) -> dict:
+def produced(steps: list[dict], producer: str) -> bool:
+    return any(producer in s["command"] and s["status"] == "passed" for s in steps)
+
+
+def collect_artifacts(root: Path, out_dir: Path, steps: list[dict]) -> dict:
     binary = root / BINARY
     return {
-        "binary": {"path": BINARY, "sha256": sha256_file(binary)} if binary.is_file() else None,
-        "web_build_manifest": web_manifest(root, out_dir),
+        "binary": {"path": BINARY, "sha256": sha256_file(binary)}
+        if produced(steps, BINARY_PRODUCER) and binary.is_file()
+        else None,
+        "web_build_manifest": web_manifest(root, out_dir)
+        if produced(steps, WEB_BUILD_PRODUCER)
+        else None,
     }
 
 
@@ -345,7 +357,8 @@ def render_markdown(r: dict) -> str:
     rows = "\n".join(
         f"| {s['index']} | `{s['command']}` | {s['status']} | "
         f"{s.get('exit_status', '—')} | {s.get('duration_s', '—')} | "
-        f"{s.get('log', '—')} `{s.get('log_sha256', '')[:16]}` |"
+        f"{s['log']} `{s['log_sha256'][:16]}` |" if "log" in s else
+        f"| {s['index']} | `{s['command']}` | {s['status']} | — | — | — |"
         for s in r["steps"]
     )
     arts = r.get("artifacts") or {}
@@ -361,8 +374,8 @@ def render_markdown(r: dict) -> str:
 - Browser: {b.get('kind', 'not recorded')} `{b.get('path', '')}` ({b.get('version', '')})
 - Host: {r['host']['platform']}; privileged: {r['host']['privileged']}
 - Toolchain: {r['toolchain']['rustc']}; node {r['toolchain']['node']}; npm {r['toolchain']['npm']}
-- Binary: {f"`{binary['path']}` sha256 `{binary['sha256']}`" if binary else 'not present'}
-- Web build manifest: {f"{manifest['files']} files, sha256 `{manifest['sha256']}`" if manifest else 'not present'}
+- Binary: {f"`{binary['path']}` sha256 `{binary['sha256']}`" if binary else 'not built by this run'}
+- Web build manifest: {f"{manifest['files']} files, sha256 `{manifest['sha256']}`" if manifest else 'not built by this run'}
 
 | # | Command | Status | Exit | Seconds | Log sha256 (prefix) |
 | --- | --- | --- | --- | --- | --- |
@@ -401,6 +414,11 @@ def self_test(root: Path) -> int:
         r, d2 = run_sequence(["true"], root, base, chromium=None, invocation=inv, artifacts=False)
         check(r["result"] == "passed" and r["failed_step"] is None, "result passed")
         check(d2 != d and (d / "receipt.json").is_file(), "earlier failed receipt kept")
+
+    print("artifacts: hashed only when their producing step passed in this run")
+    step = {"command": f"x && {BINARY_PRODUCER}", "status": "not-run"}
+    check(not produced([step], BINARY_PRODUCER), "a not-run build yields no binary hash")
+    check(produced([dict(step, status="passed")], BINARY_PRODUCER), "a passed build does")
 
     print("parser: reads CONTRIBUTING.md and fails closed on drift")
     steps, alt = parse_sequence((root / "CONTRIBUTING.md").read_text())
