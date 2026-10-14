@@ -51,19 +51,62 @@ impl FromStr for PublicUrl {
                 "public URL {raw:?} must start with https:// (or http:// for a trial)"
             ));
         };
-        if rest.is_empty() {
-            return Err(format!("public URL {raw:?} has no host"));
-        }
         if rest.contains(['/', '?', '#', '@']) || rest.chars().any(char::is_whitespace) {
             return Err(format!(
                 "public URL {raw:?} must be only scheme, host, and optional port; Consolebook is served at the root"
             ));
         }
+        authority(rest).map_err(|problem| format!("public URL {raw:?} {problem}"))?;
         Ok(Self {
             origin: format!("{}://{rest}", if secure { "https" } else { "http" }),
             secure,
         })
     }
+}
+
+/// Checks `host[:port]`, where the host is a DNS name, an IPv4 address,
+/// or a bracketed IPv6 address, and the port is 1 to 65535.
+fn authority(rest: &str) -> Result<(), &'static str> {
+    let (host, port) = if let Some(inner) = rest.strip_prefix('[') {
+        let (address, after) = inner
+            .split_once(']')
+            .ok_or("has an unclosed [ in its host")?;
+        if address.parse::<std::net::Ipv6Addr>().is_err() {
+            return Err("has an invalid IPv6 address");
+        }
+        match after {
+            "" => (address, None),
+            _ => (
+                address,
+                Some(
+                    after
+                        .strip_prefix(':')
+                        .ok_or("has text after its IPv6 address")?,
+                ),
+            ),
+        }
+    } else {
+        match rest.split_once(':') {
+            Some((host, port)) => (host, Some(port)),
+            None => (rest, None),
+        }
+    };
+    if host.is_empty() {
+        return Err("has no host");
+    }
+    if !rest.starts_with('[')
+        && !host.split('.').all(|label| {
+            !label.is_empty() && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        })
+    {
+        return Err("has an invalid host name");
+    }
+    if let Some(port) = port
+        && !port.parse::<u16>().is_ok_and(|port| port > 0)
+    {
+        return Err("has an invalid port (1 to 65535)");
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -78,6 +121,9 @@ mod tests {
         let url: PublicUrl = "http://192.0.2.10:7770".parse().expect("valid");
         assert!(!url.is_secure());
         assert_eq!(url.origin(), "http://192.0.2.10:7770");
+        let url: PublicUrl = "https://[2001:db8::1]:8443".parse().expect("valid");
+        assert_eq!(url.origin(), "https://[2001:db8::1]:8443");
+        assert!("https://[2001:db8::1]".parse::<PublicUrl>().is_ok());
     }
 
     #[test]
@@ -90,6 +136,18 @@ mod tests {
             "https://consolebook.example.org?x=1",
             "https://user@consolebook.example.org",
             "https://consolebook example.org",
+            "https://:",
+            "https://:443",
+            "https://consolebook.example.org:",
+            "https://consolebook.example.org:notaport",
+            "https://consolebook.example.org:0",
+            "https://consolebook.example.org:65536",
+            "https://[broken",
+            "https://[2001:db8::1",
+            "https://[not-ipv6]",
+            "https://[2001:db8::1]x",
+            "https://consolebook..example.org",
+            "https://consolebook_example.org",
         ] {
             assert!(raw.parse::<PublicUrl>().is_err(), "{raw} was accepted");
         }

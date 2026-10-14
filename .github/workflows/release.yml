@@ -148,6 +148,10 @@ jobs:
           grep -q '^CONSOLEBOOK_PUBLIC_URL=https://consolebook.example.invalid$' /etc/consolebook/consolebook.env
           curl -fsS http://127.0.0.2:7771/api/instance | grep -q '"public_url":"https://consolebook.example.invalid"'
           sudo journalctl -u consolebook --no-pager | grep -q 'session cookies are marked Secure'
+          # The printed command for a supervisor other than systemd carries it too.
+          sudo install/install.sh --from "dist/consolebook-linux-${{ matrix.arch }}.tar.gz" \
+            --no-service | tee no-service.log
+          grep -q 'CONSOLEBOOK_PUBLIC_URL=https://consolebook.example.invalid .* serve --bind' no-service.log
       # Jobs share archives through a draft release, published once all pass.
       - name: Upload to the draft release
         if: startsWith(github.ref, 'refs/tags/v')

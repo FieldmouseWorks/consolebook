@@ -321,7 +321,7 @@ say "Installed $("$BIN" --version)."
 if [ "$service" = no ]; then
 	say ""
 	say "Files installed; no service was created. Start it with:"
-	say "  sudo -u $ACCOUNT CONSOLEBOOK_DATA_DIR=$DATA${COPY:+ CONSOLEBOOK_BACKUP_COPY_DIR=$COPY} $BIN serve --bind $bind"
+	say "  sudo -u $ACCOUNT CONSOLEBOOK_DATA_DIR=$DATA${COPY:+ CONSOLEBOOK_BACKUP_COPY_DIR=$COPY}${PUBLIC:+ CONSOLEBOOK_PUBLIC_URL=$PUBLIC} $BIN serve --bind $bind"
 	warn_backups
 	exit 0
 fi
