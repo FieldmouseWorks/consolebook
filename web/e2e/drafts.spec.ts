@@ -124,7 +124,7 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 	await page.getByLabel('Username').fill('avery.admin');
 	await page.getByLabel('Password').fill(PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page.getByRole('heading', { name: 'Installation status' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible();
 
 	// Seed the published program, people, enrollment, assignment, and an
 	// open session over the API; the cookie rides page.request.
@@ -375,7 +375,7 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 	await page.getByLabel('Username').fill('casey.coord');
 	await page.getByLabel('Password').fill(CASEY_PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page.getByRole('heading', { name: 'Installation status' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible();
 	await page.goto(draftUrl);
 	await expect(page.getByRole('heading', { name: 'Amend' })).toBeVisible();
 	await page
@@ -391,7 +391,7 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 	await page.getByLabel('Username').fill('rowan.trainer');
 	await page.getByLabel('Password').fill(ROWAN_PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page.getByRole('heading', { name: 'Installation status' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible();
 	await page.goto(draftUrl);
 	await page
 		.getByLabel('Least acceptable performance.')
@@ -408,7 +408,7 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 	await page.getByLabel('Username').fill('casey.coord');
 	await page.getByLabel('Password').fill(CASEY_PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page.getByRole('heading', { name: 'Installation status' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible();
 	await page.goto(draftUrl);
 	await page.getByLabel('Decision').selectOption({ label: 'Approve' });
 	await page.getByRole('button', { name: 'Decide' }).click();
@@ -457,7 +457,7 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 	await page.getByLabel('Username').fill('casey.coord');
 	await page.getByLabel('Password').fill(CASEY_PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page.getByRole('heading', { name: 'Installation status' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible();
 	await page.goto(`/enrollments/${enrollment.id}`);
 	await expect(page.getByRole('heading', { name: 'Task signoffs' })).toBeVisible();
 	await page.getByRole('button', { name: 'Observed', exact: true }).first().click();

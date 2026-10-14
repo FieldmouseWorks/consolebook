@@ -93,7 +93,7 @@ test('a trainee reads their own complete signoff history', async ({ page, setupC
 	await page.getByLabel('Username').fill('avery.admin');
 	await page.getByLabel('Password').fill(PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page.getByRole('heading', { name: 'Installation status' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible();
 
 	const program = await (
 		await page.request.post(`/api/programs`, { data: { name: content('a', FIRST_PROMPT).name } })
@@ -157,7 +157,7 @@ test('a trainee reads their own complete signoff history', async ({ page, setupC
 	await page.getByLabel('Username').fill('avery.admin');
 	await page.getByLabel('Password').fill(PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page.getByRole('heading', { name: 'Installation status' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible();
 
 	// A second version, and the enrollment repointed to it: the first
 	// version's signoff is now history the current matrix cannot show.

@@ -57,7 +57,7 @@ test('record, close, and read sessions with local time semantics', async ({ page
 	await page.getByLabel('Username').fill('avery.admin');
 	await page.getByLabel('Password').fill(PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page.getByRole('heading', { name: 'Installation status' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible();
 
 	// Seed the published program, trainee, trainer, enrollment, and
 	// assignment over the API; the session cookie rides page.request.
@@ -145,11 +145,13 @@ test('record, close, and read sessions with local time semantics', async ({ page
 	await page.getByRole('button', { name: 'Sign in' }).click();
 	await expect(page.getByRole('heading', { name: 'My sessions' })).toBeVisible();
 	await expect(page.getByRole('cell', { name: 'Taylor Trainee' }).first()).toBeVisible();
-	await expect(page.getByText('2026-06-02 07:00 – 2026-06-02 15:00')).toBeVisible();
+	const sessionRow = (date: string) =>
+		page.getByRole('row').filter({ hasText: date }).filter({ hasText: '07:00–15:00' });
+	await expect(sessionRow('2026-06-02')).toBeVisible();
 
 	// Membership authorizes the close right here: the trainer completes
 	// their open session from their own list.
 	await page.getByLabel('Local end').fill('2026-06-03T15:00');
 	await page.getByRole('button', { name: 'Complete', exact: true }).click();
-	await expect(page.getByText('2026-06-03 07:00 – 2026-06-03 15:00')).toBeVisible();
+	await expect(sessionRow('2026-06-03')).toBeVisible();
 });

@@ -362,7 +362,8 @@
 	}
 	.actionbar {
 		display: flex;
-		gap: 0.75rem;
+		flex-wrap: wrap;
+		gap: 0.5rem 0.75rem;
 		align-items: center;
 		position: sticky;
 		bottom: 0;

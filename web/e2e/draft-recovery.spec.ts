@@ -98,7 +98,7 @@ async function seed(
 	await page.getByLabel('Username').fill('avery.admin');
 	await page.getByLabel('Password').fill(PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page.getByRole('heading', { name: 'Installation status' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible();
 
 	const program = await (
 		await page.request.post(`/api/programs`, { data: { name: content.name } })
@@ -478,7 +478,7 @@ async function signIn(
 	await page.getByLabel('Username').fill(username);
 	await page.getByLabel('Password').fill(password);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page.getByRole('heading', { name: 'Installation status' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible();
 	return page;
 }
 
@@ -1390,7 +1390,7 @@ test('an ordinary edit saves before a retried SPA departure', async ({
 		await expectSaved(loser);
 		await expectUnloadReady(loser);
 		await loser.getByRole('link', { name: 'Home' }).click();
-		await expect(loser.getByRole('heading', { name: 'Installation status' })).toBeVisible();
+		await expect(loser.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible();
 
 		// The queued edit reaches the server anyway, once.
 		await expect
@@ -2391,6 +2391,45 @@ test('a failed ordinary save cannot silently leave by SPA navigation', async ({
 		await expectUnloadReady(author);
 		await markSpa(author);
 		await homeSessions(author);
+	} finally {
+		await authorContext.close();
+	}
+});
+
+test('signing out from a draft with a failed save keeps the draft and the session', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const authorContext = await browser.newContext();
+	const author = await signIn(authorContext, JORDAN, seeded.jordanResetCode, JORDAN_PASSWORD);
+	try {
+		await author.goto(seeded.draftUrl);
+		await expect(author.getByLabel(MOST)).toBeVisible();
+		await author.route(`**/api/drafts/${seeded.draftId}/content`, async (route) => {
+			await route.abort('failed');
+		});
+		const unsaved = 'Invented note whose save could not reach the server.';
+		await author.getByLabel(MOST).fill(unsaved);
+		await expect(author.locator('.savestate')).toHaveText('Save failed');
+
+		// The header's sign out leaves by ordinary navigation first, so the
+		// draft's guard refuses while the session still works.
+		await author.getByRole('button', { name: 'Sign out' }).click();
+		await expect(author.getByRole('alert')).toContainText('Stay on this draft');
+		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
+		await expect(author.getByLabel(MOST)).toHaveValue(unsaved);
+		const probe = await author.request.get('/api/auth/session');
+		expect(probe.status()).toBe(200);
+
+		// Once the text is saved, the same button signs out.
+		await author.unroute(`**/api/drafts/${seeded.draftId}/content`);
+		await author.getByLabel(MOST).fill('Invented corrected note saved on retry.');
+		await expectSaved(author);
+		await author.getByRole('button', { name: 'Sign out' }).click();
+		await expect(author).toHaveURL(/\/login$/);
+		expect((await author.request.get('/api/auth/session')).status()).toBe(401);
 	} finally {
 		await authorContext.close();
 	}
