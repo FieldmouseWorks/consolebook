@@ -481,8 +481,10 @@ def run_sequence(
         result = "interrupted"
         print(f"\n{ME}: interrupted; writing the receipt", file=sys.stderr)
     finally:
-        # A second termination must not cut the receipt short.
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        # A second Ctrl-C or SIGTERM must not cut the receipt short: both are
+        # held until it is written, then delivered.
+        held = {signal.SIGINT, signal.SIGTERM}
+        signal.pthread_sigmask(signal.SIG_BLOCK, held)
         try:
             receipt["finished_at"] = now()
             receipt["duration_s"] = round(time.monotonic() - t0, 3)
@@ -499,6 +501,7 @@ def run_sequence(
             write_receipt(receipt, out_dir)
         finally:
             signal.signal(signal.SIGTERM, previous_term)
+            signal.pthread_sigmask(signal.SIG_UNBLOCK, held)
     return receipt, out_dir
 
 
@@ -667,6 +670,33 @@ def self_test(root: Path) -> int:
         time.sleep(3)
         check(not marker.exists(),
               "a repeated SIGTERM during the grace period still ends the group")
+
+    print("termination control: a second Ctrl-C while finalizing still leaves the receipt")
+    global candidate_state
+    real_state = candidate_state
+    calls = []
+
+    def interrupting_state(where: Path) -> dict:
+        calls.append(where)
+        if len(calls) == 2:
+            os.kill(os.getpid(), signal.SIGINT)
+        return real_state(where)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        candidate_state = interrupting_state
+        try:
+            run_sequence(["kill -INT $PPID; sleep 5"], root, base,
+                         chromium=None, invocation=inv, artifacts=False)
+            check(False, "the held second interrupt is delivered after the receipt")
+        except KeyboardInterrupt:
+            check(True, "the held second interrupt is delivered after the receipt")
+        finally:
+            candidate_state = real_state
+        (d,) = list(base.iterdir())
+        check((d / "receipt.json").is_file()
+              and json.loads((d / "receipt.json").read_text())["result"] == "interrupted",
+              "the receipt is written and records the interruption")
 
     print("candidate: untracked names are read exactly, not as quoted display text")
     with tempfile.TemporaryDirectory() as tmp:
