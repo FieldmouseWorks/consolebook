@@ -12,6 +12,8 @@ not a production-readiness statement.
 
 ### Fixed
 
+- A phase change that waited behind another write is no longer refused as
+  out of order; it is judged at the moment it can commit ([#108](https://github.com/FieldmouseWorks/consolebook/issues/108)).
 - After a restore, the set-aside database no longer counts as the newest
   backup: snapshots order by their time, so off-server copy status,
   catch-up copies, and retention follow the latest backup ([#105](https://github.com/FieldmouseWorks/consolebook/issues/105)).
