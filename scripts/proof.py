@@ -93,6 +93,12 @@ def parse_sequence(text: str) -> tuple[list[str], str | None]:
     steps = [s for s in blocks[0] if s and not s.startswith("#")]
     if not steps:
         raise SetupError("CONTRIBUTING.md: the gate block has no commands")
+    # A receipt that says "passed" must include the browser suite exactly once.
+    e2e = sum(E2E_MARKER in s for s in steps)
+    if e2e != 1:
+        raise SetupError(
+            f"CONTRIBUTING.md: expected one gate step running '{E2E_MARKER}', found {e2e}"
+        )
 
     browser_lines = [
         s for block in blocks[1:] for s in block if f"{BROWSER_VAR}=" in s
@@ -100,6 +106,10 @@ def parse_sequence(text: str) -> tuple[list[str], str | None]:
     if len(browser_lines) > 1:
         raise SetupError(
             f"CONTRIBUTING.md: expected one {BROWSER_VAR}= line, found {len(browser_lines)}"
+        )
+    if browser_lines and E2E_MARKER not in browser_lines[0]:
+        raise SetupError(
+            f"CONTRIBUTING.md: the {BROWSER_VAR}= line must run '{E2E_MARKER}'"
         )
     return steps, (browser_lines[0] if browser_lines else None)
 
@@ -477,6 +487,12 @@ def self_test(root: Path) -> int:
         ("missing block", f"{SECTION}\n\nno commands\n"),
         ("unterminated block", f"{SECTION}\n```sh\ncargo test\n"),
         ("empty block", f"{SECTION}\n```sh\n\n```\n"),
+        ("a gate block without the browser suite", f"{SECTION}\n```sh\ncargo test\n```\n"),
+        ("a duplicated browser suite",
+         f"{SECTION}\n```sh\n(cd web && {E2E_MARKER})\n(cd web && {E2E_MARKER})\n```\n"),
+        ("a system-browser line that skips the suite",
+         f"{SECTION}\n```sh\n(cd web && {E2E_MARKER})\n```\n\n```sh\n"
+         f"echo {BROWSER_VAR}={BROWSER_PLACEHOLDER}\n```\n"),
     ]:
         try:
             parse_sequence(text)
