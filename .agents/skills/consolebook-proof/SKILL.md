@@ -44,7 +44,15 @@ shape changes in a way the script does not recognize, it refuses to run
 the suite will use; it stops at the first failing step.
 
 Run as an unprivileged user: the Unix permission tests assume one, and the
-receipt records a privileged run.
+receipt records whether the run could bypass file permissions. Where only
+root is available (a disposable container, for example), drop the Linux
+capabilities that bypass them instead; the receipt then records the run as
+unprivileged, read from the effective capability set:
+
+```sh
+setpriv --inh-caps=-dac_override,-dac_read_search,-fowner \
+  --bounding-set=-dac_override,-dac_read_search,-fowner scripts/proof.py
+```
 
 ## 3. Read and report the receipt
 

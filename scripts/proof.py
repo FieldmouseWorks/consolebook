@@ -192,6 +192,24 @@ def browser_identity(root: Path, chromium: str | None) -> dict:
     }
 
 
+def privilege() -> dict:
+    """Whether this process can bypass file permissions, as the permission tests care.
+
+    On Linux that is CAP_DAC_OVERRIDE or CAP_DAC_READ_SEARCH in the effective
+    set, so a root process with those dropped counts as unprivileged; elsewhere
+    it falls back to an effective uid of 0.
+    """
+    euid = os.geteuid() if hasattr(os, "geteuid") else None
+    try:
+        for line in Path("/proc/self/status").read_text().splitlines():
+            if line.startswith("CapEff:"):
+                bypass = bool(int(line.split()[1], 16) & 0b110)
+                return {"privileged": bypass, "euid": euid, "privilege_source": "CapEff"}
+    except (OSError, ValueError):
+        pass
+    return {"privileged": euid == 0, "euid": euid, "privilege_source": "euid"}
+
+
 def web_manifest(root: Path, out_dir: Path) -> dict | None:
     build = root / WEB_BUILD
     if not build.is_dir():
@@ -269,10 +287,7 @@ def run_sequence(
             "path": "CONTRIBUTING.md",
             "sha256": sha256_file(contributing) if contributing.is_file() else None,
         },
-        "host": {
-            "platform": platform.platform(),
-            "privileged": hasattr(os, "geteuid") and os.geteuid() == 0,
-        },
+        "host": {"platform": platform.platform(), **privilege()},
         "toolchain": {
             "rustc": tool_version(["rustc", "--version"], root),
             "node": tool_version(["node", "--version"], root),
@@ -282,8 +297,8 @@ def run_sequence(
         "steps": [{"index": i + 1, "command": s, "cwd": ".", "status": "not-run"} for i, s in enumerate(steps)],
     }
     if receipt["host"]["privileged"]:
-        print(f"{ME}: warning: running as root; CONTRIBUTING.md asks for an unprivileged "
-              "user so permission tests are meaningful", file=sys.stderr)
+        print(f"{ME}: warning: this process can bypass file permissions; CONTRIBUTING.md "
+              "asks for an unprivileged user so permission tests are meaningful", file=sys.stderr)
     print(f"{ME}: browser for '{E2E_MARKER}': "
           f"{'system Chromium at ' + chromium if chromium else 'Playwright-managed Chromium'}")
     print(f"{ME}: receipt directory: {out_dir}")
@@ -380,7 +395,7 @@ def render_markdown(r: dict) -> str:
 - Started {r['started_at']}, finished {r['finished_at']}, {r['duration_s']:.1f}s
 - Sequence source: CONTRIBUTING.md sha256 `{r['sequence_source']['sha256']}`
 - Browser: {b.get('kind', 'not recorded')} `{b.get('path', '')}` ({b.get('version', '')})
-- Host: {r['host']['platform']}; privileged: {r['host']['privileged']}
+- Host: {r['host']['platform']}; euid {r['host']['euid']}; can bypass file permissions: {r['host']['privileged']} (from {r['host']['privilege_source']})
 - Toolchain: {r['toolchain']['rustc']}; node {r['toolchain']['node']}; npm {r['toolchain']['npm']}
 - Binary: {f"`{binary['path']}` sha256 `{binary['sha256']}`" if binary else 'not built by this run'}
 - Web build manifest: {f"{manifest['files']} files, sha256 `{manifest['sha256']}`" if manifest else 'not built by this run'}
