@@ -289,7 +289,9 @@ def run_sequence(
     print(f"{ME}: receipt directory: {out_dir}")
 
     t0 = time.monotonic()
-    result, failed = "passed", None
+    # "passed" is set only when every step ran and exited 0; any other end,
+    # including an unexpected exception, leaves a non-passing receipt.
+    result, failed = "error", None
     try:
         for step in receipt["steps"]:
             i, n = step["index"], len(steps)
@@ -299,21 +301,26 @@ def run_sequence(
             s0 = time.monotonic()
             try:
                 code = run_step(step["command"], root, env, log)
-            except KeyboardInterrupt:
-                step.update(status="interrupted", exit_status=None)
-                result, failed = "interrupted", i
+            except BaseException as e:
+                interrupted = isinstance(e, KeyboardInterrupt)
+                step.update(status="interrupted" if interrupted else "error", exit_status=None)
+                failed = i
                 raise
             finally:
                 step["duration_s"] = round(time.monotonic() - s0, 3)
-                step["log"] = log.name
-                step["log_sha256"] = sha256_file(log)
+                if log.is_file():
+                    step["log"] = log.name
+                    step["log_sha256"] = sha256_file(log)
             step["exit_status"] = code
             step["status"] = "passed" if code == 0 else "failed"
             print(f"<== [{i}/{n}] exit {code} in {step['duration_s']:.1f}s", flush=True)
             if code != 0:
                 result, failed = "failed", i
                 break
+        else:
+            result = "passed"
     except KeyboardInterrupt:
+        result = "interrupted"
         print(f"\n{ME}: interrupted; writing the receipt", file=sys.stderr)
     finally:
         receipt["finished_at"] = now()
@@ -358,7 +365,8 @@ def render_markdown(r: dict) -> str:
         f"| {s['index']} | `{s['command']}` | {s['status']} | "
         f"{s.get('exit_status', '—')} | {s.get('duration_s', '—')} | "
         f"{s['log']} `{s['log_sha256'][:16]}` |" if "log" in s else
-        f"| {s['index']} | `{s['command']}` | {s['status']} | — | — | — |"
+        f"| {s['index']} | `{s['command']}` | {s['status']} | "
+        f"{s.get('exit_status', '—')} | {s.get('duration_s', '—')} | no log |"
         for s in r["steps"]
     )
     arts = r.get("artifacts") or {}
@@ -414,6 +422,28 @@ def self_test(root: Path) -> int:
         r, d2 = run_sequence(["true"], root, base, chromium=None, invocation=inv, artifacts=False)
         check(r["result"] == "passed" and r["failed_step"] is None, "result passed")
         check(d2 != d and (d / "receipt.json").is_file(), "earlier failed receipt kept")
+
+    print("error control: an unexpected exception records an error, never a pass")
+    global run_step
+    real_step = run_step
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+
+        def broken(*_a, **_k):
+            raise OSError("injected")
+
+        run_step = broken
+        try:
+            run_sequence(["true", "true"], root, base, chromium=None, invocation=inv, artifacts=False)
+            check(False, "the exception propagates")
+        except OSError:
+            check(True, "the exception propagates")
+        finally:
+            run_step = real_step
+        (d,) = list(base.iterdir())
+        saved = json.loads((d / "receipt.json").read_text())
+        check(saved["result"] == "error" and saved["failed_step"] == 1, "result error at step 1")
+        check([s["status"] for s in saved["steps"]] == ["error", "not-run"], "statuses error, not-run")
 
     print("artifacts: hashed only when their producing step passed in this run")
     step = {"command": f"x && {BINARY_PRODUCER}", "status": "not-run"}
