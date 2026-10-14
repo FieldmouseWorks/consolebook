@@ -18,3 +18,6 @@
 .mcp.json
 CLAUDE.local.md
 .claude/
+
+# Local proof receipts written by scripts/proof.py
+/.proof/

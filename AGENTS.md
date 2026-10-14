@@ -86,6 +86,8 @@ browser prerequisites are in `CONTRIBUTING.md`. Required checks: `npm ci`,
 `cargo clippy --workspace --all-targets -- -D warnings`, and
 `cargo test --workspace`; then `cargo build -p consolebook-server` and
 `npm run e2e` in `web/` with the documented Chromium prerequisite.
+`scripts/proof.py` runs that sequence and leaves a receipt
+(`.agents/skills/consolebook-proof/`).
 Keep the pinned Rust toolchain in `rust-toolchain.toml`.
 
 Report only verification actually run, with exact failures. Investigate

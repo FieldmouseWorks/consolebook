@@ -189,7 +189,10 @@ extending them over writing one-off scripts for a session.
 
 ## Receipts and resuming
 
-Every material check or review receipt names:
+`scripts/proof.py` is the canonical way to run the required local gates and
+produce their receipt; the
+[consolebook-proof skill](../.agents/skills/consolebook-proof/SKILL.md)
+describes its use and output. Every material check or review receipt names:
 
 - actual timestamp and duration;
 - exact command or review action and working directory;
