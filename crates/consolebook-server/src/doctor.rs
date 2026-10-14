@@ -4,8 +4,12 @@
 //! SQLite may create WAL sidecars or update their coordination state (ADR 0016).
 //! It reports what it finds; the operator decides what to do.
 
+use std::path::Path;
+
 use anyhow::Result;
 use sqlx::SqlitePool;
+
+use crate::backup_copy::{self, CopyStatus};
 
 use crate::data_dir::DataDir;
 use crate::storage;
@@ -49,8 +53,9 @@ impl Finding {
 }
 
 /// Runs every diagnostic and returns the findings. The caller decides how to
-/// render them and what exit code the process deserves.
-pub async fn run(data_dir: &DataDir) -> Vec<Finding> {
+/// render them and what exit code the process deserves. `backup_copy_dir` is
+/// the configured off-server copy directory, if any (ADR 0024).
+pub async fn run(data_dir: &DataDir, backup_copy_dir: Option<&Path>) -> Vec<Finding> {
     let mut findings = Vec::new();
 
     check_layout(data_dir, &mut findings);
@@ -86,6 +91,7 @@ pub async fn run(data_dir: &DataDir) -> Vec<Finding> {
     }
 
     check_backups(data_dir, &mut findings);
+    check_backup_copy(data_dir, backup_copy_dir, &mut findings);
     findings
 }
 
@@ -278,4 +284,50 @@ fn check_backups(data_dir: &DataDir, findings: &mut Vec<Finding>) {
             format!("{} snapshot(s), latest {latest_name}", snapshots.len()),
         )),
     }
+}
+
+/// The states match `/api/backups/status`. None is a failure: the
+/// installation still works, but backups that never leave the server are
+/// lost with it, so anything short of current is a warning.
+fn check_backup_copy(data_dir: &DataDir, copy_dir: Option<&Path>, findings: &mut Vec<Finding>) {
+    const CHECK: &str = "backup copy";
+    if !data_dir.backups().is_dir() {
+        return; // Layout check already reported the missing directory.
+    }
+    let status = match backup_copy::copy_status(data_dir, copy_dir) {
+        Ok(status) => status,
+        Err(err) => {
+            findings.push(Finding::fail(CHECK, format!("{err:#}")));
+            return;
+        }
+    };
+    findings.push(match status {
+        CopyStatus::NotConfigured => Finding::warn(
+            CHECK,
+            "not_configured: every backup shares a disk with the database; pass --backup-copy-dir as configured for the service (docs/install.md)",
+        ),
+        CopyStatus::Unreachable { directory, problem } => {
+            Finding::warn(CHECK, format!("unreachable: {directory}: {problem}"))
+        }
+        CopyStatus::Behind {
+            directory,
+            count,
+            newest,
+        } => Finding::warn(
+            CHECK,
+            format!(
+                "behind: {directory} has {count} cop{} (newest {}) but not the newest local snapshot; the server retries every 15 minutes",
+                if count == 1 { "y" } else { "ies" },
+                newest.as_deref().unwrap_or("none"),
+            ),
+        ),
+        CopyStatus::Current {
+            directory,
+            count,
+            newest,
+        } => Finding::ok(
+            CHECK,
+            format!("current: {directory} has {count}, newest {newest}"),
+        ),
+    });
 }

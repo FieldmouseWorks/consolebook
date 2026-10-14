@@ -18,6 +18,11 @@ not a production-readiness statement.
   release.
 - A version that finds a database upgraded by a newer release refuses it in
   plain words and names the way back.
+- `doctor --backup-copy-dir` reports whether off-server backup copies are
+  current, behind, unreachable, or not configured, without writing anything.
+- [ADR 0027](docs/decisions/0027-backup-copy-encryption.md): Consolebook does
+  not encrypt backup copies; the install guide states what the share must
+  provide.
 
 ### Fixed
 

@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-14
 - **Amends:** [ADR 0006](0006-backup-scheduling-and-restore.md)
+- **Amended by:** [ADR 0027](0027-backup-copy-encryption.md) (copies at rest)
 
 ## Context
 
@@ -88,9 +89,10 @@ would be a second incident, not a safeguard.
 - An installation that follows the installer's advice survives the loss of
   its own disk with at most one backup interval of data lost.
 - Copies inherit ADR 0006's limits: they are plain SQLite files, unencrypted
-  at rest; protecting the share is the agency's responsibility until an
-  encryption decision exists.
-- `doctor` does not yet inspect the copy directory; the health read and
-  notices cover it while the server runs.
+  at rest. ADR 0027 keeps it that way and states what the share must
+  provide.
+- `doctor --backup-copy-dir` reports the copy directory in the same states as
+  the health read, without writing to it, so backup health is visible while
+  the server is stopped too.
 - Restoring from a copy is the existing `restore <snapshot>` path, which
   accepts any snapshot file.

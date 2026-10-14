@@ -15,7 +15,7 @@ tests show what is implemented. [Roadmap](roadmap.md) owns milestone status.
 | Task | Start in `crates/consolebook-server/src/` | Supporting context |
 | --- | --- | --- |
 | Process, storage, diagnostics | `main.rs`, `data_dir.rs`, `storage.rs`, `doctor.rs` | [Architecture](architecture.md), [ADR 0003](decisions/0003-sqlite-connection-invariants.md), [ADR 0016](decisions/0016-read-only-diagnostics.md) |
-| Backups and restore | `backup.rs`, `backup_copy.rs`, `scheduler.rs`, `restore.rs`, `serve_lock.rs` | [ADR 0006](decisions/0006-backup-scheduling-and-restore.md), [ADR 0024](decisions/0024-off-server-backup-copies.md) |
+| Backups and restore | `backup.rs`, `backup_copy.rs`, `scheduler.rs`, `restore.rs`, `serve_lock.rs` | [ADR 0006](decisions/0006-backup-scheduling-and-restore.md), [ADR 0024](decisions/0024-off-server-backup-copies.md), [ADR 0027](decisions/0027-backup-copy-encryption.md) |
 | Setup, login, recovery | `setup.rs`, `users.rs`, `sessions.rs`, `secrets.rs` | [ADR 0004](decisions/0004-local-authentication.md) |
 | Capabilities and assignments | `capabilities.rs`, `assignments.rs`, `draft_access.rs` | [ADR 0010](decisions/0010-service-owned-authorization-boundary.md), [Domain model](domain-model.md) |
 | Program configuration | `programs.rs`, `programs/content.rs`, `programs/persistence.rs`, `program_export.rs` | [ADR 0007](decisions/0007-program-version-configuration-model.md), [Program format](formats/program-version-export.md) |

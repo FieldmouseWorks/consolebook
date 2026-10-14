@@ -175,12 +175,19 @@ or a systemd mount unit). The copy directory must already exist on another
 filesystem than the data directory: the installer refuses it otherwise, and
 never creates it. If the share is not mounted later, its mount point is just an
 empty local directory; Consolebook refuses to copy there, keeps backups local,
-and reports the copy location as unreachable until the share is back. Copies are plain SQLite files: protect the share the way
-you protect the server.
+and reports the copy location as unreachable until the share is back.
+
+Each copy holds every record. Consolebook does not encrypt copies (ADR 0027),
+so the share must:
+
+- be encrypted at rest (for example SMB 3 encryption, an encrypted NAS volume,
+  or LUKS or BitLocker on a second disk);
+- be writable only by the `consolebook` account;
+- be readable only by the people who may restore.
 
 ```sh
 sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook consolebook backup    # take one now
-sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook consolebook doctor    # read-only health check
+sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook consolebook doctor --backup-copy-dir /mnt/backups/consolebook    # read-only health check; without a copy directory, leave out --backup-copy-dir
 ```
 
 Restoring replaces the database, so stop the service first:

@@ -126,6 +126,10 @@ jobs:
           copy=$(sudo sh -c 'ls /srv/consolebook-copies/consolebook-*.db' | tail -n 1)
           sudo cmp "$copy" "/var/lib/consolebook/backups/$(basename "$copy")"
           sudo journalctl -u consolebook --no-pager | grep -q 'backup copied off the server and verified'
+          # doctor sees the same copy state, read-only, beside the running service.
+          sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook \
+            consolebook doctor --backup-copy-dir /srv/consolebook-copies | tee doctor-current.log
+          grep -Eq '^ok +backup copy +current: /srv/consolebook-copies has [0-9]+, newest consolebook-' doctor-current.log
           # A share that is gone at the next start (reboot, failed mount) must
           # not stop the service: it starts and keeps backing up locally.
           sudo umount /srv/consolebook-copies
@@ -137,6 +141,10 @@ jobs:
           done
           systemctl is-active consolebook
           curl -fsS http://127.0.0.2:7771/api/health
+          sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook \
+            consolebook doctor --backup-copy-dir /srv/consolebook-copies | tee doctor-gone.log
+          grep -Eq '^warn +backup copy +unreachable: /srv/consolebook-copies' doctor-gone.log
+          test ! -e /srv/consolebook-copies
 
       # Jobs share archives through a draft release, published once all pass.
       - name: Upload to the draft release
