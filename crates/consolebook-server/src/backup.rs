@@ -5,7 +5,8 @@
 //! is in use), validated with `SQLite`'s integrity check, then fsynced along
 //! with its directory, audited, and finally subject to retention pruning.
 //! The scheduler in `scheduler.rs` drives this automatically from `serve`;
-//! the `backup` command drives it manually.
+//! the `backup` command drives it manually. Copies off the server are
+//! `backup_copy.rs` (ADR 0023).
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -85,7 +86,13 @@ pub async fn run(data_dir: &DataDir, keep: usize) -> Result<BackupReport> {
 /// names sort chronologically; this listing is discovery only — nothing
 /// about a backup's validity is inferred from its name.
 pub fn snapshots(data_dir: &DataDir) -> Result<Vec<PathBuf>> {
-    let dir = data_dir.backups();
+    snapshots_in(&data_dir.backups())
+}
+
+/// The snapshot files in `dir` (local `backups/` or a copy directory),
+/// oldest first by their timestamped names.
+pub fn snapshots_in(dir: &Path) -> Result<Vec<PathBuf>> {
+    let dir = dir.to_path_buf();
     let mut found = Vec::new();
     let entries = match std::fs::read_dir(&dir) {
         Ok(entries) => entries,
@@ -124,8 +131,13 @@ pub fn latest_snapshot_mtime(data_dir: &DataDir) -> Result<Option<i64>> {
 /// Deletes the oldest snapshots beyond `keep`. Never deletes the last
 /// remaining snapshot, whatever `keep` says. Returns what was removed.
 pub fn prune(data_dir: &DataDir, keep: usize) -> Result<Vec<PathBuf>> {
+    prune_in(&data_dir.backups(), keep)
+}
+
+/// [`prune`] for any directory of snapshots, a copy directory included.
+pub fn prune_in(dir: &Path, keep: usize) -> Result<Vec<PathBuf>> {
     let keep = keep.max(1);
-    let all = snapshots(data_dir)?;
+    let all = snapshots_in(dir)?;
     let excess = all.len().saturating_sub(keep);
     let mut pruned = Vec::with_capacity(excess);
     for snapshot in all.into_iter().take(excess) {

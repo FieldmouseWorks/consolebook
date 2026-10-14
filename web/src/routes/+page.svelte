@@ -11,6 +11,7 @@
 		getHealth,
 		getNotices,
 		getSetupProgress,
+		getBackupStatus,
 		installationExportPath,
 		issueResetCode,
 		markNoticeRead,
@@ -25,10 +26,12 @@
 		type Notice,
 		type ReviewQueueRow,
 		type SetupProgress,
+		type BackupStatus,
 		type Role,
 		type SessionDisposition
 	} from '$lib/api';
 	import { capabilityName, instant, localSpan } from '$lib/format';
+	import BackupHealth from '$lib/backups/BackupHealth.svelte';
 	import type { ShellData } from './+layout';
 
 	let { data }: { data: ShellData } = $props();
@@ -62,11 +65,16 @@
 	let queue: ReviewQueueRow[] = $state([]);
 	let summary: ExportSummary | null = $state(null);
 	let progress: SetupProgress | null = $state(null);
+	let backups: BackupStatus | null = $state(null);
 	$effect(() => {
 		if (canManageUsers) {
 			getSetupProgress().then(
 				(body) => (progress = body),
 				() => (progress = null)
+			);
+			getBackupStatus().then(
+				(body) => (backups = body),
+				() => (backups = null)
 			);
 		}
 		getHealth().then(
@@ -246,6 +254,12 @@
 				hint: "Also on the enrollment page; the trainer then sees it on their home."
 			},
 			{
+				label: 'Copy backups off this server',
+				done: backups?.copy.state === 'current',
+				href: '#backups',
+				hint: 'A second disk or a network share, so one failure cannot take everything.'
+			},
+			{
 				label: 'Finalize a first evaluation',
 				done: counts.finalized_records > 0,
 				href: null,
@@ -336,6 +350,13 @@
 				</li>
 			{/each}
 		</ol>
+	</section>
+{/if}
+
+{#if backups}
+	<section class="panel" id="backups">
+		<h2>Backups</h2>
+		<BackupHealth status={backups} />
 	</section>
 {/if}
 

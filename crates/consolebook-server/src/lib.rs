@@ -8,6 +8,7 @@ pub mod amendments;
 pub mod assignments;
 pub mod audit;
 pub mod backup;
+pub mod backup_copy;
 pub mod canonical;
 pub mod capabilities;
 pub mod data_dir;

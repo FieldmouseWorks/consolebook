@@ -10,6 +10,10 @@
 # starts it and prints the address and first-run setup code.
 #
 # Options (after `sh -s --` when piping):
+#   --backup-dir DIR  also copy every backup to DIR: another disk or a mounted
+#                     network share (strongly recommended; see docs/install.md)
+#   --data-dir DIR    keep the database and local backups in DIR
+#                     (default /var/lib/consolebook)
 #   --version X.Y.Z   install that release instead of the latest
 #   --lan             listen on every network interface (port 7770)
 #   --listen ADDR     listen on ADDR, e.g. 0.0.0.0:8080 (default 127.0.0.1:7770)
@@ -23,16 +27,20 @@ set -eu
 
 REPO="FieldmouseWorks/consolebook"
 BIN=/usr/local/bin/consolebook
-DATA=/var/lib/consolebook
+DEFAULT_DATA=/var/lib/consolebook
 ETC=/etc/consolebook
 ENV_FILE="$ETC/consolebook.env"
 UNIT=/etc/systemd/system/consolebook.service
+DROPIN_DIR=/etc/systemd/system/consolebook.service.d
+DROPIN="$DROPIN_DIR/paths.conf"
 ACCOUNT=consolebook
 DEFAULT_LISTEN=127.0.0.1:7770
 
 version=""
 from=""
 listen=""
+data_dir=""
+backup_dir=""
 service=yes
 
 say() { printf '%s\n' "$*"; }
@@ -41,10 +49,25 @@ fail() {
 	exit 1
 }
 have() { command -v "$1" >/dev/null 2>&1; }
+warn_backups() {
+	if [ -n "${COPY:-}" ]; then
+		say "Backups are also copied to $COPY."
+		return
+	fi
+	say ""
+	say "!! WARNING: backups are kept only on this server's own disk."
+	say "!! If that disk fails, the records and every backup are lost together."
+	say "!! Mount another disk or a network share, then rerun this installer with:"
+	say "!!   --backup-dir /path/to/that/mount"
+}
 usage() {
 	cat <<'EOF'
 Install or upgrade Consolebook (Linux with systemd). Run as root.
 
+  --backup-dir DIR  also copy every backup to DIR: another disk or a mounted
+                    network share (strongly recommended)
+  --data-dir DIR    keep the database and local backups in DIR
+                    (default /var/lib/consolebook)
   --version X.Y.Z   install that release instead of the latest
   --lan             listen on every network interface (port 7770)
   --listen ADDR     listen on ADDR, e.g. 0.0.0.0:8080 (default 127.0.0.1:7770)
@@ -76,6 +99,16 @@ while [ $# -gt 0 ]; do
 		from=$2
 		shift 2
 		;;
+	--data-dir)
+		[ $# -ge 2 ] || fail "--data-dir needs a directory"
+		data_dir=$2
+		shift 2
+		;;
+	--backup-dir)
+		[ $# -ge 2 ] || fail "--backup-dir needs a directory"
+		backup_dir=$2
+		shift 2
+		;;
 	--no-service)
 		service=no
 		shift
@@ -90,6 +123,14 @@ done
 
 [ "$(id -u)" -eq 0 ] || fail "run as root, for example: curl -fsSL ... | sudo sh"
 [ "$(uname -s)" = Linux ] || fail "this installer supports Linux only"
+for path in "$data_dir" "$backup_dir"; do
+	case "$path" in
+	"" | /*) ;;
+	*) fail "directories must be absolute paths: $path" ;;
+	esac
+done
+# The data and copy directories are checked against each other once the
+# effective settings (options plus the existing env file) are known.
 
 case "$(uname -m)" in
 x86_64 | amd64) arch=x86_64 ;;
@@ -117,6 +158,23 @@ fi
 
 if [ "$service" = yes ]; then
 	have systemctl || fail "systemd is required for the service; use --no-service to install files only"
+fi
+
+# Check the effective directories before stopping or replacing anything.
+env_value() {
+	if [ -f "$ENV_FILE" ]; then
+		sed -n "s/^$1=//p" "$ENV_FILE" | tail -n 1
+	fi
+}
+effective_data=${data_dir:-$(env_value CONSOLEBOOK_DATA_DIR)}
+effective_data=${effective_data:-$DEFAULT_DATA}
+effective_copy=${backup_dir:-$(env_value CONSOLEBOOK_BACKUP_COPY_DIR)}
+if [ -n "$effective_copy" ]; then
+	case "$effective_copy/" in
+	"$effective_data"/*)
+		fail "the backup copy directory must be outside the data directory ($effective_data); a copy on the same disk protects nothing"
+		;;
+	esac
 fi
 
 work=$(mktemp -d)
@@ -166,25 +224,43 @@ install -m 0755 "$release/consolebook" "$BIN"
 if ! id "$ACCOUNT" >/dev/null 2>&1; then
 	nologin=$(command -v nologin || echo /bin/false)
 	if have useradd; then
-		useradd --system --user-group --home-dir "$DATA" --no-create-home --shell "$nologin" "$ACCOUNT"
+		useradd --system --user-group --home-dir "${data_dir:-$DEFAULT_DATA}" --no-create-home --shell "$nologin" "$ACCOUNT"
 	elif have adduser; then
-		adduser -S -D -H -h "$DATA" -s "$nologin" "$ACCOUNT"
+		adduser -S -D -H -h "${data_dir:-$DEFAULT_DATA}" -s "$nologin" "$ACCOUNT"
 	else
 		fail "need useradd or adduser to create the $ACCOUNT account"
 	fi
 fi
-install -d -m 0750 -o "$ACCOUNT" -g "$ACCOUNT" "$DATA"
 install -d -m 0755 "$ETC"
 
+# Settings persist across upgrades; options given now replace their lines.
+set_setting() {
+	if grep -q "^$1=" "$ENV_FILE"; then
+		sed -i "s|^$1=.*|$1=$2|" "$ENV_FILE"
+	else
+		printf '%s=%s\n' "$1" "$2" >>"$ENV_FILE"
+	fi
+}
 if [ ! -f "$ENV_FILE" ]; then
 	cat >"$ENV_FILE" <<EOF
 # Consolebook service settings; read by consolebook.service.
-CONSOLEBOOK_DATA_DIR=$DATA
+CONSOLEBOOK_DATA_DIR=${data_dir:-$DEFAULT_DATA}
 CONSOLEBOOK_BIND=${listen:-$DEFAULT_LISTEN}
 EOF
 	chmod 0644 "$ENV_FILE"
-elif [ -n "$listen" ]; then
-	sed -i "s|^CONSOLEBOOK_BIND=.*|CONSOLEBOOK_BIND=$listen|" "$ENV_FILE"
+fi
+if [ -n "$listen" ]; then set_setting CONSOLEBOOK_BIND "$listen"; fi
+if [ -n "$data_dir" ]; then set_setting CONSOLEBOOK_DATA_DIR "$data_dir"; fi
+if [ -n "$backup_dir" ]; then set_setting CONSOLEBOOK_BACKUP_COPY_DIR "$backup_dir"; fi
+DATA=$(sed -n 's/^CONSOLEBOOK_DATA_DIR=//p' "$ENV_FILE" | tail -n 1)
+DATA=${DATA:-$DEFAULT_DATA}
+COPY=$(sed -n 's/^CONSOLEBOOK_BACKUP_COPY_DIR=//p' "$ENV_FILE" | tail -n 1)
+install -d -m 0750 -o "$ACCOUNT" -g "$ACCOUNT" "$DATA"
+if [ -n "$COPY" ]; then
+	# A mounted share may not accept ownership changes; it must be writable
+	# by the account either way, which the service proves on its first copy.
+	install -d -m 0750 "$COPY" 2>/dev/null || mkdir -p "$COPY"
+	chown "$ACCOUNT:$ACCOUNT" "$COPY" 2>/dev/null || true
 fi
 bind=$(sed -n 's/^CONSOLEBOOK_BIND=//p' "$ENV_FILE" | tail -n 1)
 bind=${bind:-$DEFAULT_LISTEN}
@@ -196,12 +272,22 @@ say "Installed $("$BIN" --version)."
 if [ "$service" = no ]; then
 	say ""
 	say "Files installed; no service was created. Start it with:"
-	say "  sudo -u $ACCOUNT CONSOLEBOOK_DATA_DIR=$DATA $BIN serve --bind $bind"
+	say "  sudo -u $ACCOUNT CONSOLEBOOK_DATA_DIR=$DATA${COPY:+ CONSOLEBOOK_BACKUP_COPY_DIR=$COPY} $BIN serve --bind $bind"
+	warn_backups
 	exit 0
 fi
 
 # --- Service -----------------------------------------------------------------
 install -m 0644 "$release/consolebook.service" "$UNIT"
+# The unit's sandbox writes only the default data directory; let it write
+# the configured ones instead.
+install -d -m 0755 "$DROPIN_DIR"
+{
+	echo "# Written by install.sh from $ENV_FILE; rerun the installer to change."
+	echo "[Service]"
+	echo "ReadWritePaths=$DATA"
+	if [ -n "$COPY" ]; then echo "ReadWritePaths=$COPY"; fi
+} >"$DROPIN"
 systemctl daemon-reload
 systemctl enable consolebook >/dev/null 2>&1
 systemctl restart consolebook
@@ -257,3 +343,4 @@ case "$host" in
 	;;
 esac
 say "Data and automatic backups: $DATA   Logs: journalctl -u consolebook"
+warn_backups

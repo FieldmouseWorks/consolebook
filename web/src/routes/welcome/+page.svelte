@@ -5,12 +5,15 @@
 	import {
 		ApiError,
 		createUser,
+		getBackupStatus,
 		importProgram,
+		type BackupStatus,
 		type CreatedUser,
 		type ImportedBody,
 		type Role
 	} from '$lib/api';
 	import { instant } from '$lib/format';
+	import BackupHealth from '$lib/backups/BackupHealth.svelte';
 	import example from '$lib/setup/example-program.json';
 	import type { ShellData } from '../+layout';
 
@@ -21,7 +24,22 @@
 		data.session?.capabilities.includes('manage_programs') ?? false
 	);
 
-	let step: 1 | 2 | 3 = $state(1);
+	let step: 1 | 2 | 3 | 4 = $state(1);
+
+	// ---- backups (ADR 0023): shown, never configured from the browser
+	let backups: BackupStatus | null = $state(null);
+	let backupsError = $state('');
+	async function loadBackups() {
+		backupsError = '';
+		try {
+			backups = await getBackupStatus();
+		} catch (err) {
+			backupsError = err instanceof ApiError ? err.message : 'the server could not be reached';
+		}
+	}
+	$effect(() => {
+		if (step === 3) void loadBackups();
+	});
 
 	// ---- people
 
@@ -139,7 +157,10 @@
 			<button type="button" class="linkish" onclick={() => (step = 2)}>2. Program</button>
 		</li>
 		<li aria-current={step === 3 ? 'step' : undefined}>
-			<button type="button" class="linkish" onclick={() => (step = 3)}>3. What's next</button>
+			<button type="button" class="linkish" onclick={() => (step = 3)}>3. Backups</button>
+		</li>
+		<li aria-current={step === 4 ? 'step' : undefined}>
+			<button type="button" class="linkish" onclick={() => (step = 4)}>4. What's next</button>
 		</li>
 	</ol>
 
@@ -311,7 +332,36 @@
 		</section>
 		<p class="next">
 			<button type="button" class="secondary" onclick={() => (step = 1)}>Back</button>
-			<button type="button" onclick={() => (step = 3)}>Next: what's next</button>
+			<button type="button" onclick={() => (step = 3)}>Next: backups</button>
+		</p>
+	{:else if step === 3}
+		<section class="panel">
+			<h2>Protect the records</h2>
+			<p>
+				Consolebook backs itself up automatically and checks every backup before
+				keeping it. Those backups live on this server. Copying them to a second disk
+				or a network share means one failure cannot take the records and the backups
+				together.
+			</p>
+			{#if backups}
+				<BackupHealth status={backups} />
+				<p>
+					<button type="button" class="secondary small" onclick={loadBackups}>Check again</button>
+				</p>
+			{:else if backupsError}
+				<p class="error" role="alert">{backupsError}</p>
+			{:else}
+				<p class="quiet">Checking backups…</p>
+			{/if}
+			<p>
+				Copies are set up on the server, not here: the service is deliberately unable
+				to change its own configuration. Run the command shown once the location is
+				mounted, then check again.
+			</p>
+		</section>
+		<p class="next">
+			<button type="button" class="secondary" onclick={() => (step = 2)}>Back</button>
+			<button type="button" onclick={() => (step = 4)}>Next: what's next</button>
 		</p>
 	{:else}
 		<section class="panel">
@@ -329,6 +379,9 @@
 {/if}
 
 <style>
+	.quiet {
+		opacity: 0.7;
+	}
 	h3 {
 		font-size: 1rem;
 		margin: 0 0 0.4rem;

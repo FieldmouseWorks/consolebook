@@ -7,6 +7,7 @@ use std::process::ExitCode;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
+use consolebook_server::backup_copy::{self, BackupSettings};
 use consolebook_server::data_dir::DataDir;
 use consolebook_server::doctor::Verdict;
 use consolebook_server::serve_lock::ServeLock;
@@ -56,6 +57,10 @@ enum Command {
             value_parser = clap::value_parser!(u64).range(1..)
         )]
         backup_keep: u64,
+        /// Also copy each validated backup here: a second disk or a mounted
+        /// network share, so backups survive the loss of this one (ADR 0023).
+        #[arg(long, env = "CONSOLEBOOK_BACKUP_COPY_DIR")]
+        backup_copy_dir: Option<PathBuf>,
     },
     /// Diagnose an existing installation without modifying it.
     Doctor,
@@ -69,6 +74,9 @@ enum Command {
             value_parser = clap::value_parser!(u64).range(1..)
         )]
         keep: u64,
+        /// Also copy the new backup here (ADR 0023).
+        #[arg(long, env = "CONSOLEBOOK_BACKUP_COPY_DIR")]
+        backup_copy_dir: Option<PathBuf>,
     },
     /// Replace the database with a validated snapshot (server must be stopped).
     ///
@@ -129,9 +137,21 @@ async fn main() -> ExitCode {
             bind,
             backup_interval_hours,
             backup_keep,
-        } => serve(&cli.data_dir, bind, backup_interval_hours, backup_keep).await,
+            backup_copy_dir,
+        } => {
+            let settings = BackupSettings {
+                data_dir: DataDir::new(&cli.data_dir),
+                interval_hours: backup_interval_hours,
+                keep: usize::try_from(backup_keep).unwrap_or(usize::MAX),
+                copy_dir: backup_copy_dir,
+            };
+            serve(bind, settings).await
+        }
         Command::Doctor => run_doctor(&cli.data_dir).await,
-        Command::Backup { keep } => run_backup(&cli.data_dir, keep).await,
+        Command::Backup {
+            keep,
+            backup_copy_dir,
+        } => run_backup(&cli.data_dir, keep, backup_copy_dir.as_deref()).await,
         Command::Restore { snapshot } => run_restore(&cli.data_dir, &snapshot).await,
         Command::Export {
             action: ExportAction::Verify { archive },
@@ -148,13 +168,8 @@ async fn main() -> ExitCode {
     }
 }
 
-async fn serve(
-    data_dir: &std::path::Path,
-    bind: SocketAddr,
-    backup_interval_hours: u64,
-    backup_keep: u64,
-) -> Result<ExitCode> {
-    let data_dir = DataDir::new(data_dir);
+async fn serve(bind: SocketAddr, settings: BackupSettings) -> Result<ExitCode> {
+    let data_dir = settings.data_dir.clone();
     data_dir.ensure_layout()?;
     let lock = ServeLock::acquire(&data_dir)?;
     tracing::debug!(lock = %lock.path().display(), "holding installation lock");
@@ -184,18 +199,21 @@ async fn serve(
         );
     }
 
-    let scheduler = tokio::spawn(scheduler::run(
-        data_dir.clone(),
-        pool.clone(),
-        std::time::Duration::from_secs(backup_interval_hours * 3600),
-        usize::try_from(backup_keep).unwrap_or(usize::MAX),
-    ));
+    if let Some(dir) = &settings.copy_dir {
+        tracing::info!(copy_dir = %dir.display(), "backups are copied off the server");
+    } else {
+        tracing::warn!(
+            "no backup copy directory: every backup shares a disk with the database; \
+             set CONSOLEBOOK_BACKUP_COPY_DIR (docs/install.md)"
+        );
+    }
+    let scheduler = tokio::spawn(scheduler::run(settings.clone(), pool.clone()));
 
     let listener = tokio::net::TcpListener::bind(bind)
         .await
         .with_context(|| format!("binding {bind}"))?;
     tracing::info!(addr = %listener.local_addr()?, "listening");
-    http::serve(listener, http::AppState::new(pool)).await?;
+    http::serve(listener, http::AppState::new(pool).with_backups(settings)).await?;
     scheduler.abort();
     drop(lock);
     tracing::info!("stopped");
@@ -269,10 +287,15 @@ async fn run_recover(data_dir: &std::path::Path, username: &str) -> Result<ExitC
     }
 }
 
-async fn run_backup(data_dir: &std::path::Path, keep: u64) -> Result<ExitCode> {
+async fn run_backup(
+    data_dir: &std::path::Path,
+    keep: u64,
+    copy_dir: Option<&std::path::Path>,
+) -> Result<ExitCode> {
     let data_dir = DataDir::new(data_dir);
     data_dir.ensure_layout()?;
-    let report = backup::run(&data_dir, usize::try_from(keep).unwrap_or(usize::MAX)).await?;
+    let keep = usize::try_from(keep).unwrap_or(usize::MAX);
+    let report = backup::run(&data_dir, keep).await?;
     tracing::info!(
         snapshot = %report.snapshot.display(),
         size_bytes = report.size_bytes,
@@ -280,6 +303,11 @@ async fn run_backup(data_dir: &std::path::Path, keep: u64) -> Result<ExitCode> {
         "backup complete and validated"
     );
     println!("{}", report.snapshot.display());
+    if let Some(copy_dir) = copy_dir {
+        let copy = backup_copy::copy_snapshot(&report.snapshot, copy_dir, keep)?;
+        tracing::info!(copy = %copy.copy.display(), sha256 = copy.sha256, "backup copied and verified");
+        println!("{}", copy.copy.display());
+    }
     Ok(ExitCode::SUCCESS)
 }
 

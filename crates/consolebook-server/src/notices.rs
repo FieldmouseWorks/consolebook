@@ -16,6 +16,8 @@ use crate::capabilities::Capability;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NoticeKind {
     BackupFailed,
+    /// A validated backup could not be copied off the server (ADR 0023).
+    BackupCopyFailed,
     AssignmentCreated,
     DraftOwnershipReceived,
     DraftSubmittedForReview,
@@ -35,6 +37,7 @@ impl NoticeKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::BackupFailed => "backup_failed",
+            Self::BackupCopyFailed => "backup_copy_failed",
             Self::AssignmentCreated => "assignment_created",
             Self::DraftOwnershipReceived => "draft_ownership_received",
             Self::DraftSubmittedForReview => "draft_submitted_for_review",

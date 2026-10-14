@@ -43,7 +43,7 @@ test('full shell lifecycle', async ({ page, setupCode }) => {
 	// The administrator issues themselves a reset code from the UI.
 	await page.getByLabel('Username', { exact: true }).fill('avery.admin');
 	await page.getByRole('button', { name: 'Issue reset code' }).click();
-	const codeOut = page.locator('code');
+	const codeOut = page.locator('p.code-out code');
 	await expect(codeOut).toBeVisible();
 	const resetCode = (await codeOut.textContent())?.trim() ?? '';
 	expect(resetCode).toMatch(/^[0-9a-f]{32}$/);
@@ -94,7 +94,15 @@ test("the administrator's home walks the first day", async ({ page, setupCode })
 	// A fresh installation starts at the beginning of the checklist.
 	const checklist = page.locator('section.setup');
 	await expect(checklist.getByRole('heading', { name: 'Getting started' })).toBeVisible();
-	await expect(checklist.getByText('0 of 7 steps done')).toBeVisible();
+	await expect(checklist.getByText('0 of 8 steps done')).toBeVisible();
+	// Without a copy directory, backups are flagged until fixed (ADR 0023).
+	const backups = page.locator('#backups');
+	await expect(backups.getByRole('alert')).toContainText("only on this server's own disk");
+	await expect(backups.locator('pre')).toContainText('--backup-dir');
+	await expect(checklist.getByRole('link', { name: /Copy backups off this server/ })).toHaveAttribute(
+		'href',
+		'#backups'
+	);
 	await expect(checklist.getByRole('link', { name: /Add people/ })).toHaveAttribute(
 		'href',
 		'#add-person'
@@ -111,12 +119,12 @@ test("the administrator's home walks the first day", async ({ page, setupCode })
 		await page.getByRole('button', { name: 'Create user' }).click();
 		await expect(page.locator('p.code-out')).toContainText(`Created ${username}.`);
 	}
-	await expect(checklist.getByText('0 of 7 steps done')).toBeVisible();
+	await expect(checklist.getByText('0 of 8 steps done')).toBeVisible();
 	await page.getByLabel('New username').fill('taylor.trainee');
 	await page.getByLabel('Role').selectOption('trainee');
 	await page.getByRole('button', { name: 'Create user' }).click();
 	await expect(page.locator('p.code-out')).toContainText('Created taylor.trainee.');
-	await expect(checklist.getByText('1 of 7 steps done')).toBeVisible();
+	await expect(checklist.getByText('1 of 8 steps done')).toBeVisible();
 	await expect(checklist.locator('li.done')).toContainText('Add people');
 
 	// The checklist is the administrator's; a trainee never sees it.
