@@ -398,10 +398,14 @@ async fn competing_session_requests_return_created_and_typed_conflict() {
     use tower::ServiceExt;
     let fx = Fixture::new().await;
     let enrollment = enrolled(&fx).await;
-    let token = consolebook_server::sessions::create(&fx.pool, ACTOR)
-        .await
-        .expect("login token")
-        .0;
+    let token = consolebook_server::sessions::create(
+        &fx.pool,
+        ACTOR,
+        consolebook_server::sessions::CookieTransport::Plain,
+    )
+    .await
+    .expect("login token")
+    .0;
     let app =
         consolebook_server::http::router(consolebook_server::http::AppState::new(fx.pool.clone()));
     let request = || {

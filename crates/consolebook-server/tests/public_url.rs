@@ -165,3 +165,53 @@ fn the_installer_check_uses_the_server_parser() {
         assert!(!check(bad).status.success(), "{bad} was accepted");
     }
 }
+
+/// Turning on an https:// public URL must end sessions whose cookies were
+/// issued without Secure: a browser may still send them over plain HTTP.
+#[tokio::test]
+async fn sessions_issued_without_secure_are_revoked_when_secure_starts() {
+    use consolebook_server::sessions::{self, CookieTransport};
+
+    let (_tmp, pool) = initialized_pool().await;
+    let (plain, _) = sessions::create(&pool, 1, CookieTransport::Plain)
+        .await
+        .expect("plain session");
+    let (secure, _) = sessions::create(&pool, 1, CookieTransport::Secure)
+        .await
+        .expect("secure session");
+
+    assert_eq!(sessions::revoke_not_secure(&pool).await.expect("revoke"), 1);
+    assert!(
+        sessions::validate(&pool, &plain.raw)
+            .await
+            .expect("validate")
+            .is_none(),
+        "the plain-HTTP session is no longer a credential"
+    );
+    assert!(
+        sessions::validate(&pool, &secure.raw)
+            .await
+            .expect("validate")
+            .is_some(),
+        "a session issued Secure survives"
+    );
+    assert_eq!(
+        sessions::revoke_not_secure(&pool).await.expect("again"),
+        0,
+        "nothing more to revoke"
+    );
+}
+
+/// Signing in behind an https public URL records the session as Secure, so
+/// the next start does not sign everyone out again.
+#[tokio::test]
+async fn sign_in_behind_https_records_a_secure_session() {
+    let (_tmp, pool) = initialized_pool().await;
+    let url: PublicUrl = "https://consolebook.example.org".parse().expect("url");
+    let _ = cookie_headers(http::AppState::new(pool.clone()).with_public_url(url)).await;
+    let secure: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM session WHERE issued_secure = 1")
+        .fetch_one(&pool)
+        .await
+        .expect("count");
+    assert_eq!(secure, 1);
+}

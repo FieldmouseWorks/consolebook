@@ -89,7 +89,9 @@ Any other proxy (nginx, IIS ARR, a load balancer) works the same way: terminate
 TLS, forward everything to `http://127.0.0.1:7770` with the original `Host`
 header, and set `--public-url` to the `https://` address. Opening Consolebook
 by any other address makes the sign-in page point to the right one: with
-`Secure` cookies, signing in over plain HTTP would not stick.
+`Secure` cookies, signing in over plain HTTP would not stick. Turning this on
+signs out everyone who signed in before it, since their cookies could still
+travel over plain HTTP; they sign in again at the public address.
 
 Other options: `--version 0.1.0` installs a specific release, `--listen
 ADDRESS:PORT` picks your own address, and `--from FILE` installs from a

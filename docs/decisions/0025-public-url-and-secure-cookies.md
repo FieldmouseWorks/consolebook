@@ -28,6 +28,11 @@ of its origin.
 - **An `https://` public URL marks every session cookie `Secure`.** That
   covers the cookie set at sign-in and the one that clears it at sign-out.
   The decision comes only from this setting, never from request headers.
+- Each session records whether its cookie was issued `Secure`. When `serve`
+  starts with an `https://` public URL, it revokes every live session that
+  was not: a browser may still hold that cookie and send it over plain
+  HTTP, so it stops being a credential at once, not at its expiry. People
+  signed in before the change sign in again, at the public address.
 - Without a public URL, or with an `http://` one, cookies are not `Secure`,
   so a loopback install and a plain-HTTP `--lan` trial still work.
 - `serve` logs the choice at start. When it listens beyond loopback without

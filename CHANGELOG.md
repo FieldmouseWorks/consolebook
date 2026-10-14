@@ -22,6 +22,7 @@ not a production-readiness statement.
   address people use. An `https://` address marks sign-in cookies `Secure`,
   and the sign-in page points browsers that arrived by another address to it
   (ADR 0025). The install guide gives a tested Caddy configuration for HTTPS.
+  Turning it on signs out sessions whose cookies were not `Secure`.
 
 ### Fixed
 

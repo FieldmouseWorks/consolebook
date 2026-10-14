@@ -15,7 +15,7 @@ use consolebook_server::serve_lock::ServeLock;
 use consolebook_server::users::{IssueRefusal, ResetOrigin};
 use consolebook_server::{
     BUILD_COMMIT, BUILD_IDENTITY, VERSION, backup, doctor, export_verify, http, restore, scheduler,
-    setup, storage, users,
+    sessions, setup, storage, users,
 };
 
 #[derive(Parser)]
@@ -245,6 +245,14 @@ async fn serve(
     match &public_url {
         Some(url) if url.is_secure() => {
             tracing::info!(public_url = %url, "session cookies are marked Secure");
+            let revoked = sessions::revoke_not_secure(&pool).await?;
+            if revoked > 0 {
+                tracing::info!(
+                    revoked,
+                    "signed out sessions whose cookies were issued without Secure; \
+                     people sign in again at the public address"
+                );
+            }
         }
         _ if !bind.ip().is_loopback() => tracing::warn!(
             "serving plain HTTP on the network: session cookies are not Secure; put HTTPS \

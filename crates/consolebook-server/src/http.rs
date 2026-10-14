@@ -382,7 +382,12 @@ async fn login(
         return Err(invalid());
     }
 
-    let (token, expires_at) = sessions::create(&state.pool, user.id).await?;
+    let transport = if state.secure_cookies() {
+        sessions::CookieTransport::Secure
+    } else {
+        sessions::CookieTransport::Plain
+    };
+    let (token, expires_at) = sessions::create(&state.pool, user.id, transport).await?;
     audit::record(
         &state.pool,
         EventKind::LoginSucceeded,
