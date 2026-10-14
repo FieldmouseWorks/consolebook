@@ -2,7 +2,7 @@
 // finalization, acknowledgment, amendments, summaries, signoffs, exports,
 // and trainee packets. All fixture data is invented.
 
-import { expect, test } from './fixtures';
+import { expect, signOut, test } from './fixtures';
 import type { Page } from '@playwright/test';
 import { BINARY, execFileAsync } from './server';
 
@@ -175,7 +175,7 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 			trainer_user_ids: [jordan.id, rowan.id]
 		}
 	});
-	await page.getByRole('button', { name: 'Sign out' }).click();
+	await signOut(page);
 
 	// Jordan starts the draft from their own session list.
 	await resetAndLogin(page, 'jordan.trainer', jordan.reset_code, JORDAN_PASSWORD);
@@ -221,7 +221,7 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 
 	// Rowan finds the session on their list, opens the draft, and submits.
 	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
-	await page.getByRole('button', { name: 'Sign out' }).click();
+	await signOut(page);
 	await resetAndLogin(page, 'rowan.trainer', rowan.reset_code, ROWAN_PASSWORD);
 	await expect(page.getByRole('heading', { name: 'My sessions' })).toBeVisible();
 	await page.getByRole('link', { name: 'Open draft' }).click();
@@ -244,7 +244,7 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 	// The coordinator finds the draft on the review queue; a change
 	// request needs its comment, then reopens the draft.
 	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
-	await page.getByRole('button', { name: 'Sign out' }).click();
+	await signOut(page);
 	await resetAndLogin(page, 'casey.coord', casey.reset_code, CASEY_PASSWORD);
 	await expect(page.getByRole('heading', { name: 'Review queue' })).toBeVisible();
 	await page.getByRole('link', { name: 'Review', exact: true }).click();
@@ -262,7 +262,7 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 
 	// The owner revises the reopened draft and resubmits.
 	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
-	await page.getByRole('button', { name: 'Sign out' }).click();
+	await signOut(page);
 	await page.getByLabel('Username').fill('rowan.trainer');
 	await page.getByLabel('Password').fill(ROWAN_PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
@@ -278,7 +278,7 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 	// The same reviewer approves the resubmission; the draft stays
 	// frozen and the verdicts stand in the record.
 	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
-	await page.getByRole('button', { name: 'Sign out' }).click();
+	await signOut(page);
 	await page.getByLabel('Username').fill('casey.coord');
 	await page.getByLabel('Password').fill(CASEY_PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
@@ -330,7 +330,7 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 	// Taylor signs in, finds the record on their timeline, and
 	// acknowledges receipt with a response.
 	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
-	await page.getByRole('button', { name: 'Sign out' }).click();
+	await signOut(page);
 	await resetAndLogin(page, 'taylor.trainee', trainee.reset_code, TAYLOR_PASSWORD);
 	await page.getByRole('link', { name: 'My records' }).click();
 	await expect(page.getByRole('heading', { name: 'My records' })).toBeVisible();
@@ -371,7 +371,7 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 	// A correction is an amendment, never an edit: the coordinator
 	// reopens the sealed record with a reason...
 	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
-	await page.getByRole('button', { name: 'Sign out' }).click();
+	await signOut(page);
 	await page.getByLabel('Username').fill('casey.coord');
 	await page.getByLabel('Password').fill(CASEY_PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
@@ -387,7 +387,7 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 
 	// ...the owner corrects the reopened copy and resubmits...
 	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
-	await page.getByRole('button', { name: 'Sign out' }).click();
+	await signOut(page);
 	await page.getByLabel('Username').fill('rowan.trainer');
 	await page.getByLabel('Password').fill(ROWAN_PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
@@ -404,7 +404,7 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 	// original, which stays readable in the history with its
 	// acknowledgment.
 	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
-	await page.getByRole('button', { name: 'Sign out' }).click();
+	await signOut(page);
 	await page.getByLabel('Username').fill('casey.coord');
 	await page.getByLabel('Password').fill(CASEY_PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
@@ -439,7 +439,7 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 	// The successor never inherits acknowledgment: Taylor's timeline
 	// shows the amended record awaiting them again.
 	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
-	await page.getByRole('button', { name: 'Sign out' }).click();
+	await signOut(page);
 	await page.getByLabel('Username').fill('taylor.trainee');
 	await page.getByLabel('Password').fill(TAYLOR_PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
@@ -453,7 +453,7 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 	// The coordinator signs off tasks on the enrollment page: the first
 	// signoff is a plain act, changing it is an override with a reason.
 	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
-	await page.getByRole('button', { name: 'Sign out' }).click();
+	await signOut(page);
 	await page.getByLabel('Username').fill('casey.coord');
 	await page.getByLabel('Password').fill(CASEY_PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();

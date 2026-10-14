@@ -4,7 +4,7 @@
 // reading their trainee through the scoped view. All fixture data is
 // invented.
 
-import { expect, test } from './fixtures';
+import { expect, signOut, test } from './fixtures';
 
 const PASSWORD = 'invented-passphrase-1';
 const TRAINER_PASSWORD = 'trainer-passphrase-3';
@@ -117,8 +117,7 @@ test('assign a trainer, record phase history, and read it scoped', async ({ page
 
 	// The trainer sets a password through the reset flow and signs in.
 	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
-	await page.getByRole('button', { name: 'Sign out' }).click();
-	await expect(page).toHaveURL(/\/login$/);
+	await signOut(page);
 	await page.goto(`/reset`);
 	await page.getByLabel('Username').fill('jordan.trainer');
 	await page.getByLabel('Reset code').fill(trainerCode);
