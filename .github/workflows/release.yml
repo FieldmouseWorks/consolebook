@@ -91,14 +91,15 @@ jobs:
             --backup-dir /srv/consolebook-copies | tee copies.log
           grep -q 'Backups are also copied to /srv/consolebook-copies' copies.log
           grep -q '^ReadWritePaths=/srv/consolebook-copies$' /etc/systemd/system/consolebook.service.d/paths.conf
+          # Both directories belong to the service account (0750); inspect as root.
           for i in $(seq 1 150); do
-            ls /srv/consolebook-copies/consolebook-*.db >/dev/null 2>&1 && break
+            sudo sh -c 'ls /srv/consolebook-copies/consolebook-*.db' >/dev/null 2>&1 && break
             sleep 2
           done
-          ls -l /var/lib/consolebook/backups /srv/consolebook-copies
-          copy=$(ls /srv/consolebook-copies/consolebook-*.db | tail -n 1)
-          cmp "$copy" "/var/lib/consolebook/backups/$(basename "$copy")"
-          journalctl -u consolebook --no-pager | grep -q 'backup copied off the server and verified'
+          sudo ls -l /var/lib/consolebook/backups /srv/consolebook-copies
+          copy=$(sudo sh -c 'ls /srv/consolebook-copies/consolebook-*.db' | tail -n 1)
+          sudo cmp "$copy" "/var/lib/consolebook/backups/$(basename "$copy")"
+          sudo journalctl -u consolebook --no-pager | grep -q 'backup copied off the server and verified'
 
       # Jobs share archives through a draft release, published once all pass.
       - name: Upload to the draft release
