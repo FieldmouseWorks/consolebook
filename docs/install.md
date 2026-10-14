@@ -110,7 +110,10 @@ service, and prints the address. The database is upgraded on start, and
 startup refuses to run against data it cannot verify.
 
 When a new version changes the database, it first takes a validated backup
-of it as it was, and starts only if that backup succeeded. The log names it:
+of it as it was, `backups/consolebook-premigration-<stamp>.db`, and changes
+nothing unless that backup succeeded. Whichever command runs first takes it:
+the service, or `setup-code` or `recover` run by hand, which refuse while
+the old service is still running. The log names it:
 
 ```sh
 journalctl -u consolebook | grep 'took a validated backup first'
@@ -124,7 +127,7 @@ upgrade, restore that backup with the release that wrote it:
 ```sh
 sudo systemctl stop consolebook
 curl -fsSL https://raw.githubusercontent.com/FieldmouseWorks/consolebook/main/install/install.sh | sudo sh -s -- --version 0.1.0 --no-service
-sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook consolebook restore /var/lib/consolebook/backups/consolebook-<stamp>.db
+sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook consolebook restore /var/lib/consolebook/backups/consolebook-premigration-<stamp>.db
 sudo systemctl start consolebook
 ```
 

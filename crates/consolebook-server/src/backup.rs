@@ -19,6 +19,7 @@ use time::macros::format_description;
 
 use crate::audit::{self, EventKind};
 use crate::data_dir::DataDir;
+use crate::serve_lock::ServeLock;
 use crate::storage;
 
 const SNAPSHOT_STAMP: &[BorrowedFormatItem<'_>] =
@@ -41,7 +42,7 @@ pub struct BackupReport {
 /// validation fails.
 pub async fn run(data_dir: &DataDir, keep: usize) -> Result<BackupReport> {
     let pool = storage::open_existing(&data_dir.database()).await?;
-    let snapshot = match take_snapshot(&pool, data_dir).await {
+    let snapshot = match take_snapshot(&pool, data_dir, SCHEDULED_PREFIX).await {
         Ok(snapshot) => snapshot,
         Err(err) => {
             pool.close().await;
@@ -56,11 +57,11 @@ pub async fn run(data_dir: &DataDir, keep: usize) -> Result<BackupReport> {
 /// VACUUM INTO a new snapshot, validate it, and make it durable. Writes
 /// nothing to the live database, so it works on a schema this build has
 /// not migrated yet.
-async fn take_snapshot(pool: &SqlitePool, data_dir: &DataDir) -> Result<PathBuf> {
+async fn take_snapshot(pool: &SqlitePool, data_dir: &DataDir, prefix: &str) -> Result<PathBuf> {
     let stamp = OffsetDateTime::now_utc()
         .format(SNAPSHOT_STAMP)
         .context("formatting snapshot timestamp")?;
-    let snapshot = data_dir.backups().join(format!("consolebook-{stamp}.db"));
+    let snapshot = data_dir.backups().join(format!("{prefix}{stamp}.db"));
     if snapshot.exists() {
         bail!(
             "snapshot {} already exists; refusing to overwrite a backup",
@@ -180,6 +181,29 @@ pub async fn validate_snapshot(snapshot: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Snapshots `run` takes: `consolebook-<stamp>.db`.
+const SCHEDULED_PREFIX: &str = "consolebook-";
+
+/// Snapshots taken before a migration: `consolebook-premigration-<stamp>.db`.
+pub const PRE_MIGRATION_PREFIX: &str = "consolebook-premigration-";
+
+/// Pre-migration snapshots kept, at most. A migration that fails on every
+/// start, under a service manager that keeps restarting it, replaces
+/// copies of the same pre-migration state instead of filling the disk.
+pub const PRE_MIGRATION_KEEP: usize = 3;
+
+/// Whether this executable would migrate the database. Reads only.
+async fn migration_pending(data_dir: &DataDir) -> Result<bool> {
+    let database = data_dir.database();
+    if !database.exists() {
+        return Ok(false);
+    }
+    let pool = storage::open_diagnostic(&database).await?;
+    let pending = storage::pending_migrations(&pool).await;
+    pool.close().await;
+    Ok(!pending?.is_empty())
+}
+
 /// Takes a validated snapshot before this executable migrates an existing
 /// database, so an upgrade that goes wrong has a recovery point from the
 /// moment before it changed anything (there is no downgrade; ADR 0023).
@@ -188,28 +212,46 @@ pub async fn validate_snapshot(snapshot: &Path) -> Result<()> {
 /// failure is returned, so startup fails closed rather than migrating
 /// without the snapshot.
 ///
-/// It prunes nothing: the caller may not know the configured retention
-/// count, and the next scheduled backup prunes with it.
+/// Ordinary retention is left to the next scheduled backup, since the
+/// caller may not know the configured count; only pre-migration snapshots
+/// beyond [`PRE_MIGRATION_KEEP`] are pruned here.
 pub async fn before_migrating(data_dir: &DataDir) -> Result<Option<PreMigrationBackup>> {
-    let database = data_dir.database();
-    if !database.exists() {
-        return Ok(None);
-    }
-    let pool = storage::open_diagnostic(&database).await?;
-    let pending = storage::pending_migrations(&pool).await;
-    pool.close().await;
-    if pending?.is_empty() {
+    if !migration_pending(data_dir).await? {
         return Ok(None);
     }
     // Nothing is written to the old schema: the audit event waits for the
     // migrated database (`PreMigrationBackup::record`).
-    let pool = storage::open_existing(&database).await?;
-    let snapshot = take_snapshot(&pool, data_dir).await;
+    let pool = storage::open_existing(&data_dir.database()).await?;
+    let snapshot = take_snapshot(&pool, data_dir, PRE_MIGRATION_PREFIX).await;
     pool.close().await;
     let report = snapshot
         .and_then(|snapshot| finish(data_dir, snapshot, None))
+        .and_then(|mut report| {
+            report.pruned = prune_pre_migration(data_dir)?;
+            Ok(report)
+        })
         .context("taking the pre-migration backup")?;
     Ok(Some(PreMigrationBackup { report }))
+}
+
+/// Deletes the oldest pre-migration snapshots beyond [`PRE_MIGRATION_KEEP`],
+/// leaving every other snapshot alone.
+fn prune_pre_migration(data_dir: &DataDir) -> Result<Vec<PathBuf>> {
+    let pre_migration: Vec<PathBuf> = snapshots(data_dir)?
+        .into_iter()
+        .filter(|path| {
+            path.file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with(PRE_MIGRATION_PREFIX))
+        })
+        .collect();
+    let excess = pre_migration.len().saturating_sub(PRE_MIGRATION_KEEP);
+    let mut pruned = Vec::with_capacity(excess);
+    for snapshot in pre_migration.into_iter().take(excess) {
+        std::fs::remove_file(&snapshot)
+            .with_context(|| format!("pruning snapshot {}", snapshot.display()))?;
+        pruned.push(snapshot);
+    }
+    Ok(pruned)
 }
 
 /// A validated snapshot of the database as it was before this build
@@ -239,7 +281,21 @@ impl PreMigrationBackup {
 /// needs to. The one way an executable migrates: when a migration is
 /// pending it first takes the validated pre-migration backup, and refuses
 /// to migrate without it.
-pub async fn open_migrated(data_dir: &DataDir) -> Result<SqlitePool> {
+///
+/// Migrating needs the installation to itself, or a running server could
+/// commit records after the snapshot and then run against the new schema.
+/// `serve` passes the lock it holds; any other command takes it here when a
+/// migration is pending, and refuses while a server holds it. With nothing
+/// pending, no lock is needed, so `recover` works beside a running server.
+pub async fn open_migrated(data_dir: &DataDir, held: Option<&ServeLock>) -> Result<SqlitePool> {
+    let _exclusive = match held {
+        None if migration_pending(data_dir).await? => Some(ServeLock::acquire(data_dir).context(
+            "this version migrates the database, which needs the installation to itself; \
+             stop the running service, then run this command again",
+        )?),
+        _ => None,
+    };
+    // Checked again under the lock, before anything is taken or changed.
     let pre_migration = before_migrating(data_dir).await?;
     if let Some(backup) = &pre_migration {
         tracing::info!(

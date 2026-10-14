@@ -12,6 +12,7 @@ use sqlx::migrate::Migrator;
 use consolebook_server::backup;
 use consolebook_server::backup_copy;
 use consolebook_server::data_dir::DataDir;
+use consolebook_server::serve_lock::ServeLock;
 use consolebook_server::storage::{self, MIGRATOR};
 
 async fn connect(path: &Path) -> SqlitePool {
@@ -260,13 +261,15 @@ async fn opening_for_use_backs_up_migrates_and_audits() {
     older_installation(&data_dir).await;
     let older = applied(&data_dir.database()).await;
 
-    let pool = backup::open_migrated(&data_dir).await.expect("open");
+    let pool = backup::open_migrated(&data_dir, None).await.expect("open");
     pool.close().await;
     assert_eq!(backup::snapshots(&data_dir).expect("list").len(), 1);
     assert_eq!(applied(&data_dir.database()).await, older + 1);
     assert_eq!(backups_audited(&data_dir.database()).await, 1);
 
-    let pool = backup::open_migrated(&data_dir).await.expect("reopen");
+    let pool = backup::open_migrated(&data_dir, None)
+        .await
+        .expect("reopen");
     pool.close().await;
     assert_eq!(
         backup::snapshots(&data_dir).expect("list").len(),
@@ -287,4 +290,99 @@ fn the_executable_migrates_only_through_open_migrated() {
         "src/main.rs opens the database with storage::open; use backup::open_migrated"
     );
     assert!(main.contains("backup::open_migrated("));
+}
+
+fn names(data_dir: &DataDir) -> Vec<String> {
+    backup::snapshots(data_dir)
+        .expect("list")
+        .iter()
+        .map(|path| {
+            path.file_name()
+                .expect("name")
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect()
+}
+
+/// A migration that fails on every start, under a service manager that
+/// keeps restarting it, must not fill the disk with snapshots.
+#[tokio::test]
+async fn repeated_attempts_keep_a_bounded_number_of_pre_migration_snapshots() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let data_dir = DataDir::new(tmp.path().join("data"));
+    data_dir.ensure_layout().expect("layout");
+    older_installation(&data_dir).await;
+    // Four earlier attempts at the same upgrade, and an ordinary backup.
+    for n in 1..=4 {
+        std::fs::write(
+            data_dir
+                .backups()
+                .join(format!("consolebook-premigration-20260101T00000{n}Z.db")),
+            b"invented earlier attempt",
+        )
+        .expect("earlier attempt");
+    }
+    let ordinary = "consolebook-20260101T000000Z.db";
+    std::fs::write(data_dir.backups().join(ordinary), b"invented backup").expect("ordinary");
+
+    let backup = backup::before_migrating(&data_dir)
+        .await
+        .expect("backup")
+        .expect("a migration is pending");
+    let taken = backup
+        .snapshot()
+        .file_name()
+        .expect("name")
+        .to_string_lossy()
+        .into_owned();
+    assert!(taken.starts_with(backup::PRE_MIGRATION_PREFIX), "{taken}");
+    let names = names(&data_dir);
+    let pre_migration: Vec<&String> = names
+        .iter()
+        .filter(|name| name.starts_with(backup::PRE_MIGRATION_PREFIX))
+        .collect();
+    assert_eq!(pre_migration.len(), backup::PRE_MIGRATION_KEEP, "{names:?}");
+    assert!(names.contains(&taken), "{names:?}");
+    assert!(names.iter().any(|name| name == ordinary), "{names:?}");
+    assert!(
+        !names.iter().any(|name| name.ends_with("T000001Z.db")),
+        "the oldest attempt goes first: {names:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_running_server_blocks_a_migrating_command_but_not_an_ordinary_one() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let data_dir = DataDir::new(tmp.path().join("data"));
+    data_dir.ensure_layout().expect("layout");
+    older_installation(&data_dir).await;
+    let older = applied(&data_dir.database()).await;
+
+    let server = ServeLock::acquire(&data_dir).expect("a server holds the installation");
+    let err = backup::open_migrated(&data_dir, None)
+        .await
+        .expect_err("migrating beside a running server is refused");
+    assert!(
+        format!("{err:#}").contains("stop the running service"),
+        "{err:#}"
+    );
+    assert_eq!(applied(&data_dir.database()).await, older, "not migrated");
+    assert!(names(&data_dir).is_empty(), "no snapshot taken");
+    drop(server);
+
+    backup::open_migrated(&data_dir, None)
+        .await
+        .expect("migrates once the server is gone")
+        .close()
+        .await;
+    assert_eq!(applied(&data_dir.database()).await, older + 1);
+
+    // Nothing pending: `recover` works beside a running server.
+    let _server = ServeLock::acquire(&data_dir).expect("a server holds the installation");
+    backup::open_migrated(&data_dir, None)
+        .await
+        .expect("an ordinary command needs no lock")
+        .close()
+        .await;
 }
