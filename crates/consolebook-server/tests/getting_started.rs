@@ -113,7 +113,12 @@ impl Fixture {
             .await
             .expect("get");
         let status = response.status();
-        let bytes = response.into_body().collect().await.expect("body").to_bytes();
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body")
+            .to_bytes();
         (status, serde_json::from_slice(&bytes).expect("json"))
     }
 }
