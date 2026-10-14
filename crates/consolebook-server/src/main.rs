@@ -173,18 +173,7 @@ async fn serve(bind: SocketAddr, settings: BackupSettings) -> Result<ExitCode> {
     data_dir.ensure_layout()?;
     let lock = ServeLock::acquire(&data_dir)?;
     tracing::debug!(lock = %lock.path().display(), "holding installation lock");
-    let pre_migration = backup::before_migrating(&data_dir, settings.keep).await?;
-    if let Some(backup) = &pre_migration {
-        tracing::info!(
-            snapshot = %backup.snapshot().display(),
-            "this version migrates the database; took a validated backup first \
-             (to go back: stop the service, install the previous release, and restore this snapshot)"
-        );
-    }
-    let pool = storage::open(&data_dir.database()).await?;
-    if let Some(backup) = pre_migration {
-        backup.record(&pool).await?;
-    }
+    let pool = backup::open_migrated(&data_dir).await?;
     let installation_id = storage::installation_id(&pool).await?;
     tracing::info!(
         version = VERSION,
@@ -255,7 +244,7 @@ fn now_unix() -> i64 {
 
 async fn run_setup_code(data_dir: &std::path::Path) -> Result<ExitCode> {
     let data_dir = DataDir::new(data_dir);
-    let pool = storage::open(&data_dir.database()).await?;
+    let pool = backup::open_migrated(&data_dir).await?;
     match setup::issue_setup_code(&pool).await? {
         None => {
             eprintln!("this installation is already initialized; setup is unavailable");
@@ -274,7 +263,7 @@ async fn run_setup_code(data_dir: &std::path::Path) -> Result<ExitCode> {
 
 async fn run_recover(data_dir: &std::path::Path, username: &str) -> Result<ExitCode> {
     let data_dir = DataDir::new(data_dir);
-    let pool = storage::open(&data_dir.database()).await?;
+    let pool = backup::open_migrated(&data_dir).await?;
     match users::issue_reset_code(&pool, username, ResetOrigin::Recovery).await? {
         Ok(issued) => {
             println!("{}", issued.code.raw);

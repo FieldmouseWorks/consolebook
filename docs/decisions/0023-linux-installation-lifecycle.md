@@ -73,8 +73,10 @@ The same command installs and upgrades.
 There is no downgrade path. An older executable started against a database
 migrated by a newer one finds applied migrations it does not know and refuses
 to start, rather than running against a schema it does not understand.
-Recovery from a bad upgrade is restoring the backup `serve` takes before it
-migrates (ADR 0006) with the matching older release.
+Recovery from a bad upgrade is restoring the backup taken before the
+database is migrated (ADR 0006) with the matching older release. Every
+command that migrates (`serve`, `setup-code`, `recover`) takes that backup
+first and refuses to migrate without it.
 
 ### Changing these later
 

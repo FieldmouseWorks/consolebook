@@ -12,9 +12,10 @@ not a production-readiness statement.
 
 ### Added
 
-- Before a new version migrates the database, `serve` takes a validated
-  backup of it as it was and does not start without one; the install guide
-  shows how to go back with the previous release.
+- Before a new version migrates the database, it takes a validated backup
+  of it as it was and refuses to migrate without one, whichever command
+  runs first; the install guide shows how to go back with the previous
+  release.
 - A version that finds a database upgraded by a newer release refuses it in
   plain words and names the way back.
 

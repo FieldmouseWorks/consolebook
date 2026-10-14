@@ -50,7 +50,7 @@ pub async fn run(data_dir: &DataDir, keep: usize) -> Result<BackupReport> {
     };
     audit::record(&pool, EventKind::BackupCompleted, None, None).await?;
     pool.close().await;
-    finish(data_dir, snapshot, keep)
+    finish(data_dir, snapshot, Some(keep))
 }
 
 /// VACUUM INTO a new snapshot, validate it, and make it durable. Writes
@@ -87,11 +87,15 @@ async fn take_snapshot(pool: &SqlitePool, data_dir: &DataDir) -> Result<PathBuf>
     Ok(snapshot)
 }
 
-fn finish(data_dir: &DataDir, snapshot: PathBuf, keep: usize) -> Result<BackupReport> {
+/// Size the new snapshot and, given a retention count, prune to it.
+fn finish(data_dir: &DataDir, snapshot: PathBuf, keep: Option<usize>) -> Result<BackupReport> {
     let size_bytes = std::fs::metadata(&snapshot)
         .with_context(|| format!("reading snapshot metadata {}", snapshot.display()))?
         .len();
-    let pruned = prune(data_dir, keep)?;
+    let pruned = match keep {
+        Some(keep) => prune(data_dir, keep)?,
+        None => Vec::new(),
+    };
     Ok(BackupReport {
         snapshot,
         size_bytes,
@@ -183,10 +187,10 @@ pub async fn validate_snapshot(snapshot: &Path) -> Result<()> {
 /// Returns `None` when there is no database yet or nothing to migrate. Any
 /// failure is returned, so startup fails closed rather than migrating
 /// without the snapshot.
-pub async fn before_migrating(
-    data_dir: &DataDir,
-    keep: usize,
-) -> Result<Option<PreMigrationBackup>> {
+///
+/// It prunes nothing: the caller may not know the configured retention
+/// count, and the next scheduled backup prunes with it.
+pub async fn before_migrating(data_dir: &DataDir) -> Result<Option<PreMigrationBackup>> {
     let database = data_dir.database();
     if !database.exists() {
         return Ok(None);
@@ -203,7 +207,7 @@ pub async fn before_migrating(
     let snapshot = take_snapshot(&pool, data_dir).await;
     pool.close().await;
     let report = snapshot
-        .and_then(|snapshot| finish(data_dir, snapshot, keep))
+        .and_then(|snapshot| finish(data_dir, snapshot, None))
         .context("taking the pre-migration backup")?;
     Ok(Some(PreMigrationBackup { report }))
 }
@@ -229,6 +233,26 @@ impl PreMigrationBackup {
         audit::record(migrated, EventKind::BackupCompleted, None, None).await?;
         Ok(self.report)
     }
+}
+
+/// Opens the installation's database for use, migrating it if this build
+/// needs to. The one way an executable migrates: when a migration is
+/// pending it first takes the validated pre-migration backup, and refuses
+/// to migrate without it.
+pub async fn open_migrated(data_dir: &DataDir) -> Result<SqlitePool> {
+    let pre_migration = before_migrating(data_dir).await?;
+    if let Some(backup) = &pre_migration {
+        tracing::info!(
+            snapshot = %backup.snapshot().display(),
+            "this version migrates the database; took a validated backup first \
+             (to go back: stop the service, install the previous release, and restore this snapshot)"
+        );
+    }
+    let pool = storage::open(&data_dir.database()).await?;
+    if let Some(backup) = pre_migration {
+        backup.record(&pool).await?;
+    }
+    Ok(pool)
 }
 
 /// Explicit durability step: fsync a file and its directory entry.

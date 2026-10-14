@@ -87,7 +87,7 @@ async fn an_upgrade_backs_up_the_old_schema_before_migrating() {
     );
     pool.close().await;
 
-    let backup = backup::before_migrating(&data_dir, 14)
+    let backup = backup::before_migrating(&data_dir)
         .await
         .expect("backup")
         .expect("a migration is pending, so a snapshot is taken");
@@ -111,7 +111,7 @@ async fn an_upgrade_backs_up_the_old_schema_before_migrating() {
     assert_eq!(applied(&data_dir.database()).await, older + 1);
     assert_eq!(backups_audited(&data_dir.database()).await, 1);
     assert!(
-        backup::before_migrating(&data_dir, 14)
+        backup::before_migrating(&data_dir)
             .await
             .expect("check")
             .is_none(),
@@ -125,7 +125,7 @@ async fn the_pre_migration_backup_is_the_one_copied_off_the_server() {
     let data_dir = DataDir::new(tmp.path().join("data"));
     data_dir.ensure_layout().expect("layout");
     older_installation(&data_dir).await;
-    let backup = backup::before_migrating(&data_dir, 14)
+    let backup = backup::before_migrating(&data_dir)
         .await
         .expect("backup")
         .expect("a migration is pending");
@@ -152,7 +152,7 @@ async fn an_installation_from_the_first_migration_upgrades() {
     data_dir.ensure_layout().expect("layout");
     installation_at(&data_dir, 1).await;
 
-    let backup = backup::before_migrating(&data_dir, 14)
+    let backup = backup::before_migrating(&data_dir)
         .await
         .expect("a schema without an audit table is backed up")
         .expect("migrations are pending");
@@ -169,14 +169,14 @@ async fn a_new_or_current_installation_takes_no_extra_backup() {
     let data_dir = DataDir::new(tmp.path().join("data"));
     data_dir.ensure_layout().expect("layout");
     assert!(
-        backup::before_migrating(&data_dir, 14)
+        backup::before_migrating(&data_dir)
             .await
             .expect("no database")
             .is_none()
     );
     storage::open(&data_dir.database()).await.expect("create");
     assert!(
-        backup::before_migrating(&data_dir, 14)
+        backup::before_migrating(&data_dir)
             .await
             .expect("current")
             .is_none()
@@ -194,7 +194,7 @@ async fn startup_does_not_migrate_when_the_backup_cannot_be_written() {
     older_installation(&data_dir).await;
     let older = applied(&data_dir.database()).await;
 
-    let err = backup::before_migrating(&data_dir, 14)
+    let err = backup::before_migrating(&data_dir)
         .await
         .expect_err("no snapshot, so no go");
     assert!(
@@ -234,7 +234,7 @@ async fn an_older_build_refuses_a_newer_database_plainly() {
     let before = applied(&data_dir.database()).await;
 
     assert!(
-        backup::before_migrating(&data_dir, 14)
+        backup::before_migrating(&data_dir)
             .await
             .expect("check")
             .is_none(),
@@ -250,4 +250,41 @@ async fn an_older_build_refuses_a_newer_database_plainly() {
     );
     assert!(message.contains(&future.to_string()), "{message}");
     assert_eq!(applied(&data_dir.database()).await, before);
+}
+
+#[tokio::test]
+async fn opening_for_use_backs_up_migrates_and_audits() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let data_dir = DataDir::new(tmp.path().join("data"));
+    data_dir.ensure_layout().expect("layout");
+    older_installation(&data_dir).await;
+    let older = applied(&data_dir.database()).await;
+
+    let pool = backup::open_migrated(&data_dir).await.expect("open");
+    pool.close().await;
+    assert_eq!(backup::snapshots(&data_dir).expect("list").len(), 1);
+    assert_eq!(applied(&data_dir.database()).await, older + 1);
+    assert_eq!(backups_audited(&data_dir.database()).await, 1);
+
+    let pool = backup::open_migrated(&data_dir).await.expect("reopen");
+    pool.close().await;
+    assert_eq!(
+        backup::snapshots(&data_dir).expect("list").len(),
+        1,
+        "nothing pending, nothing more taken"
+    );
+}
+
+/// Every command that opens the database for use (`serve`, `setup-code`,
+/// `recover`) migrates through `open_migrated`, so none can upgrade an
+/// installation without its pre-migration backup. `restore` migrates the
+/// copy it restores, whose source snapshot stays in `backups/`.
+#[test]
+fn the_executable_migrates_only_through_open_migrated() {
+    let main = include_str!("../src/main.rs");
+    assert!(
+        !main.contains("storage::open("),
+        "src/main.rs opens the database with storage::open; use backup::open_migrated"
+    );
+    assert!(main.contains("backup::open_migrated("));
 }
