@@ -180,7 +180,7 @@ async fn serve(
         tracing::warn!(
             setup_code = code.raw,
             expires_in_minutes = (expires_at - now_unix()) / 60,
-            "installation is not initialized; complete setup at POST /api/setup with this code"
+            "installation is not initialized; open http://{bind}/ in a web browser and enter this setup code"
         );
     }
 
@@ -235,7 +235,7 @@ async fn run_setup_code(data_dir: &std::path::Path) -> Result<ExitCode> {
         Some((code, expires_at)) => {
             println!("{}", code.raw);
             eprintln!(
-                "setup code valid for {} minutes; complete setup at POST /api/setup",
+                "setup code valid for {} minutes; enter it on the setup page in a web browser",
                 (expires_at - now_unix()) / 60
             );
             Ok(ExitCode::SUCCESS)

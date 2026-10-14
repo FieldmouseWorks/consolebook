@@ -1,0 +1,34 @@
+# Consolebook as a systemd service. Installed by install/install.sh; see
+# docs/install.md. Settings live in /etc/consolebook/consolebook.env so an
+# upgrade can replace this file without touching local choices.
+[Unit]
+Description=Consolebook training records
+Documentation=https://github.com/FieldmouseWorks/consolebook/blob/main/docs/install.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=consolebook
+Group=consolebook
+EnvironmentFile=/etc/consolebook/consolebook.env
+ExecStart=/usr/local/bin/consolebook serve
+Restart=on-failure
+RestartSec=5
+
+# The service may write only its own data directory.
+UMask=0027
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/consolebook
+
+[Install]
+WantedBy=multi-user.target

@@ -77,3 +77,61 @@ test('full shell lifecycle', async ({ page, setupCode }) => {
 	await page.goto('/setup');
 	await expect(page).toHaveURL(/\/$/);
 });
+
+test("the administrator's home walks the first day", async ({ page, setupCode }) => {
+	await page.goto('/');
+	await page.getByLabel('Setup code').fill(setupCode);
+	await page.getByLabel('Agency name').fill('Example County Communications');
+	await page.getByLabel('Administrator username').fill('avery.admin');
+	await page.getByLabel('Administrator display name').fill('Avery Admin');
+	await page.getByLabel('Administrator password').fill(PASSWORD);
+	await page.getByRole('button', { name: 'Initialize installation' }).click();
+	await expect(page).toHaveURL(/\/login$/);
+	await page.getByLabel('Username').fill('avery.admin');
+	await page.getByLabel('Password').fill(PASSWORD);
+	await page.getByRole('button', { name: 'Sign in' }).click();
+
+	// A fresh installation starts at the beginning of the checklist.
+	const checklist = page.locator('section.setup');
+	await expect(checklist.getByRole('heading', { name: 'Getting started' })).toBeVisible();
+	await expect(checklist.getByText('0 of 7 steps done')).toBeVisible();
+	await expect(checklist.getByRole('link', { name: /Add people/ })).toHaveAttribute(
+		'href',
+		'#add-person'
+	);
+
+	// The people step needs all three roles; it ticks once the last arrives.
+	const people: [string, string][] = [
+		['casey.coordinator', 'coordinator'],
+		['jordan.trainer', 'trainer']
+	];
+	for (const [username, role] of people) {
+		await page.getByLabel('New username').fill(username);
+		await page.getByLabel('Role').selectOption(role);
+		await page.getByRole('button', { name: 'Create user' }).click();
+		await expect(page.locator('p.code-out')).toContainText(`Created ${username}.`);
+	}
+	await expect(checklist.getByText('0 of 7 steps done')).toBeVisible();
+	await page.getByLabel('New username').fill('taylor.trainee');
+	await page.getByLabel('Role').selectOption('trainee');
+	await page.getByRole('button', { name: 'Create user' }).click();
+	await expect(page.locator('p.code-out')).toContainText('Created taylor.trainee.');
+	await expect(checklist.getByText('1 of 7 steps done')).toBeVisible();
+	await expect(checklist.locator('li.done')).toContainText('Add people');
+
+	// The checklist is the administrator's; a trainee never sees it.
+	const traineeCode = ((await page.locator('p.code-out code').textContent()) ?? '').trim();
+	await page.getByRole('button', { name: 'Sign out' }).click();
+	await expect(page).toHaveURL(/\/login$/);
+	await page.goto('/reset');
+	await page.getByLabel('Username').fill('taylor.trainee');
+	await page.getByLabel('Reset code').fill(traineeCode);
+	await page.getByLabel('New password').fill(NEW_PASSWORD);
+	await page.getByRole('button', { name: 'Set new password' }).click();
+	await expect(page).toHaveURL(/\/login$/);
+	await page.getByLabel('Username').fill('taylor.trainee');
+	await page.getByLabel('Password').fill(NEW_PASSWORD);
+	await page.getByRole('button', { name: 'Sign in' }).click();
+	await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Getting started' })).toHaveCount(0);
+});

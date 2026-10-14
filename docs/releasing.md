@@ -24,7 +24,12 @@ changes without a migration are a **patch** (`0.2.0` → `0.2.1`).
 
 ## Tag after merge
 
-Once the PR is merged and `main` is green, tag the merge commit:
+Once the PR is merged and `main` is green, tag the merge commit. Pushing the
+tag runs [the release workflow](../.github/workflows/release.yml): it checks
+the tag against the Cargo version, builds static x86_64 and arm64 archives,
+installs and upgrades each with `install/install.sh` on a systemd runner, and
+only then publishes the GitHub release with this version's changelog section
+as its notes.
 
 ```sh
 git fetch origin main
@@ -33,7 +38,13 @@ git push origin vX.Y.Z
 ```
 
 Never move, delete, or reuse a pushed tag; a mistake is fixed by the next
-release. Check the identity of a build from the tag:
+release. If the workflow fails, the release stays a draft: fix the cause on
+`main` and release the next patch version.
+
+To build an archive locally, build `web/` and then run
+`scripts/package-release.sh x86_64-unknown-linux-musl x86_64` (needs the
+target and `musl-tools`); `install/install.sh --from dist/consolebook-linux-x86_64.tar.gz`
+installs it. Check the identity of a build from the tag:
 
 ```sh
 cargo run -p consolebook-server -- --version   # X.Y.Z (<commit>)

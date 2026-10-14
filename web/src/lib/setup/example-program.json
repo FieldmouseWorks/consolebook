@@ -1,0 +1,123 @@
+{
+  "format": "consolebook-program-version",
+  "format_version": 1,
+  "content": {
+    "name": "Example Telecommunicator Program",
+    "label": "Starting template",
+    "description": "An invented starting point. Rename it, then replace its phases, competencies, tasks, scales, and forms with your agency's own before publishing.",
+    "phases": [
+      { "name": "Orientation", "description": "Center tour, systems access, and observation at a trainer's side.", "presentation_number": 1 },
+      { "name": "Call Taking", "description": "Answering and processing emergency and non-emergency calls under direct supervision.", "presentation_number": 2 },
+      { "name": "Radio Dispatch", "description": "Working a dispatch position under direct supervision.", "presentation_number": 3 },
+      { "name": "Shadow", "description": "Working independently while a trainer observes without intervening.", "presentation_number": 4 }
+    ],
+    "phase_transitions": [
+      { "from_phase": "Orientation", "to_phase": "Call Taking", "kind": "advance" },
+      { "from_phase": "Call Taking", "to_phase": "Radio Dispatch", "kind": "advance" },
+      { "from_phase": "Radio Dispatch", "to_phase": "Shadow", "kind": "advance" },
+      { "from_phase": "Radio Dispatch", "to_phase": "Call Taking", "kind": "remediation" },
+      { "from_phase": "Shadow", "to_phase": "Radio Dispatch", "kind": "remediation" }
+    ],
+    "competencies": [
+      {
+        "category": "Call processing",
+        "name": "Call Interrogation",
+        "description": "Obtains and verifies location, callback number, and nature of the emergency.",
+        "tasks": [
+          { "prompt": "Processes a structure-fire call from first ring to dispatch.", "citations": [] },
+          { "prompt": "Verifies a wireless caller's location with follow-up questions.", "citations": [] }
+        ],
+        "citations": []
+      },
+      {
+        "category": "Call processing",
+        "name": "Map and Location Skills",
+        "description": "Locates addresses, intersections, and landmarks using the center's mapping tools.",
+        "tasks": [
+          { "prompt": "Locates a rural address by mile marker.", "citations": [] }
+        ],
+        "citations": []
+      },
+      {
+        "category": "Radio",
+        "name": "Radio Discipline",
+        "description": "Uses clear text, correct unit identifiers, and concise transmissions.",
+        "tasks": [
+          { "prompt": "Dispatches a medical call and acknowledges each unit's status.", "citations": [] }
+        ],
+        "citations": []
+      },
+      {
+        "category": "Conduct",
+        "name": "Stress Management",
+        "description": "Stays composed and effective during high-volume or emotional calls.",
+        "tasks": [],
+        "citations": []
+      }
+    ],
+    "rating_scales": [
+      {
+        "name": "Standard 1-7",
+        "kind": "anchored_numeric",
+        "min_value": 1,
+        "max_value": 7,
+        "anchors": [
+          { "value": 1, "label": "Unacceptable", "definition": "Contrary to training; requires immediate correction." },
+          { "value": 4, "label": "Meets standards", "definition": "Performs the task as trained, with acceptable speed and accuracy." },
+          { "value": 7, "label": "Superior", "definition": "Performs well beyond the standard expected at this phase." }
+        ]
+      },
+      {
+        "name": "Pass or fail",
+        "kind": "pass_fail",
+        "min_value": null,
+        "max_value": null,
+        "anchors": [
+          { "value": 0, "label": "Fail", "definition": "Did not perform the task as trained." },
+          { "value": 1, "label": "Pass", "definition": "Performed the task as trained." }
+        ]
+      },
+      {
+        "name": "Narrative only",
+        "kind": "narrative_only",
+        "min_value": null,
+        "max_value": null,
+        "anchors": []
+      }
+    ],
+    "rating_modifiers": [
+      { "code": "NRT", "label": "Not responding to training", "description": "The same issue continues after correction." }
+    ],
+    "evaluation_forms": [
+      {
+        "record_type": "daily_report",
+        "name": "Daily Observation Report",
+        "instructions": "Rate what you observed this shift against the standard. Mark a competency not observed rather than guessing.",
+        "competencies": [
+          { "competency": "Call Interrogation", "rating_scale": "Standard 1-7" },
+          { "competency": "Map and Location Skills", "rating_scale": "Standard 1-7" },
+          { "competency": "Radio Discipline", "rating_scale": "Pass or fail" },
+          { "competency": "Stress Management", "rating_scale": "Standard 1-7" }
+        ],
+        "narratives": [
+          { "prompt": "Most acceptable performance.", "required": true },
+          { "prompt": "Least acceptable performance.", "required": true },
+          { "prompt": "Additional comments.", "required": false }
+        ]
+      },
+      {
+        "record_type": "weekly_summary",
+        "name": "Weekly Summary",
+        "instructions": "Summarize the week's daily reports: progress, recurring issues, and the plan for next week.",
+        "competencies": [
+          { "competency": "Stress Management", "rating_scale": "Narrative only" }
+        ],
+        "narratives": [
+          { "prompt": "Progress this week.", "required": true },
+          { "prompt": "Plan for next week.", "required": true }
+        ]
+      }
+    ],
+    "citations": []
+  }
+}

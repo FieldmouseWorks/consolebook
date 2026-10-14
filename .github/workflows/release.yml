@@ -1,0 +1,136 @@
+name: release
+
+# Builds static Linux release archives, proves the installer end to end on a
+# real systemd host (fresh install, setup code, upgrade), and on a version tag
+# publishes them as a GitHub release. docs/releasing.md owns the procedure;
+# ADR 0022 owns what a version means. It runs on every pull request, not only
+# installer changes: any Rust, dependency, or web change can break the static
+# musl build, and that must fail before merge, not after a tag is pushed.
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            arch: aarch64
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Tag matches the Cargo version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          test "v$version" = "$GITHUB_REF_NAME" || {
+            echo "tag $GITHUB_REF_NAME does not match Cargo.toml version $version" >&2
+            exit 1
+          }
+      - name: Toolchain and static target
+        run: |
+          rustup toolchain install
+          rustup target add ${{ matrix.target }}
+          sudo apt-get update -q
+          sudo apt-get install -y -q musl-tools
+      - name: Web build
+        working-directory: web
+        run: npm ci && npm run build
+      - name: Package
+        run: |
+          CONSOLEBOOK_BUILD_COMMIT=$(git rev-parse --short=12 HEAD) \
+            scripts/package-release.sh ${{ matrix.target }} ${{ matrix.arch }}
+          file "target/${{ matrix.target }}/release/consolebook-server"
+      # The archive is installed exactly as an operator would, on a host with
+      # systemd, and must come up, offer setup, and survive an upgrade.
+      - name: Installer, fresh install
+        run: |
+          sudo install/install.sh --from "dist/consolebook-linux-${{ matrix.arch }}.tar.gz" | tee install.log
+          grep -E '^  2\. Setup code  [A-Za-z0-9-]+$' install.log
+          curl -fsS http://127.0.0.1:7770/api/health | tee health.json
+          grep -q "\"commit\":\"$(git rev-parse --short=12 HEAD)\"" health.json
+          systemctl is-active consolebook
+          test "$(stat -c %U /var/lib/consolebook)" = consolebook
+      # The upgrade also moves the service to a specific, non-default
+      # address, so the installer's own health probe must follow the bind.
+      - name: Installer, upgrade in place
+        run: |
+          sudo install/install.sh --from "dist/consolebook-linux-${{ matrix.arch }}.tar.gz" \
+            --listen 127.0.0.2:7771 | tee upgrade.log
+          grep -q 'Setup code' upgrade.log  # still uninitialized, so a fresh code is offered
+          grep -q 'http://127.0.0.2:7771/' upgrade.log
+          systemctl is-active consolebook
+          curl -fsS http://127.0.0.2:7771/api/instance
+      # Jobs share archives through a draft release, published once all pass.
+      - name: Upload to the draft release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+              --title "Consolebook ${GITHUB_REF_NAME#v}" --notes "Release notes follow." || true
+          gh release upload "$GITHUB_REF_NAME" --clobber \
+            "dist/consolebook-linux-${{ matrix.arch }}.tar.gz" \
+            "dist/consolebook-linux-${{ matrix.arch }}.tar.gz.sha256"
+    permissions:
+      contents: write
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Notes from the changelog, then publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          awk -v v="$version" '
+            index($0, "## [" v "]") == 1 { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          test -s notes.md || { echo "CHANGELOG.md has no section for $version" >&2; exit 1; }
+          cat >> notes.md <<'EOF'
+
+          ## Install or upgrade
+
+          On a Linux server with systemd, as root:
+
+          ```sh
+          curl -fsSL https://raw.githubusercontent.com/FieldmouseWorks/consolebook/main/install/install.sh | sudo sh
+          ```
+
+          See [docs/install.md](https://github.com/FieldmouseWorks/consolebook/blob/main/docs/install.md).
+          EOF
+          gh release edit "$GITHUB_REF_NAME" --notes-file notes.md --draft=false --latest
