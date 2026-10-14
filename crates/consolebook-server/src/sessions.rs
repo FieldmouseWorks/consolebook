@@ -9,6 +9,7 @@ use sqlx::{Sqlite, SqlitePool, Transaction};
 use time::OffsetDateTime;
 
 use crate::secrets::{self, OpaqueSecret};
+use crate::storage;
 
 /// Absolute session lifetime.
 pub const SESSION_TTL_SECONDS: i64 = 12 * 60 * 60;
@@ -31,18 +32,28 @@ pub async fn create(
     let token = secrets::generate_session_token()?;
     let now = OffsetDateTime::now_utc().unix_timestamp();
     let expires_at = now + SESSION_TTL_SECONDS;
+    let mut tx = storage::write_tx(pool)
+        .await
+        .context("starting session creation")?;
     sqlx::query(
-        "INSERT INTO session (token_hash, user_id, created_at, expires_at, issued_secure)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO session (token_hash, user_id, created_at, expires_at)
+         VALUES (?1, ?2, ?3, ?4)",
     )
     .bind(&token.digest_hex)
     .bind(user_id)
     .bind(now)
     .bind(expires_at)
-    .bind(transport == CookieTransport::Secure)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .context("creating session")?;
+    if transport == CookieTransport::Secure {
+        sqlx::query("INSERT INTO session_secure_cookie (token_hash) VALUES (?1)")
+            .bind(&token.digest_hex)
+            .execute(&mut *tx)
+            .await
+            .context("recording the session's Secure cookie")?;
+    }
+    tx.commit().await.context("committing session")?;
 
     // Opportunistic hygiene: drop sessions expired for more than a day so
     // the table does not accumulate forever. Validity never depends on
@@ -72,7 +83,8 @@ pub async fn revoke_not_secure(pool: &SqlitePool) -> Result<u64> {
     let now = OffsetDateTime::now_utc().unix_timestamp();
     let revoked = sqlx::query(
         "UPDATE session SET revoked_at = ?1
-         WHERE revoked_at IS NULL AND issued_secure = 0 AND expires_at > ?1",
+         WHERE revoked_at IS NULL AND expires_at > ?1
+           AND token_hash NOT IN (SELECT token_hash FROM session_secure_cookie)",
     )
     .bind(now)
     .execute(pool)

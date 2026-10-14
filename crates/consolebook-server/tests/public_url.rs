@@ -209,7 +209,7 @@ async fn sign_in_behind_https_records_a_secure_session() {
     let (_tmp, pool) = initialized_pool().await;
     let url: PublicUrl = "https://consolebook.example.org".parse().expect("url");
     let _ = cookie_headers(http::AppState::new(pool.clone()).with_public_url(url)).await;
-    let secure: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM session WHERE issued_secure = 1")
+    let secure: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM session_secure_cookie")
         .fetch_one(&pool)
         .await
         .expect("count");
