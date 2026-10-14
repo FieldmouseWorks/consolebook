@@ -227,6 +227,9 @@ case "$host" in
 0.0.0.0 | "[::]" | ::)
 	address=$(hostname -I 2>/dev/null | cut -d' ' -f1)
 	address=${address:-$(hostname)}
+	case "$address" in
+	*:*) address="[$address]" ;; # an IPv6 literal needs brackets in a URL
+	esac
 	url="http://$address:$port/"
 	;;
 *) url="http://$host:$port/" ;;
