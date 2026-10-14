@@ -36,7 +36,8 @@
 		type UserSummary,
 		type VersionSummary
 	} from '$lib/api';
-	import { instant } from '$lib/format';
+	import { instant, localSpan } from '$lib/format';
+	import ProblemState from '$lib/ui/ProblemState.svelte';
 	import type { ShellData } from '../../+layout';
 
 	let { data }: { data: ShellData } = $props();
@@ -51,6 +52,8 @@
 
 	let detail: EnrollmentDetail | null = $state(null);
 	let error = $state('');
+	// The HTTP status of the last failed enrollment load, for the page-level problem state.
+	let loadStatus: number | null = $state(null);
 	let busy = $state(false);
 
 	// Every finalized version of this enrollment's records leaves as one
@@ -83,6 +86,7 @@
 		try {
 			detail = await getEnrollment(enrollmentId);
 		} catch (err) {
+			loadStatus = err instanceof ApiError ? err.status : null;
 			error = err instanceof ApiError ? err.message : 'the server could not be reached';
 		}
 	}
@@ -558,7 +562,7 @@
 					{#each detail.assignments as assignment (assignment.id)}
 						<tr>
 							<td>{assignment.trainer_display_name}</td>
-							<td>{instant(assignment.assigned_at)}</td>
+							<td class="nowrap">{instant(assignment.assigned_at)}</td>
 							<td>
 								{assignment.ended_at === null ? 'active' : instant(assignment.ended_at)}
 							</td>
@@ -619,13 +623,10 @@
 				<tbody>
 					{#each sessions as session (session.id)}
 						<tr>
-							<td>{session.business_date}</td>
-							<td>
-								{session.local_start.replace('T', ' ')}
-								{#if session.local_end}
-									– {session.local_end.replace('T', ' ')}
-								{/if}
-								<span class="quiet-inline">({session.timezone})</span>
+							<td class="nowrap">{session.business_date}</td>
+							<td class="nowrap">
+								{localSpan(session.local_start, session.local_end).times}
+								<span class="quiet-inline tz">({session.timezone})</span>
 							</td>
 							<td>{session.phase_name ?? '—'}</td>
 							<td>
@@ -1032,7 +1033,7 @@
 					<tbody>
 						{#each detail.phase_events as event (event.id)}
 							<tr>
-								<td>
+								<td class="nowrap">
 									{instant(event.effective_at)}
 									{#if event.recorded_at !== event.effective_at}
 										<span class="quiet-inline">
@@ -1114,7 +1115,7 @@
 				<tbody>
 					{#each detail.events as event (event.id)}
 						<tr>
-							<td>{instant(event.occurred_at)}</td>
+							<td class="nowrap">{instant(event.occurred_at)}</td>
 							<td>{kindLabel(event.kind)}</td>
 							<td>
 								{#if event.kind === 'version_change'}
@@ -1196,12 +1197,15 @@
 		</a>
 	</p>
 {:else if error}
-	<p class="error" role="alert">{error}</p>
+	<ProblemState status={loadStatus} detail={error} />
 {:else}
 	<p>Loading…</p>
 {/if}
 
 <style>
+	.tz {
+		display: block;
+	}
 	.quiet {
 		opacity: 0.7;
 		margin: 0 0 0.75rem;

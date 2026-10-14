@@ -60,7 +60,7 @@ test('assign a trainer, record phase history, and read it scoped', async ({ page
 	await page.getByLabel('Username').fill('avery.admin');
 	await page.getByLabel('Password').fill(PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page.getByRole('heading', { name: 'Installation status' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible();
 
 	// Create the trainer through the role-aware form and keep their code.
 	await page.getByLabel('New username').fill('jordan.trainer');
@@ -116,7 +116,7 @@ test('assign a trainer, record phase history, and read it scoped', async ({ page
 	await expect(page.getByText('Paused')).toBeVisible();
 
 	// The trainer sets a password through the reset flow and signs in.
-	await page.getByRole('link', { name: 'Home' }).click();
+	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 	await page.getByRole('button', { name: 'Sign out' }).click();
 	await expect(page).toHaveURL(/\/login$/);
 	await page.goto(`/reset`);
