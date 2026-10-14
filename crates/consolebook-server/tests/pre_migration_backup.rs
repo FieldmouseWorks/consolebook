@@ -386,3 +386,32 @@ async fn a_running_server_blocks_a_migrating_command_but_not_an_ordinary_one() {
         .close()
         .await;
 }
+
+/// A pre-migration snapshot is ordered by its time like any other, so a
+/// later ordinary backup is the newest: the one copied off the server and
+/// the one copy status asks after.
+#[tokio::test]
+async fn a_later_backup_is_newer_than_the_pre_migration_snapshot() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let data_dir = DataDir::new(tmp.path().join("data"));
+    data_dir.ensure_layout().expect("layout");
+    std::fs::write(
+        data_dir
+            .backups()
+            .join("consolebook-premigration-20260101T000000Z.db"),
+        b"invented pre-migration snapshot",
+    )
+    .expect("pre-migration");
+    let later = "consolebook-20260102T000000Z.db";
+    std::fs::write(data_dir.backups().join(later), b"invented later backup").expect("later");
+
+    assert_eq!(names(&data_dir).last().map(String::as_str), Some(later));
+    let share = tempfile::tempdir_in("/dev/shm").expect("these tests need /dev/shm (a tmpfs)");
+    let copy = backup_copy::catch_up(&data_dir, share.path(), 14)
+        .expect("copy")
+        .expect("the later backup was not yet copied");
+    assert_eq!(
+        copy.copy.file_name().expect("name").to_string_lossy(),
+        later
+    );
+}
