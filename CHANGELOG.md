@@ -21,6 +21,9 @@ not a production-readiness statement.
 
 ### Fixed
 
+- After a restore, the set-aside database no longer counts as the newest
+  backup: snapshots order by their time, so off-server copy status,
+  catch-up copies, and retention follow the latest backup ([#105](https://github.com/FieldmouseWorks/consolebook/issues/105)).
 - A draft that saves after a failed save no longer keeps saying "The draft
   did not save" ([#83](https://github.com/FieldmouseWorks/consolebook/issues/83)).
 
