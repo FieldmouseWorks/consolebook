@@ -64,9 +64,13 @@ ignored `.proof/` and never deletes one. It holds:
   the invocation and working directory, start, finish, and duration, the
   `CONTRIBUTING.md` hash, host and privilege, toolchain versions, the browser
   kind, path, and version, each step's command, status, exit, duration, log,
-  and log SHA-256, the server binary's SHA-256, and the web build manifest hash;
+  and log SHA-256, the server binary's SHA-256, the web build manifest hash,
+  and the browser suite's own counts (expected, unexpected, flaky, skipped);
 - `receipt.md`: the same receipt as a paste-ready summary;
-- `NN.log` per step that ran, and `web-build.sha256`, the asset manifest.
+- `NN.log` per step that ran, `web-build.sha256`, the asset manifest, and
+  `e2e-report.json`, Playwright's report. The browser step fails without that
+  report or with zero tests, whatever its exit status, so a gate line that
+  never reaches the suite cannot pass.
 
 The integrator posts `receipt.md` to the primary issue or PR, labeled as a
 local result, and links the hosted `pr-gate` run separately once it is
