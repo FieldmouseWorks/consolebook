@@ -461,15 +461,17 @@ pub async fn record_phase_event(
     if matches!(kind, PhaseEventKind::Return | PhaseEventKind::Restart) && reason.is_empty() {
         return Ok(Err(LifecycleRefusal::ReasonRequired));
     }
-    let now = OffsetDateTime::now_utc().unix_timestamp();
-    let effective = effective_at.unwrap_or(now);
-    if effective > now {
-        return Ok(Err(LifecycleRefusal::EffectiveInFuture));
-    }
-
     let mut tx = storage::write_tx(pool)
         .await
         .context("starting phase event")?;
+    // "Now" is read once the writer is held: a request that waited behind
+    // another event is judged at the instant it can actually commit, never
+    // refused as out of order for the time it spent waiting (#108).
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    let effective = effective_at.unwrap_or(now);
+    if effective > now {
+        return storage::refuse(tx, LifecycleRefusal::EffectiveInFuture).await;
+    }
     let Some(current_status) = status(&mut tx, enrollment_id).await? else {
         return storage::refuse(tx, LifecycleRefusal::NoSuchEnrollment).await;
     };

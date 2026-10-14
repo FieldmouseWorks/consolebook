@@ -223,6 +223,72 @@ async fn phase_events_validate_the_committed_pause_state() {
     fx.probe().await;
 }
 
+/// A request for "now" that waits behind the writer while a later event
+/// commits is judged when it can commit, not when it asked (#108).
+#[tokio::test]
+async fn a_present_phase_event_is_judged_after_waiting_for_the_writer() {
+    let fx = Fixture::new().await;
+    let enrollment = enrolled(&fx).await;
+    let phase: i64 = sqlx::query_scalar("SELECT id FROM phase LIMIT 1")
+        .fetch_one(&fx.pool)
+        .await
+        .expect("phase");
+    lifecycle::record_phase_event(
+        &fx.pool,
+        ACTOR,
+        enrollment,
+        PhaseEventKind::Advance,
+        Some(phase),
+        None,
+        "",
+    )
+    .await
+    .expect("call")
+    .expect("entry");
+
+    let asked = time::OffsetDateTime::now_utc().unix_timestamp();
+    let mut blocker = storage::write_tx(&fx.pool).await.expect("hold writer");
+    let pause = lifecycle::record_phase_event(
+        &fx.pool,
+        ACTOR,
+        enrollment,
+        PhaseEventKind::Pause,
+        None,
+        None,
+        "Invented pause",
+    );
+    tokio::pin!(pause);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), &mut pause)
+            .await
+            .is_err(),
+        "the request waits for the writer"
+    );
+    // While it waits, the clock passes a second and another pause commits.
+    while time::OffsetDateTime::now_utc().unix_timestamp() <= asked {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let later = asked + 1;
+    sqlx::query(
+        "INSERT INTO phase_event (enrollment_id, kind, from_phase_id, effective_at, recorded_at, actor_user_id, reason)
+         VALUES (?1, 'pause', ?2, ?3, ?3, ?4, 'Invented earlier pause')",
+    )
+    .bind(enrollment)
+    .bind(phase)
+    .bind(later)
+    .bind(ACTOR)
+    .execute(&mut *blocker)
+    .await
+    .expect("a pause commits first");
+    blocker.commit().await.expect("release writer");
+
+    let outcome = tokio::time::timeout(Duration::from_secs(10), pause)
+        .await
+        .expect("bounded completion")
+        .expect("a domain outcome");
+    assert_eq!(outcome, Err(LifecycleRefusal::AlreadyPaused));
+}
+
 #[tokio::test]
 async fn overlapping_session_creation_has_one_winner() {
     let fx = Fixture::new().await;
