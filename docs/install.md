@@ -122,11 +122,19 @@ journalctl -u consolebook | grep 'took a validated backup first'
 There is no downgrade: an older version refuses a database a newer one has
 changed, and says so ("upgraded by a newer Consolebook"; 0.1.0 says
 "migration N was previously applied but is missing"). To go back after an
-upgrade, restore that backup with the release that wrote it:
+upgrade, install the version you upgraded **from** and restore that backup
+with it. The backup holds that version's database; the new version would
+only migrate it again. The log names the version that ran before:
+
+```sh
+journalctl -u consolebook | grep 'starting Consolebook' | tail -n 2
+```
+
+Then, with that version in place of `<previous>`:
 
 ```sh
 sudo systemctl stop consolebook
-curl -fsSL https://raw.githubusercontent.com/FieldmouseWorks/consolebook/main/install/install.sh | sudo sh -s -- --version 0.1.0 --no-service
+curl -fsSL https://raw.githubusercontent.com/FieldmouseWorks/consolebook/main/install/install.sh | sudo sh -s -- --version <previous> --no-service
 sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook consolebook restore /var/lib/consolebook/backups/consolebook-premigration-<stamp>.db
 sudo systemctl start consolebook
 ```
