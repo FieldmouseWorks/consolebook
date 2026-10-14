@@ -17,6 +17,13 @@ one step running `npm run e2e` is replaced by the system-browser line from the
 block in that section that sets CONSOLEBOOK_E2E_CHROMIUM=/path/to/chromium.
 Anything else about those blocks changing makes this script fail closed.
 
+The parser cannot prove a shell line reaches the suite (`exit 0 && npm run
+e2e` would read as an invocation), so the browser step must also leave
+runtime evidence: the runner points CONSOLEBOOK_E2E_REPORT at the receipt
+directory, web/playwright.config.ts writes a JSON report there, and the step
+passes only when that report exists and counts at least one expected test
+and no unexpected ones.
+
 Receipts: each run writes a new directory under .proof/ (ignored, never
 deleted or overwritten here) holding receipt.json, receipt.md, one log per
 step, and the web asset manifest. Failed and interrupted runs keep theirs.
@@ -46,6 +53,8 @@ SCHEMA = "consolebook-proof-receipt/1"
 SECTION = "## Build and verification"
 E2E_MARKER = "npm run e2e"
 BROWSER_VAR = "CONSOLEBOOK_E2E_CHROMIUM"
+REPORT_VAR = "CONSOLEBOOK_E2E_REPORT"
+REPORT_NAME = "e2e-report.json"
 BROWSER_PLACEHOLDER = "/path/to/chromium"
 RECEIPT_ROOT = ".proof"
 BINARY = "target/debug/consolebook-server"
@@ -351,6 +360,23 @@ def run_step(cmd: str, root: Path, env: dict, log_path: Path) -> int:
             raise
 
 
+def e2e_evidence(report: Path) -> tuple[dict | None, str | None]:
+    """The browser suite's own account of a run, or why there is none."""
+    if not report.is_file():
+        return None, f"the browser suite left no report ({REPORT_VAR}); it did not run"
+    try:
+        stats = json.loads(report.read_text())["stats"]
+        counts = {k: int(stats[k]) for k in ("expected", "unexpected", "flaky", "skipped")}
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        return None, f"the browser suite's report is unreadable: {e}"
+    evidence = {"report": report.name, "sha256": sha256_file(report), **counts}
+    if counts["expected"] < 1:
+        return evidence, "the browser suite ran no tests"
+    if counts["unexpected"]:
+        return evidence, f"the browser suite reported {counts['unexpected']} unexpected results"
+    return evidence, None
+
+
 def run_sequence(
     steps: list[str],
     root: Path,
@@ -365,6 +391,8 @@ def run_sequence(
         env[BROWSER_VAR] = chromium
     before = candidate_state(root)
     out_dir = new_receipt_dir(receipts, before["head"], before["dirty"])
+    report = out_dir / REPORT_NAME
+    env[REPORT_VAR] = str(report)
     contributing = root / "CONTRIBUTING.md"
 
     receipt: dict = {
@@ -420,8 +448,15 @@ def run_sequence(
                     step["log_sha256"] = sha256_file(log)
             step["exit_status"] = code
             step["status"] = "passed" if code == 0 else "failed"
-            print(f"<== [{i}/{n}] exit {code} in {step['duration_s']:.1f}s", flush=True)
-            if code != 0:
+            if runs_e2e(step["command"]):
+                step["e2e"], problem = e2e_evidence(report)
+                if problem:
+                    step["problem"] = problem
+                    if code == 0:
+                        step["status"], code = "failed", None
+                        print(f"{ME}: {problem}", file=sys.stderr)
+            print(f"<== [{i}/{n}] exit {step['exit_status']} in {step['duration_s']:.1f}s", flush=True)
+            if step["status"] != "passed":
                 result, failed = "failed", i
                 break
         else:
@@ -486,6 +521,14 @@ def render_markdown(r: dict) -> str:
     arts = r.get("artifacts") or {}
     binary = arts.get("binary")
     manifest = arts.get("web_build_manifest")
+    suite = next((s for s in r["steps"] if "e2e" in s or "problem" in s), None)
+    if suite is None:
+        suite_line = "not run"
+    else:
+        e = suite.get("e2e") or {}
+        counts = (f"{e['expected']} expected, {e['unexpected']} unexpected, {e['flaky']} flaky, "
+                  f"{e['skipped']} skipped; report sha256 `{e['sha256']}`") if e else "no report"
+        suite_line = counts + (f" — {suite['problem']}" if suite.get("problem") else "")
     return f"""### Local proof receipt — {r['result']}
 
 - Candidate: `{c['head']}` tree `{c['tree']}`{' (dirty)' if c['dirty'] else ''}; unchanged during run: {r['candidate_unchanged_during_run']}
@@ -498,6 +541,7 @@ def render_markdown(r: dict) -> str:
 - Toolchain: {r['toolchain']['rustc']}; node {r['toolchain']['node']}; npm {r['toolchain']['npm']}
 - Binary: {f"`{binary['path']}` sha256 `{binary['sha256']}`" if binary else 'not built by this run'}
 - Web build manifest: {f"{manifest['files']} files, sha256 `{manifest['sha256']}`" if manifest else 'not built by this run'}
+- Browser suite: {suite_line}
 
 | # | Command | Status | Exit | Seconds | Log sha256 (prefix) |
 | --- | --- | --- | --- | --- | --- |
@@ -536,6 +580,29 @@ def self_test(root: Path) -> int:
         r, d2 = run_sequence(["true"], root, base, chromium=None, invocation=inv, artifacts=False)
         check(r["result"] == "passed" and r["failed_step"] is None, "result passed")
         check(d2 != d and (d / "receipt.json").is_file(), "earlier failed receipt kept")
+
+    print("browser suite: a passing exit is not enough without the suite's own report")
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        r, d = run_sequence([f"exit 0 && {E2E_MARKER}", "echo never"], root, base,
+                            chromium=None, invocation=inv, artifacts=False)
+        check(r["result"] == "failed" and r["failed_step"] == 1
+              and "did not run" in r["steps"][0].get("problem", ""),
+              "an unreachable suite fails its step for lack of a report")
+        check(r["steps"][1]["status"] == "not-run", "the chain stops there")
+        check("did not run" in (d / "receipt.md").read_text(), "the summary names the problem")
+
+        def fake(stats: str) -> str:
+            return f"printf '{{\"stats\":{stats}}}' > \"${REPORT_VAR}\" && exit 0 && {E2E_MARKER}"
+
+        r, _ = run_sequence([fake('{"expected":0,"unexpected":0,"flaky":0,"skipped":4}')],
+                            root, base, chromium=None, invocation=inv, artifacts=False)
+        check(r["result"] == "failed" and "no tests" in r["steps"][0].get("problem", ""),
+              "a report that ran no tests fails the step")
+        r, _ = run_sequence([fake('{"expected":3,"unexpected":0,"flaky":0,"skipped":0}')],
+                            root, base, chromium=None, invocation=inv, artifacts=False)
+        check(r["result"] == "passed" and r["steps"][0]["e2e"]["expected"] == 3,
+              "a report of passing tests passes and is recorded")
 
     print("error control: an unexpected exception records an error, never a pass")
     global run_step
