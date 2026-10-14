@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-14
+- **Amended by:** [ADR 0026](0026-release-distribution-and-provenance.md) (installer from the release)
 
 ## Context
 
@@ -93,6 +94,5 @@ an existing installation or refuses with instructions. It never strands data.
   attribute that ADR 0004 defers to deployment hardening, are separate work.
 - The installer does not take a backup before upgrading. Until it does, the
   scheduled backups (ADR 0006) are the recovery point for a failed upgrade.
-- The one-line command fetches the installer from `main` and the archive from
-  the release. Pinning the installer to the release and signing archives are
-  open decisions.
+- The one-line command fetches the installer and the archive from the same
+  release, and both carry build provenance (ADR 0026).

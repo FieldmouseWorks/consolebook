@@ -10,6 +10,12 @@ not a production-readiness statement.
 
 ## [Unreleased]
 
+### Changed
+
+- The one-line install fetches the installer published with the latest
+  release instead of the `main` branch, and every release asset carries
+  build provenance (`gh attestation verify`; ADR 0026).
+
 ## [0.1.0] - 2026-10-14
 
 The first versioned release: everything built through Milestone 4 and the

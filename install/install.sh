@@ -1,7 +1,7 @@
 #!/bin/sh
 # Install or upgrade Consolebook on a Linux server with systemd.
 #
-#   curl -fsSL https://raw.githubusercontent.com/FieldmouseWorks/consolebook/main/install/install.sh | sudo sh
+#   curl -fsSL https://github.com/FieldmouseWorks/consolebook/releases/latest/download/install.sh | sudo sh
 #
 # The same command upgrades an existing installation and keeps its data.
 # It downloads the release for this machine, checks its SHA-256, installs

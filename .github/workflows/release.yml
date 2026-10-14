@@ -150,8 +150,17 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" --clobber \
             "dist/consolebook-linux-${{ matrix.arch }}.tar.gz" \
             "dist/consolebook-linux-${{ matrix.arch }}.tar.gz.sha256"
+      # Signed provenance ties the archive to this repository, workflow, and
+      # commit (ADR 0026); verify with `gh attestation verify`.
+      - name: Attest build provenance
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/consolebook-linux-${{ matrix.arch }}.tar.gz
     permissions:
       contents: write
+      id-token: write
+      attestations: write
 
   publish:
     needs: build
@@ -160,10 +169,25 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+      # The one-line install fetches the installer from the release, not from
+      # main, so it is the reviewed script that shipped with the archives.
+      - name: Installer as a release asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp install/install.sh install.sh
+          sha256sum install.sh > install.sh.sha256
+          gh release upload "$GITHUB_REF_NAME" --clobber install.sh install.sh.sha256
+      - name: Attest installer provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: install.sh
       - name: Notes from the changelog, then publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -182,8 +206,11 @@ jobs:
           On a Linux server with systemd, as root:
 
           ```sh
-          curl -fsSL https://raw.githubusercontent.com/FieldmouseWorks/consolebook/main/install/install.sh | sudo sh
+          curl -fsSL https://github.com/FieldmouseWorks/consolebook/releases/latest/download/install.sh | sudo sh
           ```
+
+          To check where an archive came from:
+          `gh attestation verify consolebook-linux-x86_64.tar.gz -R FieldmouseWorks/consolebook`.
 
           See [docs/install.md](https://github.com/FieldmouseWorks/consolebook/blob/main/docs/install.md).
           EOF
