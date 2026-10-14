@@ -68,6 +68,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/auth/reset-codes", post(issue_reset_code))
         .route("/api/auth/reset", post(reset_password))
         .route("/api/users", get(list_users).post(create_user))
+        .route("/api/getting-started", get(getting_started))
         .route("/api/notices", get(list_notices))
         .route("/api/notices/{id}/read", post(mark_notice_read))
         .merge(crate::programs_http::routes())
@@ -569,6 +570,21 @@ async fn list_users(
     }
     let users = users::list(&state.pool).await?;
     Ok(Json(UsersBody { users }))
+}
+
+/// The administrator's setup checklist counts (docs/install.md).
+async fn getting_started(
+    State(state): State<AppState>,
+    current: CurrentUser,
+) -> Result<Json<crate::getting_started::Progress>, ApiError> {
+    match crate::getting_started::progress(&state.pool, current.user.id).await? {
+        Ok(progress) => Ok(Json(progress)),
+        Err(crate::getting_started::ProgressRefusal::CapabilityRequired) => Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "capability_required",
+            "setup progress requires the manage_users capability",
+        )),
+    }
 }
 
 // -------------------------------------------------------------- notices

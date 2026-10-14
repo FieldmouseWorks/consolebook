@@ -22,6 +22,7 @@ pub mod export_stream;
 pub mod export_verify;
 pub mod exports_http;
 pub mod finalization;
+pub mod getting_started;
 pub mod http;
 pub mod lifecycle;
 pub mod notices;

@@ -21,3 +21,6 @@ CLAUDE.local.md
 
 # Local proof receipts written by scripts/proof.py
 /.proof/
+
+# Release archives written by scripts/package-release.sh
+/dist/
