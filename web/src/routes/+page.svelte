@@ -10,6 +10,7 @@
 		exportSummary,
 		getHealth,
 		getNotices,
+		getSetupProgress,
 		installationExportPath,
 		issueResetCode,
 		markNoticeRead,
@@ -23,6 +24,7 @@
 		type MySession,
 		type Notice,
 		type ReviewQueueRow,
+		type SetupProgress,
 		type Role,
 		type SessionDisposition
 	} from '$lib/api';
@@ -59,7 +61,14 @@
 	let sessions: MySession[] = $state([]);
 	let queue: ReviewQueueRow[] = $state([]);
 	let summary: ExportSummary | null = $state(null);
+	let progress: SetupProgress | null = $state(null);
 	$effect(() => {
+		if (canManageUsers) {
+			getSetupProgress().then(
+				(body) => (progress = body),
+				() => (progress = null)
+			);
+		}
 		getHealth().then(
 			(h) => (health = h),
 			() => (health = null)
@@ -193,6 +202,59 @@
 		}
 	}
 
+	// The first day, in order: each step is done when the installation's
+	// counts say so, and links to where it happens (docs/install.md).
+	let setupSteps = $derived(
+		progress === null
+			? []
+			: [
+					{
+						label: 'Add people: a coordinator, a trainer, and a trainee',
+						done:
+							progress.coordinators > 0 && progress.trainers > 0 && progress.trainees > 0,
+						href: '#add-person',
+						hint: 'Each gets a one-time code to choose a password.'
+					},
+					{
+						label: 'Create a training program',
+						done: progress.programs > 0,
+						href: '/programs',
+						hint: 'Phases, competencies and tasks, a rating scale, and a form.'
+					},
+					{
+						label: 'Publish a program version',
+						done: progress.published_versions > 0,
+						href: '/programs',
+						hint: 'Published versions are frozen; records pin them.'
+					},
+					{
+						label: 'Enroll a trainee',
+						done: progress.enrollments > 0,
+						href: '/programs',
+						hint: "From the published version's page."
+					},
+					{
+						label: 'Assign a trainer',
+						done: progress.assignments > 0,
+						href: null,
+						hint: "On the trainee's enrollment page."
+					},
+					{
+						label: 'Record a training session',
+						done: progress.sessions > 0,
+						href: null,
+						hint: "Also on the enrollment page; the trainer then sees it on their home."
+					},
+					{
+						label: 'Finalize a first evaluation',
+						done: progress.finalized_records > 0,
+						href: null,
+						hint: 'The trainer writes it, a coordinator reviews and finalizes it.'
+					}
+				]
+	);
+	let setupDone = $derived(setupSteps.filter((step) => step.done).length);
+
 	let newUsername = $state('');
 	let newDisplayName = $state('');
 	let newEmployeeId = $state('');
@@ -219,6 +281,7 @@
 			newEmployeeId = '';
 			newTitle = '';
 			newRole = 'trainee';
+			progress = await getSetupProgress().catch(() => progress);
 		} catch (err) {
 			createError =
 				err instanceof ApiError ? err.message : 'the server could not be reached';
@@ -249,6 +312,31 @@
 
 <h1>Home</h1>
 <p class="lede">Signed in as {session?.user.display_name} · {data.instance.agency}</p>
+
+{#if setupSteps.length > 0 && setupDone < setupSteps.length}
+	<section class="panel setup">
+		<div class="cardhead">
+			<h2>Getting started</h2>
+			<span class="count">{setupDone} of {setupSteps.length} steps done</span>
+		</div>
+		<ol class="steps">
+			{#each setupSteps as step (step.label)}
+				<li class:done={step.done}>
+					<span class="mark" aria-hidden="true">{step.done ? '✓' : ''}</span>
+					<span>
+						{#if step.href && !step.done}
+							<a href={step.href}>{step.label}</a>
+						{:else}
+							{step.label}
+						{/if}
+						{#if step.done}<span class="visually-hidden">(done)</span>{/if}
+						<span class="sub">{step.hint}</span>
+					</span>
+				</li>
+			{/each}
+		</ol>
+	</section>
+{/if}
 
 {#if canReview}
 	<section class="card">
@@ -536,7 +624,7 @@
 {/if}
 
 {#if canManageUsers}
-	<section class="card">
+	<section class="card" id="add-person">
 		<h2>Add a person</h2>
 		<p>
 			The account starts with the chosen role's capabilities and no password.
@@ -788,6 +876,47 @@
 	}
 	button.linkish:hover {
 		text-decoration: underline;
+	}
+	ol.steps {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+	}
+	ol.steps li {
+		display: flex;
+		gap: 0.75rem;
+		padding: 0.5rem 0;
+		border-top: 1px solid light-dark(#e2e5ea, #333a47);
+	}
+	ol.steps li:first-child {
+		border-top: 0;
+	}
+	ol.steps .mark {
+		flex: none;
+		width: 1.4rem;
+		height: 1.4rem;
+		border-radius: 999px;
+		border: 2px solid light-dark(#b9c0cb, #4a5261);
+		display: grid;
+		place-items: center;
+		font-size: 0.8rem;
+		font-weight: 700;
+	}
+	ol.steps li.done .mark {
+		background: light-dark(#2e7d4f, #4fb27a);
+		border-color: transparent;
+		color: #ffffff;
+	}
+	ol.steps li.done > span:last-child {
+		opacity: 0.65;
+	}
+	.visually-hidden {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+		white-space: nowrap;
 	}
 	details.about {
 		max-width: 44rem;

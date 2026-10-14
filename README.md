@@ -9,6 +9,18 @@ Consolebook is a [Fieldmouse Works](https://github.com/FieldmouseWorks) project 
 > evaluation, not production. Do not put production or personnel data into
 > this repository or any current build.
 
+## Install
+
+On a Linux server with systemd (x86_64 or arm64):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/FieldmouseWorks/consolebook/main/install/install.sh | sudo sh
+```
+
+It prints the address and a setup code; finish in the browser, and the home
+page walks you through the first day. Run the same command to upgrade.
+[docs/install.md](docs/install.md) covers network access, backups, and the rest.
+
 ## Product goals
 
 - Programs and agency terminology are versioned configuration.
@@ -62,7 +74,7 @@ Milestone 5 work. For the live demonstration deployment, see the
 - [docs/decisions/](docs/decisions/) — architecture decision records
 - [crates/consolebook-server/](crates/consolebook-server/) — the server crate
 
-## Build and run
+## Build and run from source
 
 ```sh
 (cd web && npm ci && npm run build)               # build the interface (embedded by cargo)

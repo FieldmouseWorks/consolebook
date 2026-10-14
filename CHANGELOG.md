@@ -36,3 +36,11 @@ first Milestone 5 slices ([roadmap](docs/roadmap.md)).
   policies, and attributed record holds. Disposition is not yet executed.
 - Build identity: `--version`, `/api/instance`, `/api/health`, the startup
   log, and the interface footer report the version and source commit.
+- One-command install and upgrade for Linux with systemd
+  (`install/install.sh`), static x86_64 and arm64 release archives, and an
+  operator guide ([docs/install.md](docs/install.md)).
+- A "Getting started" checklist on the administrator's home that follows the
+  installation from first run to its first finalized evaluation.
+- An interface that leads each role with its own work, shows who is signed in
+  with sign out on every page, works at phone width, and explains refused or
+  missing pages in plain words.

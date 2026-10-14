@@ -331,6 +331,23 @@ export function listUsers(): Promise<{ users: UserSummary[] }> {
 	return request('/api/users');
 }
 
+/** Installation-wide counts behind the administrator's setup checklist. */
+export interface SetupProgress {
+	coordinators: number;
+	trainers: number;
+	trainees: number;
+	programs: number;
+	published_versions: number;
+	enrollments: number;
+	assignments: number;
+	sessions: number;
+	finalized_records: number;
+}
+
+export function getSetupProgress(): Promise<SetupProgress> {
+	return request('/api/getting-started');
+}
+
 export interface CreatedUser {
 	id: number;
 	username: string;
