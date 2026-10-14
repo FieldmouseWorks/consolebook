@@ -4,33 +4,46 @@ The roadmap is ordered by risk. Dates come later; fake schedules are how softwar
 
 ## Current state and next gates
 
-Product baseline: [`7936a4e`](https://github.com/FieldmouseWorks/consolebook/commit/7936a4e6459ff7e1a4557eff7736fd74ca452750),
-checked 2026-09-23. Milestones 0–4 are complete, including immutable finalized
-records, acknowledgments, amendments, summaries, and task signoffs
+Release baseline: **0.1.0** (2026-10-14, tag `v0.1.0`; see the
+[changelog](../CHANGELOG.md)). Milestones 0–4 are complete, including immutable
+finalized records, acknowledgments, amendments, summaries, and task signoffs
 ([Milestone 4 history](https://github.com/FieldmouseWorks/consolebook/issues/32)).
 Milestone 5 has file-verifiable [record exports](https://github.com/FieldmouseWorks/consolebook/pull/46)
 and [trainee packets](https://github.com/FieldmouseWorks/consolebook/pull/50),
 [retention policies and holds](https://github.com/FieldmouseWorks/consolebook/pull/66),
 and [trainee signoff history](https://github.com/FieldmouseWorks/consolebook/pull/68).
 
-Material limits: confirmed disposition, tombstones, portable policy-boundary
-evidence, expanded backup/restore scope, deterministic PDFs, and clean-room
-recovery proof remain Milestone 5 work. Pre-alpha status still applies;
-implemented backup/restore tests are not a recovery drill.
+Operability as of 0.1.0: versioned releases with a traceable build identity
+([ADR 0022](decisions/0022-product-versioning.md)), a one-command Linux install
+and upgrade from static release archives ([ADR 0023](decisions/0023-linux-installation-lifecycle.md),
+[install guide](install.md)), a Getting started checklist and optional guided
+setup, and verified backup copies off the server with backup health
+([ADR 0024](decisions/0024-off-server-backup-copies.md)). `scripts/proof.py`
+runs the full local gate sequence and leaves a receipt.
 
-Active setup outcome: establish the [evidence-driven workflow](workflow.md)
-through [#71](https://github.com/FieldmouseWorks/consolebook/issues/71), which owns
-the canonical task graph, permission/effort record, current next action, and
-verification receipts. Its gates are documentation/instruction review, the
-existing full PR checks, and a reviewable PR for the maintainer's merge decision.
-The issue's live state supersedes this setup pointer once it closes.
+Material limits: confirmed disposition, tombstones, portable policy-boundary
+evidence, a complete installation export ([#98](https://github.com/FieldmouseWorks/consolebook/issues/98)),
+deterministic PDFs, and clean-room recovery proof ([#97](https://github.com/FieldmouseWorks/consolebook/issues/97))
+remain Milestone 5 work. Pre-alpha status still applies; implemented
+backup/restore tests are not a recovery drill.
+
+Before any pilot, beyond Milestone 5: a supported HTTPS front end and the
+`Secure` session cookie ([#93](https://github.com/FieldmouseWorks/consolebook/issues/93)),
+a backup taken before an upgrade migrates ([#94](https://github.com/FieldmouseWorks/consolebook/issues/94)),
+a release-pinned installer and an archive-signing decision ([#95](https://github.com/FieldmouseWorks/consolebook/issues/95)),
+encrypted backup copies with `doctor` inspection ([#99](https://github.com/FieldmouseWorks/consolebook/issues/99)),
+and a pilot operations guide ([#100](https://github.com/FieldmouseWorks/consolebook/issues/100)).
+
+Work follows the [evidence-driven workflow](workflow.md): one primary issue
+owns each outcome's task graph, permission and effort record, next action,
+and verification receipts.
 
 Next product gate: finish the approved retention/disposition design in
 [#64](https://github.com/FieldmouseWorks/consolebook/issues/64) under
 [#44](https://github.com/FieldmouseWorks/consolebook/issues/44). This is sequencing,
 not authorization to begin another outcome. Reconcile live issues and PR reviews
-before selecting work, including the recorded intermittent retention test
-failure [#70](https://github.com/FieldmouseWorks/consolebook/issues/70).
+before selecting work, including the recorded intermittent browser test
+failure [#83](https://github.com/FieldmouseWorks/consolebook/issues/83).
 
 For continuation, check the
 [open issues](https://github.com/FieldmouseWorks/consolebook/issues?q=is%3Aissue+is%3Aopen)
