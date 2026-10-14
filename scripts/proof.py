@@ -324,8 +324,22 @@ def new_receipt_dir(base: Path, head: str, dirty: bool) -> Path:
     raise SetupError(f"could not create a fresh receipt directory under {base}")
 
 
-def _terminated(_signum: int, _frame: object) -> None:
-    """SIGTERM (a cancelled CI job or container stop) ends a run like Ctrl-C."""
+_interrupted = False
+# How long a stopped step's group gets to exit on SIGTERM before SIGKILL.
+STOP_GRACE_S = 10.0
+
+
+def _interrupt(_signum: int, _frame: object) -> None:
+    """Ctrl-C or SIGTERM (a cancelled CI job or container stop) ends a run.
+
+    Only the first one raises. A repeat cannot preempt the cleanup that the
+    first set off (stopping the step's process group, writing the receipt),
+    wherever it lands, so it is absorbed.
+    """
+    global _interrupted
+    if _interrupted:
+        return
+    _interrupted = True
     raise KeyboardInterrupt
 
 
@@ -335,26 +349,20 @@ def stop_group(proc: subprocess.Popen) -> None:
     Each step leads its own process group, so subshells, `npx`, and test
     servers are signalled with it: SIGTERM first, then SIGKILL for whatever
     is left, so nothing in the group can still change the candidate after
-    the runner snapshots it. The SIGKILL pass runs even when a repeated
-    interrupt cuts the grace period short, with interrupts held until the
-    group is gone.
+    the runner snapshots it. A repeated interrupt cannot cut this short:
+    `_interrupt` raises only once per run.
     """
     try:
         os.killpg(proc.pid, signal.SIGTERM)
-        proc.wait(timeout=10)
+        proc.wait(timeout=STOP_GRACE_S)
     except (ProcessLookupError, subprocess.TimeoutExpired):
         pass
     finally:
-        held = {signal.SIGINT, signal.SIGTERM}
-        signal.pthread_sigmask(signal.SIG_BLOCK, held)
         try:
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            proc.wait()
-        finally:
-            signal.pthread_sigmask(signal.SIG_UNBLOCK, held)
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        proc.wait()
 
 
 def run_step(cmd: str, root: Path, env: dict, log_path: Path) -> int:
@@ -438,7 +446,9 @@ def run_sequence(
           f"{'system Chromium at ' + chromium if chromium else 'Playwright-managed Chromium'}")
     print(f"{ME}: receipt directory: {out_dir}")
 
-    previous_term = signal.signal(signal.SIGTERM, _terminated)
+    global _interrupted
+    _interrupted = False
+    previous = {sig: signal.signal(sig, _interrupt) for sig in (signal.SIGINT, signal.SIGTERM)}
     t0 = time.monotonic()
     # "passed" is set only when every step ran and exited 0; any other end,
     # including an unexpected exception, leaves a non-passing receipt.
@@ -500,7 +510,8 @@ def run_sequence(
             )
             write_receipt(receipt, out_dir)
         finally:
-            signal.signal(signal.SIGTERM, previous_term)
+            for sig, handler in previous.items():
+                signal.signal(sig, handler)
             signal.pthread_sigmask(signal.SIG_UNBLOCK, held)
     return receipt, out_dir
 
@@ -655,8 +666,21 @@ def self_test(root: Path) -> int:
               "result interrupted at step 1")
         check([s["status"] for s in saved["steps"]] == ["interrupted", "not-run"],
               "statuses interrupted, not-run")
-        check(signal.getsignal(signal.SIGTERM) is not _terminated,
-              "the previous SIGTERM handler is restored")
+        check(all(signal.getsignal(sig) is not _interrupt
+                  for sig in (signal.SIGINT, signal.SIGTERM)),
+              "the previous SIGINT and SIGTERM handlers are restored")
+        global _interrupted
+        _interrupted = False
+        try:
+            _interrupt(signal.SIGTERM, None)
+            check(False, "the first interrupt raises")
+        except KeyboardInterrupt:
+            check(True, "the first interrupt raises")
+        try:
+            _interrupt(signal.SIGINT, None)
+            check(True, "a repeat is absorbed, so it cannot preempt cleanup")
+        except KeyboardInterrupt:
+            check(False, "a repeat is absorbed, so it cannot preempt cleanup")
         marker = base / "late-write"
         run_sequence([f"(trap '' TERM; sleep 2; touch '{marker}') & kill -TERM $PPID; wait"],
                      root, base, chromium=None, invocation=inv, artifacts=False)
@@ -664,12 +688,17 @@ def self_test(root: Path) -> int:
         check(not marker.exists(),
               "a child that ignores SIGTERM is stopped before it can change the candidate")
         marker = base / "late-write-2"
-        run_sequence([f"trap '' TERM; kill -TERM $PPID; sleep 0.5; kill -TERM $PPID; "
-                      f"sleep 2; touch '{marker}'"],
-                     root, base, chromium=None, invocation=inv, artifacts=False)
-        time.sleep(3)
+        global STOP_GRACE_S
+        real_grace, STOP_GRACE_S = STOP_GRACE_S, 1.0
+        try:
+            run_sequence([f"trap '' TERM; kill -TERM $PPID; sleep 0.3; kill -TERM $PPID; "
+                          f"sleep 2; touch '{marker}'"],
+                         root, base, chromium=None, invocation=inv, artifacts=False)
+        finally:
+            STOP_GRACE_S = real_grace
+        time.sleep(2.5)
         check(not marker.exists(),
-              "a repeated SIGTERM during the grace period still ends the group")
+              "a repeated SIGTERM cannot skip the kill: nothing writes after the grace period")
 
     print("termination control: a second Ctrl-C while finalizing still leaves the receipt")
     global candidate_state
