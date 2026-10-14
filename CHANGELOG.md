@@ -10,6 +10,12 @@ not a production-readiness statement.
 
 ## [Unreleased]
 
+### Added
+
+- Before a new version migrates the database, `serve` takes a validated
+  backup of it as it was and does not start without one; the install guide
+  shows how to go back with the previous release.
+
 ## [0.1.0] - 2026-10-14
 
 The first versioned release: everything built through Milestone 4 and the

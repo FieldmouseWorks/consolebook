@@ -107,6 +107,36 @@ pub async fn open(db_path: &Path) -> Result<SqlitePool> {
     Ok(pool)
 }
 
+/// Migrations this executable would apply to an existing database, in order.
+///
+/// Empty for a database that is up to date, and for one that has never been
+/// migrated (a new installation), which has nothing to lose. Reads only.
+pub async fn pending_migrations(pool: &SqlitePool) -> Result<Vec<i64>> {
+    let tracked: Option<String> = sqlx::query_scalar(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations'",
+    )
+    .fetch_optional(pool)
+    .await
+    .context("looking for the migrations table")?;
+    if tracked.is_none() {
+        return Ok(Vec::new());
+    }
+    let applied: Vec<i64> =
+        sqlx::query_scalar("SELECT version FROM _sqlx_migrations WHERE success = 1")
+            .fetch_all(pool)
+            .await
+            .context("reading applied migrations")?;
+    if applied.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(MIGRATOR
+        .iter()
+        .filter(|migration| migration.migration_type.is_up_migration())
+        .map(|migration| migration.version)
+        .filter(|version| !applied.contains(version))
+        .collect())
+}
+
 /// Opens an existing database without creating one and without migrating.
 /// Used by backup; applies writable connection settings, including WAL.
 pub async fn open_existing(db_path: &Path) -> Result<SqlitePool> {

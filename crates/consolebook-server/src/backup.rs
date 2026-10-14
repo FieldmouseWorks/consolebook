@@ -159,6 +159,30 @@ pub async fn validate_snapshot(snapshot: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Takes a validated snapshot before this executable migrates an existing
+/// database, so an upgrade that goes wrong has a recovery point from the
+/// moment before it changed anything (there is no downgrade; ADR 0023).
+///
+/// Returns `None` when there is no database yet or nothing to migrate. Any
+/// failure is returned, so startup fails closed rather than migrating
+/// without the snapshot.
+pub async fn before_migrating(data_dir: &DataDir, keep: usize) -> Result<Option<BackupReport>> {
+    let database = data_dir.database();
+    if !database.exists() {
+        return Ok(None);
+    }
+    let pool = storage::open_diagnostic(&database).await?;
+    let pending = storage::pending_migrations(&pool).await;
+    pool.close().await;
+    if pending?.is_empty() {
+        return Ok(None);
+    }
+    run(data_dir, keep)
+        .await
+        .context("taking the pre-migration backup")
+        .map(Some)
+}
+
 /// Explicit durability step: fsync a file and its directory entry.
 pub fn persist(path: &Path) -> Result<()> {
     File::open(path)

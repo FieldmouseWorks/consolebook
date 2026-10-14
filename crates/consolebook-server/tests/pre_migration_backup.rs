@@ -1,0 +1,140 @@
+//! A validated backup before an upgrade migrates the database (#94).
+//!
+//! An "older installation" here is a database migrated by every migration
+//! except this build's newest, which is what an earlier release leaves.
+
+use std::borrow::Cow;
+use std::path::Path;
+
+use sqlx::SqlitePool;
+use sqlx::migrate::Migrator;
+
+use consolebook_server::backup;
+use consolebook_server::data_dir::DataDir;
+use consolebook_server::storage::{self, MIGRATOR};
+
+async fn connect(path: &Path) -> SqlitePool {
+    SqlitePool::connect(&format!("sqlite://{}?mode=rwc", path.display()))
+        .await
+        .expect("connect")
+}
+
+/// A database as the previous release left it: all but the newest migration.
+async fn older_installation(data_dir: &DataDir) {
+    let all = &MIGRATOR.migrations;
+    // The fields are semver-exempt in sqlx; a test that stops compiling on
+    // an upgrade is the right signal to rebuild this fixture.
+    let previous = Migrator {
+        migrations: Cow::Owned(all[..all.len() - 1].to_vec()),
+        ignore_missing: false,
+        locking: true,
+        no_tx: false,
+    };
+    let pool = connect(&data_dir.database()).await;
+    previous.run(&pool).await.expect("older migrations");
+    pool.close().await;
+}
+
+async fn applied(path: &Path) -> i64 {
+    let pool = connect(path).await;
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations WHERE success = 1")
+        .fetch_one(&pool)
+        .await
+        .expect("count");
+    pool.close().await;
+    count
+}
+
+fn newest_version() -> i64 {
+    MIGRATOR
+        .iter()
+        .map(|m| m.version)
+        .max()
+        .expect("migrations")
+}
+
+#[tokio::test]
+async fn an_upgrade_backs_up_the_old_schema_before_migrating() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let data_dir = DataDir::new(tmp.path().join("data"));
+    data_dir.ensure_layout().expect("layout");
+    older_installation(&data_dir).await;
+    let older = applied(&data_dir.database()).await;
+
+    let pool = storage::open_diagnostic(&data_dir.database())
+        .await
+        .expect("open");
+    assert_eq!(
+        storage::pending_migrations(&pool).await.expect("pending"),
+        vec![newest_version()]
+    );
+    pool.close().await;
+
+    let report = backup::before_migrating(&data_dir, 14)
+        .await
+        .expect("backup")
+        .expect("a migration is pending, so a snapshot is taken");
+    assert_eq!(
+        applied(&report.snapshot).await,
+        older,
+        "the snapshot holds the schema from before the upgrade"
+    );
+    backup::validate_snapshot(&report.snapshot)
+        .await
+        .expect("the snapshot validates");
+
+    storage::open(&data_dir.database()).await.expect("migrate");
+    assert_eq!(applied(&data_dir.database()).await, older + 1);
+    assert!(
+        backup::before_migrating(&data_dir, 14)
+            .await
+            .expect("check")
+            .is_none(),
+        "nothing is pending once migrated"
+    );
+}
+
+#[tokio::test]
+async fn a_new_or_current_installation_takes_no_extra_backup() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let data_dir = DataDir::new(tmp.path().join("data"));
+    data_dir.ensure_layout().expect("layout");
+    assert!(
+        backup::before_migrating(&data_dir, 14)
+            .await
+            .expect("no database")
+            .is_none()
+    );
+    storage::open(&data_dir.database()).await.expect("create");
+    assert!(
+        backup::before_migrating(&data_dir, 14)
+            .await
+            .expect("current")
+            .is_none()
+    );
+    assert_eq!(backup::snapshots(&data_dir).expect("list").len(), 0);
+}
+
+#[tokio::test]
+async fn startup_does_not_migrate_when_the_backup_cannot_be_written() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let data_dir = DataDir::new(tmp.path().join("data"));
+    std::fs::create_dir_all(data_dir.root()).expect("root");
+    // backups/ is a file, so no snapshot can be written there.
+    std::fs::write(data_dir.backups(), b"invented obstruction").expect("obstruct");
+    older_installation(&data_dir).await;
+    let older = applied(&data_dir.database()).await;
+
+    let err = backup::before_migrating(&data_dir, 14)
+        .await
+        .expect_err("no snapshot, so no go");
+    assert!(
+        format!("{err:#}").contains("pre-migration backup"),
+        "{err:#}"
+    );
+    assert_eq!(
+        applied(&data_dir.database()).await,
+        older,
+        "the database is untouched"
+    );
+}
