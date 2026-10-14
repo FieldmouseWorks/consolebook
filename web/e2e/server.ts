@@ -10,10 +10,14 @@ import { promisify, stripVTControlCharacters } from 'node:util';
 export const BINARY = join(import.meta.dirname, '../../target/debug/consolebook-server');
 export const execFileAsync = promisify(execFile);
 
-export async function startServer({ binary = BINARY, bind = '127.0.0.1:0' } = {}) {
+export async function startServer({
+	binary = BINARY,
+	bind = '127.0.0.1:0',
+	serveArgs = [] as string[]
+} = {}) {
 	const root = await mkdtemp(join(tmpdir(), 'consolebook-e2e-'));
 	const dataDir = join(root, 'data');
-	const child = spawn(binary, ['--data-dir', dataDir, 'serve', '--bind', bind], {
+	const child = spawn(binary, ['--data-dir', dataDir, 'serve', '--bind', bind, ...serveArgs], {
 		stdio: ['ignore', 'pipe', 'ignore'],
 		env: { ...process.env, RUST_LOG: 'info', NO_COLOR: '1' }
 	});

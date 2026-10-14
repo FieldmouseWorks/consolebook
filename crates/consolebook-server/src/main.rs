@@ -10,6 +10,7 @@ use clap::{Parser, Subcommand};
 use consolebook_server::backup_copy::{self, BackupSettings};
 use consolebook_server::data_dir::DataDir;
 use consolebook_server::doctor::Verdict;
+use consolebook_server::public_url::PublicUrl;
 use consolebook_server::serve_lock::ServeLock;
 use consolebook_server::users::{IssueRefusal, ResetOrigin};
 use consolebook_server::{
@@ -61,6 +62,11 @@ enum Command {
         /// network share, so backups survive the loss of this one (ADR 0024).
         #[arg(long, env = "CONSOLEBOOK_BACKUP_COPY_DIR")]
         backup_copy_dir: Option<PathBuf>,
+        /// The address people use, such as `https://consolebook.example.org`
+        /// behind a TLS proxy. An `https://` address marks session cookies
+        /// Secure (ADR 0025).
+        #[arg(long, env = "CONSOLEBOOK_PUBLIC_URL")]
+        public_url: Option<PublicUrl>,
     },
     /// Diagnose an existing installation without modifying it.
     Doctor,
@@ -138,6 +144,7 @@ async fn main() -> ExitCode {
             backup_interval_hours,
             backup_keep,
             backup_copy_dir,
+            public_url,
         } => {
             let settings = BackupSettings {
                 data_dir: DataDir::new(&cli.data_dir),
@@ -145,7 +152,7 @@ async fn main() -> ExitCode {
                 keep: usize::try_from(backup_keep).unwrap_or(usize::MAX),
                 copy_dir: backup_copy_dir,
             };
-            serve(bind, settings).await
+            serve(bind, settings, public_url).await
         }
         Command::Doctor => run_doctor(&cli.data_dir).await,
         Command::Backup {
@@ -168,7 +175,11 @@ async fn main() -> ExitCode {
     }
 }
 
-async fn serve(bind: SocketAddr, settings: BackupSettings) -> Result<ExitCode> {
+async fn serve(
+    bind: SocketAddr,
+    settings: BackupSettings,
+    public_url: Option<PublicUrl>,
+) -> Result<ExitCode> {
     let data_dir = settings.data_dir.clone();
     data_dir.ensure_layout()?;
     let lock = ServeLock::acquire(&data_dir)?;
@@ -207,13 +218,27 @@ async fn serve(bind: SocketAddr, settings: BackupSettings) -> Result<ExitCode> {
              set CONSOLEBOOK_BACKUP_COPY_DIR (docs/install.md)"
         );
     }
+    match &public_url {
+        Some(url) if url.is_secure() => {
+            tracing::info!(public_url = %url, "session cookies are marked Secure");
+        }
+        _ if !bind.ip().is_loopback() => tracing::warn!(
+            "serving plain HTTP on the network: session cookies are not Secure; put HTTPS \
+             in front and set CONSOLEBOOK_PUBLIC_URL to its https:// address (docs/install.md)"
+        ),
+        _ => {}
+    }
     let scheduler = tokio::spawn(scheduler::run(settings.clone(), pool.clone()));
 
     let listener = tokio::net::TcpListener::bind(bind)
         .await
         .with_context(|| format!("binding {bind}"))?;
     tracing::info!(addr = %listener.local_addr()?, "listening");
-    http::serve(listener, http::AppState::new(pool).with_backups(settings)).await?;
+    let mut state = http::AppState::new(pool).with_backups(settings);
+    if let Some(url) = public_url {
+        state = state.with_public_url(url);
+    }
+    http::serve(listener, state).await?;
     scheduler.abort();
     drop(lock);
     tracing::info!("stopped");

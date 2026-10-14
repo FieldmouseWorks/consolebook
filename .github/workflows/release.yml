@@ -138,6 +138,16 @@ jobs:
           systemctl is-active consolebook
           curl -fsS http://127.0.0.2:7771/api/health
 
+      # Behind a TLS proxy, the published https:// address makes sign-in
+      # cookies Secure (ADR 0025).
+      - name: Installer, public HTTPS address
+        run: |
+          sudo install/install.sh --from "dist/consolebook-linux-${{ matrix.arch }}.tar.gz" \
+            --public-url https://consolebook.example.invalid | tee public.log
+          grep -q 'sign-in cookies are Secure' public.log
+          grep -q '^CONSOLEBOOK_PUBLIC_URL=https://consolebook.example.invalid$' /etc/consolebook/consolebook.env
+          curl -fsS http://127.0.0.2:7771/api/instance | grep -q '"public_url":"https://consolebook.example.invalid"'
+          sudo journalctl -u consolebook --no-pager | grep -q 'session cookies are marked Secure'
       # Jobs share archives through a draft release, published once all pass.
       - name: Upload to the draft release
         if: startsWith(github.ref, 'refs/tags/v')

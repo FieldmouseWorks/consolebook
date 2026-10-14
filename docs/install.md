@@ -57,9 +57,39 @@ curl -fsSL https://raw.githubusercontent.com/FieldmouseWorks/consolebook/main/in
 ```
 
 That serves plain HTTP on port 7770. That is fine for a trial on a trusted
-network. For real use, put HTTPS in front of it: run your agency's reverse
-proxy (nginx, Caddy, IIS ARR, or a load balancer) on the same machine, forwarding
-to `127.0.0.1:7770`, and keep the default listen address.
+network, with invented data.
+
+### HTTPS (required before real records)
+
+For real use, browsers reach Consolebook over HTTPS through a reverse proxy on
+the same machine, and Consolebook keeps listening on `127.0.0.1:7770`. Tell it
+the address people use, so it marks sign-in cookies `Secure` (a browser then
+never sends them over plain HTTP; ADR 0025):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/FieldmouseWorks/consolebook/main/install/install.sh | sudo sh -s -- --public-url https://consolebook.example.org
+```
+
+With [Caddy](https://caddyserver.com/docs/install), the whole proxy is this
+`/etc/caddy/Caddyfile`:
+
+```
+consolebook.example.org {
+	reverse_proxy 127.0.0.1:7770
+}
+```
+
+Caddy gets and renews a certificate by itself when the name is in public DNS
+and ports 80 and 443 reach the server. For a name only your network knows,
+use your agency's certificate instead (`tls /path/to/cert.pem
+/path/to/key.pem` inside the block), or `tls internal` for Caddy's own
+authority, which each browser must then trust.
+
+Any other proxy (nginx, IIS ARR, a load balancer) works the same way: terminate
+TLS, forward everything to `http://127.0.0.1:7770` with the original `Host`
+header, and set `--public-url` to the `https://` address. Opening Consolebook
+by any other address makes the sign-in page point to the right one: with
+`Secure` cookies, signing in over plain HTTP would not stick.
 
 Other options: `--version 0.1.0` installs a specific release, `--listen
 ADDRESS:PORT` picks your own address, and `--from FILE` installs from a

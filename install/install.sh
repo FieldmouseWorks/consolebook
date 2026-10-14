@@ -17,6 +17,8 @@
 #   --version X.Y.Z   install that release instead of the latest
 #   --lan             listen on every network interface (port 7770)
 #   --listen ADDR     listen on ADDR, e.g. 0.0.0.0:8080 (default 127.0.0.1:7770)
+#   --public-url URL  the https:// address people use through your TLS proxy;
+#                     session cookies become Secure (see docs/install.md)
 #   --from FILE       install from a downloaded release archive
 #   --no-service      install files only; do not create or start the service
 #
@@ -39,6 +41,7 @@ DEFAULT_LISTEN=127.0.0.1:7770
 version=""
 from=""
 listen=""
+public_url=""
 data_dir=""
 backup_dir=""
 service=yes
@@ -71,6 +74,7 @@ Install or upgrade Consolebook (Linux with systemd). Run as root.
   --version X.Y.Z   install that release instead of the latest
   --lan             listen on every network interface (port 7770)
   --listen ADDR     listen on ADDR, e.g. 0.0.0.0:8080 (default 127.0.0.1:7770)
+  --public-url URL  the https:// address people use through your TLS proxy
   --from FILE       install from a downloaded release archive
   --no-service      install files only; do not create or start the service
 
@@ -92,6 +96,14 @@ while [ $# -gt 0 ]; do
 	--listen)
 		[ $# -ge 2 ] || fail "--listen needs an address such as 0.0.0.0:7770"
 		listen=$2
+		shift 2
+		;;
+	--public-url)
+		[ $# -ge 2 ] || fail "--public-url needs an address such as https://consolebook.example.org"
+		case "$2" in
+		https://* | http://*) public_url=${2%/} ;;
+		*) fail "--public-url must start with https:// (for example https://consolebook.example.org)" ;;
+		esac
 		shift 2
 		;;
 	--from)
@@ -280,6 +292,8 @@ fi
 if [ -n "$listen" ]; then set_setting CONSOLEBOOK_BIND "$listen"; fi
 if [ -n "$data_dir" ]; then set_setting CONSOLEBOOK_DATA_DIR "$data_dir"; fi
 if [ -n "$backup_dir" ]; then set_setting CONSOLEBOOK_BACKUP_COPY_DIR "$backup_dir"; fi
+if [ -n "$public_url" ]; then set_setting CONSOLEBOOK_PUBLIC_URL "$public_url"; fi
+PUBLIC=$(sed -n 's/^CONSOLEBOOK_PUBLIC_URL=//p' "$ENV_FILE" | tail -n 1)
 DATA=$(sed -n 's/^CONSOLEBOOK_DATA_DIR=//p' "$ENV_FILE" | tail -n 1)
 DATA=${DATA:-$DEFAULT_DATA}
 COPY=$(sed -n 's/^CONSOLEBOOK_BACKUP_COPY_DIR=//p' "$ENV_FILE" | tail -n 1)
@@ -350,6 +364,8 @@ case "$host" in
 	;;
 *) url="http://$host:$port/" ;;
 esac
+# The published address, when there is one, is where people should go.
+if [ -n "$PUBLIC" ]; then url="$PUBLIC/"; fi
 
 say ""
 if probe "http://$local_host:$port/api/instance" | grep -q '"initialized":false'; then
@@ -370,11 +386,16 @@ else
 		say "Consolebook is running at $url"
 	fi
 fi
-case "$host" in
-127.* | localhost | ::1 | "[::1]")
+case "$PUBLIC:$host" in
+https://*)
 	say ""
-	say "It listens on this machine only. To open it from other computers, rerun with --lan"
-	say "(plain HTTP) or put HTTPS in front of it; see docs/install.md."
+	say "People reach it through HTTPS at $PUBLIC; sign-in cookies are Secure."
+	;;
+*:127.* | *:localhost | *:::1 | *:"[::1]")
+	say ""
+	say "It listens on this machine only. To open it from other computers, put HTTPS in"
+	say "front of it and rerun with --public-url, or use --lan for a plain-HTTP trial;"
+	say "see docs/install.md."
 	;;
 *)
 	say ""

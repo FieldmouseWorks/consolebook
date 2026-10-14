@@ -1,6 +1,6 @@
 # ADR 0004: Local authentication, sessions, and recovery
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by [ADR 0025](0025-public-url-and-secure-cookies.md) (`Secure` cookies)
 - **Date:** 2026-08-28
 
 ## Context
@@ -28,9 +28,8 @@ and failure responses are identical for unknown user and wrong password.
 `SameSite=Strict`, path-`/` cookie, stored server-side as SHA-256 digests
 with a 12-hour absolute lifetime. Logout and password reset revoke
 immediately; validation always checks expiry and revocation, and expired
-rows are pruned opportunistically. The `Secure` cookie attribute is not
-yet set: pre-alpha deployments are local or behind an operator's TLS
-proxy, and the flag joins the deployment-hardening work before any pilot.
+rows are pruned opportunistically. The cookie is `Secure` when the
+installation's public URL is `https://` (ADR 0025).
 
 ### Authorization
 
