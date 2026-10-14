@@ -173,14 +173,18 @@ async fn serve(bind: SocketAddr, settings: BackupSettings) -> Result<ExitCode> {
     data_dir.ensure_layout()?;
     let lock = ServeLock::acquire(&data_dir)?;
     tracing::debug!(lock = %lock.path().display(), "holding installation lock");
-    if let Some(report) = backup::before_migrating(&data_dir, settings.keep).await? {
+    let pre_migration = backup::before_migrating(&data_dir, settings.keep).await?;
+    if let Some(backup) = &pre_migration {
         tracing::info!(
-            snapshot = %report.snapshot.display(),
+            snapshot = %backup.snapshot().display(),
             "this version migrates the database; took a validated backup first \
              (to go back: stop the service, install the previous release, and restore this snapshot)"
         );
     }
     let pool = storage::open(&data_dir.database()).await?;
+    if let Some(backup) = pre_migration {
+        backup.record(&pool).await?;
+    }
     let installation_id = storage::installation_id(&pool).await?;
     tracing::info!(
         version = VERSION,

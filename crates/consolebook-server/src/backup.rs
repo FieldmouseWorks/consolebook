@@ -12,6 +12,7 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use sqlx::SqlitePool;
 use time::OffsetDateTime;
 use time::format_description::BorrowedFormatItem;
 use time::macros::format_description;
@@ -40,6 +41,22 @@ pub struct BackupReport {
 /// validation fails.
 pub async fn run(data_dir: &DataDir, keep: usize) -> Result<BackupReport> {
     let pool = storage::open_existing(&data_dir.database()).await?;
+    let snapshot = match take_snapshot(&pool, data_dir).await {
+        Ok(snapshot) => snapshot,
+        Err(err) => {
+            pool.close().await;
+            return Err(err);
+        }
+    };
+    audit::record(&pool, EventKind::BackupCompleted, None, None).await?;
+    pool.close().await;
+    finish(data_dir, snapshot, keep)
+}
+
+/// VACUUM INTO a new snapshot, validate it, and make it durable. Writes
+/// nothing to the live database, so it works on a schema this build has
+/// not migrated yet.
+async fn take_snapshot(pool: &SqlitePool, data_dir: &DataDir) -> Result<PathBuf> {
     let stamp = OffsetDateTime::now_utc()
         .format(SNAPSHOT_STAMP)
         .context("formatting snapshot timestamp")?;
@@ -56,21 +73,21 @@ pub async fn run(data_dir: &DataDir, keep: usize) -> Result<BackupReport> {
         .context("backup path is not valid UTF-8")?;
     sqlx::query("VACUUM INTO ?1")
         .bind(snapshot_str)
-        .execute(&pool)
+        .execute(pool)
         .await
         .context("taking VACUUM INTO snapshot")?;
 
     if let Err(err) = validate_snapshot(&snapshot).await {
-        pool.close().await;
         // A snapshot that fails validation must not look like a usable backup.
         let _ = std::fs::remove_file(&snapshot);
         return Err(err.context("snapshot failed validation and was removed"));
     }
 
     persist(&snapshot)?;
-    audit::record(&pool, EventKind::BackupCompleted, None, None).await?;
-    pool.close().await;
+    Ok(snapshot)
+}
 
+fn finish(data_dir: &DataDir, snapshot: PathBuf, keep: usize) -> Result<BackupReport> {
     let size_bytes = std::fs::metadata(&snapshot)
         .with_context(|| format!("reading snapshot metadata {}", snapshot.display()))?
         .len();
@@ -166,7 +183,10 @@ pub async fn validate_snapshot(snapshot: &Path) -> Result<()> {
 /// Returns `None` when there is no database yet or nothing to migrate. Any
 /// failure is returned, so startup fails closed rather than migrating
 /// without the snapshot.
-pub async fn before_migrating(data_dir: &DataDir, keep: usize) -> Result<Option<BackupReport>> {
+pub async fn before_migrating(
+    data_dir: &DataDir,
+    keep: usize,
+) -> Result<Option<PreMigrationBackup>> {
     let database = data_dir.database();
     if !database.exists() {
         return Ok(None);
@@ -177,10 +197,38 @@ pub async fn before_migrating(data_dir: &DataDir, keep: usize) -> Result<Option<
     if pending?.is_empty() {
         return Ok(None);
     }
-    run(data_dir, keep)
-        .await
-        .context("taking the pre-migration backup")
-        .map(Some)
+    // Nothing is written to the old schema: the audit event waits for the
+    // migrated database (`PreMigrationBackup::record`).
+    let pool = storage::open_existing(&database).await?;
+    let snapshot = take_snapshot(&pool, data_dir).await;
+    pool.close().await;
+    let report = snapshot
+        .and_then(|snapshot| finish(data_dir, snapshot, keep))
+        .context("taking the pre-migration backup")?;
+    Ok(Some(PreMigrationBackup { report }))
+}
+
+/// A validated snapshot of the database as it was before this build
+/// migrated it. Its audit event belongs in the migrated database, so the
+/// caller records it once migration has run.
+#[must_use = "record the backup's audit event once the database is migrated"]
+#[derive(Debug)]
+pub struct PreMigrationBackup {
+    report: BackupReport,
+}
+
+impl PreMigrationBackup {
+    /// The snapshot, for logging before migration.
+    #[must_use]
+    pub fn snapshot(&self) -> &Path {
+        &self.report.snapshot
+    }
+
+    /// Records the audit event in the migrated database.
+    pub async fn record(self, migrated: &SqlitePool) -> Result<BackupReport> {
+        audit::record(migrated, EventKind::BackupCompleted, None, None).await?;
+        Ok(self.report)
+    }
 }
 
 /// Explicit durability step: fsync a file and its directory entry.

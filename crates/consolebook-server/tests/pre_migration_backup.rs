@@ -22,11 +22,16 @@ async fn connect(path: &Path) -> SqlitePool {
 
 /// A database as the previous release left it: all but the newest migration.
 async fn older_installation(data_dir: &DataDir) {
+    installation_at(data_dir, MIGRATOR.migrations.len() - 1).await;
+}
+
+/// A database migrated by only the first `count` migrations.
+async fn installation_at(data_dir: &DataDir, count: usize) {
     let all = &MIGRATOR.migrations;
     // The fields are semver-exempt in sqlx; a test that stops compiling on
     // an upgrade is the right signal to rebuild this fixture.
     let previous = Migrator {
-        migrations: Cow::Owned(all[..all.len() - 1].to_vec()),
+        migrations: Cow::Owned(all[..count].to_vec()),
         ignore_missing: false,
         locking: true,
         no_tx: false,
@@ -42,6 +47,17 @@ async fn applied(path: &Path) -> i64 {
         .fetch_one(&pool)
         .await
         .expect("count");
+    pool.close().await;
+    count
+}
+
+async fn backups_audited(path: &Path) -> i64 {
+    let pool = connect(path).await;
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM audit_event WHERE kind = 'backup_completed'")
+            .fetch_one(&pool)
+            .await
+            .expect("count");
     pool.close().await;
     count
 }
@@ -71,21 +87,29 @@ async fn an_upgrade_backs_up_the_old_schema_before_migrating() {
     );
     pool.close().await;
 
-    let report = backup::before_migrating(&data_dir, 14)
+    let backup = backup::before_migrating(&data_dir, 14)
         .await
         .expect("backup")
         .expect("a migration is pending, so a snapshot is taken");
     assert_eq!(
-        applied(&report.snapshot).await,
+        applied(backup.snapshot()).await,
         older,
         "the snapshot holds the schema from before the upgrade"
     );
-    backup::validate_snapshot(&report.snapshot)
+    backup::validate_snapshot(backup.snapshot())
         .await
         .expect("the snapshot validates");
+    assert_eq!(
+        backups_audited(&data_dir.database()).await,
+        0,
+        "nothing is written to the old schema"
+    );
 
-    storage::open(&data_dir.database()).await.expect("migrate");
+    let pool = storage::open(&data_dir.database()).await.expect("migrate");
+    backup.record(&pool).await.expect("audit");
+    pool.close().await;
     assert_eq!(applied(&data_dir.database()).await, older + 1);
+    assert_eq!(backups_audited(&data_dir.database()).await, 1);
     assert!(
         backup::before_migrating(&data_dir, 14)
             .await
@@ -101,11 +125,14 @@ async fn the_pre_migration_backup_is_the_one_copied_off_the_server() {
     let data_dir = DataDir::new(tmp.path().join("data"));
     data_dir.ensure_layout().expect("layout");
     older_installation(&data_dir).await;
-    let report = backup::before_migrating(&data_dir, 14)
+    let backup = backup::before_migrating(&data_dir, 14)
         .await
         .expect("backup")
         .expect("a migration is pending");
-    storage::open(&data_dir.database()).await.expect("migrate");
+    let snapshot = backup.snapshot().to_path_buf();
+    let pool = storage::open(&data_dir.database()).await.expect("migrate");
+    backup.record(&pool).await.expect("audit");
+    pool.close().await;
 
     // The scheduler's first tick: the snapshot is fresh, so no new backup
     // is due, and catch-up copies the newest one, which is this snapshot.
@@ -113,7 +140,27 @@ async fn the_pre_migration_backup_is_the_one_copied_off_the_server() {
     let copy = backup_copy::catch_up(&data_dir, share.path(), 14)
         .expect("copy")
         .expect("the snapshot was not yet copied");
-    assert_eq!(copy.copy.file_name(), report.snapshot.file_name());
+    assert_eq!(copy.copy.file_name(), snapshot.file_name());
+}
+
+/// The oldest schema there is has no audit table at all, so a backup that
+/// wrote its audit event before migrating would fail there.
+#[tokio::test]
+async fn an_installation_from_the_first_migration_upgrades() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let data_dir = DataDir::new(tmp.path().join("data"));
+    data_dir.ensure_layout().expect("layout");
+    installation_at(&data_dir, 1).await;
+
+    let backup = backup::before_migrating(&data_dir, 14)
+        .await
+        .expect("a schema without an audit table is backed up")
+        .expect("migrations are pending");
+    assert_eq!(applied(backup.snapshot()).await, 1);
+    let pool = storage::open(&data_dir.database()).await.expect("migrate");
+    backup.record(&pool).await.expect("audit after migrating");
+    pool.close().await;
+    assert_eq!(backups_audited(&data_dir.database()).await, 1);
 }
 
 #[tokio::test]
