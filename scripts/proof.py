@@ -64,19 +64,34 @@ class SetupError(Exception):
 
 
 def runs_e2e(line: str) -> bool:
-    """Whether a gate line invokes the browser suite as a command.
+    """Whether a gate line invokes the browser suite so that its failure counts.
 
-    The line is split into shell commands at `&&`, `||`, and `;`; one of them,
-    without grouping parentheses and leading `NAME=value` assignments, must be
-    exactly `npm run e2e`. Text that merely mentions it (`echo npm run e2e`)
-    does not count.
+    The line is lexed like a shell would (quotes, and `#` comments, which
+    are dropped) and split into commands only at `&&`, the one operator
+    that passes a failure through. Any other operator (`;`, `||`, `|`, `&`,
+    which can each hide a failed suite) stays inside its command, so that
+    command can never equal the marker. One command, after grouping
+    parentheses and leading `NAME=value` assignments, must be exactly
+    `npm run e2e`. Anything the lexer cannot read is refused, never accepted.
     """
-    for command in re.split(r"&&|\|\||;", line):
-        words = command.replace("(", " ").replace(")", " ").split()
-        while words and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=\S*", words[0]):
-            words.pop(0)
-        if words == E2E_MARKER.split():
+    lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return False
+    command: list[str] = []
+    for token in [*tokens, "&&"]:
+        if token in ("(", ")"):
+            continue
+        if token != "&&":
+            command.append(token)
+            continue
+        while command and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", command[0], re.DOTALL):
+            command.pop(0)
+        if command == E2E_MARKER.split():
             return True
+        command = []
     return False
 
 
@@ -562,6 +577,12 @@ def self_test(root: Path) -> int:
           "invocations of the suite are recognized")
     check(not runs_e2e(f"echo {E2E_MARKER}") and not runs_e2e("npm run e2e-other"),
           "text that only mentions the suite is not an invocation")
+    check(not any(runs_e2e(line) for line in [
+              f": # ; {E2E_MARKER}", f"{E2E_MARKER} | true", f"{E2E_MARKER}; true",
+              f"{E2E_MARKER} || true", f"{E2E_MARKER} & true", f"(cd web && '{E2E_MARKER}"]),
+          "commented-out, failure-masking, or unreadable lines are refused")
+    check(runs_e2e(f"(cd web && {BROWSER_VAR}='/opt/x y/chromium' {E2E_MARKER})"),
+          "a quoted assignment with spaces still counts")
     swapped = with_system_browser(steps, alt, "/opt/x y/chromium")
     check(any(f"{BROWSER_VAR}='/opt/x y/chromium'" in s for s in swapped)
           and not any(BROWSER_PLACEHOLDER in s for s in swapped),
