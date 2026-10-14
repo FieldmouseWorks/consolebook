@@ -28,6 +28,10 @@ jobs:
       # Cheap repository guards run first so they fail in seconds.
       - name: Guidance names
         run: scripts/check-guidance-names.sh
+      # The local gate runner's own controls (parsing, browser-suite evidence,
+      # candidate hashing, interruption); a broken runner must not merge.
+      - name: Proof runner self-test
+        run: python3 scripts/proof.py --self-test
       - name: Install pinned toolchain
         run: |
           rustup toolchain install
