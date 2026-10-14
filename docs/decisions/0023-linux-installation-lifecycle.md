@@ -73,8 +73,10 @@ The same command installs and upgrades.
 There is no downgrade path. An older executable started against a database
 migrated by a newer one finds applied migrations it does not know and refuses
 to start, rather than running against a schema it does not understand.
-Recovery from a bad upgrade is restoring a backup taken before it (ADR 0006)
-with the matching older release.
+Recovery from a bad upgrade is restoring the backup taken before the
+database is migrated (ADR 0006) with the matching older release. Every
+command that migrates (`serve`, `setup-code`, `recover`) takes that backup
+first and refuses to migrate without it.
 
 ### Changing these later
 
@@ -91,8 +93,9 @@ an existing installation or refuses with instructions. It never strands data.
   `docs/install.md` tells operators to put TLS in front of anything beyond a
   trial. A supported reverse-proxy configuration, and the `Secure` cookie
   attribute that ADR 0004 defers to deployment hardening, are separate work.
-- The installer does not take a backup before upgrading. Until it does, the
-  scheduled backups (ADR 0006) are the recovery point for a failed upgrade.
+- An upgrade that changes the database takes a validated backup first, from
+  `serve` before it migrates, and does not start without it. That backup is
+  the recovery point for going back with the previous release.
 - The one-line command fetches the installer from `main` and the archive from
   the release. Pinning the installer to the release and signing archives are
   open decisions.

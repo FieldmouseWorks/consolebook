@@ -6,7 +6,7 @@ systemd (Ubuntu, Debian, RHEL, Rocky, Alma, Fedora, and similar), x86_64 or
 arm64, and an administrator account that can use `sudo`.
 
 Consolebook is pre-alpha. Use invented data until your agency has decided it is
-ready for real records. [ADR 0024](decisions/0023-linux-installation-lifecycle.md)
+ready for real records. [ADR 0023](decisions/0023-linux-installation-lifecycle.md)
 records the locations, service account, and upgrade behavior this page relies on.
 
 ## 1. Install
@@ -108,6 +108,36 @@ Run the same install command again. It replaces the program and the service
 definition, keeps `/var/lib/consolebook` and your settings, restarts the
 service, and prints the address. The database is upgraded on start, and
 startup refuses to run against data it cannot verify.
+
+When a new version changes the database, it first takes a validated backup
+of it as it was, `backups/consolebook-premigration-<stamp>.db`, and changes
+nothing unless that backup succeeded. Whichever command runs first takes it:
+the service, or `setup-code` or `recover` run by hand, which refuse while
+the old service is still running. The log names it:
+
+```sh
+journalctl -u consolebook | grep 'took a validated backup first'
+```
+
+There is no downgrade: an older version refuses a database a newer one has
+changed, and says so ("upgraded by a newer Consolebook"; 0.1.0 says
+"migration N was previously applied but is missing"). To go back after an
+upgrade, install the version you upgraded **from** and restore that backup
+with it. The backup holds that version's database; the new version would
+only migrate it again. The log names the version that ran before:
+
+```sh
+journalctl -u consolebook | grep 'starting Consolebook' | tail -n 2
+```
+
+Then, with that version in place of `<previous>`:
+
+```sh
+sudo systemctl stop consolebook
+curl -fsSL https://raw.githubusercontent.com/FieldmouseWorks/consolebook/main/install/install.sh | sudo sh -s -- --version <previous> --no-service
+sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook consolebook restore /var/lib/consolebook/backups/consolebook-premigration-<stamp>.db
+sudo systemctl start consolebook
+```
 
 ## Moving the data directory
 

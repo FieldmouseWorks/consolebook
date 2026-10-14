@@ -85,6 +85,13 @@ async fn connect(db_path: &Path, create: bool) -> Result<SqlitePool> {
 pub async fn open(db_path: &Path) -> Result<SqlitePool> {
     let pool = connect(db_path, true).await?;
 
+    let newer = newer_migrations(&pool).await?;
+    if let Some(version) = newer.first() {
+        bail!(
+            "this database was upgraded by a newer Consolebook (it has migration {version}, which this version does not know); install that release again, or restore the snapshot taken before the upgrade (docs/install.md, \"Upgrading\")"
+        );
+    }
+
     MIGRATOR
         .run(&pool)
         .await
@@ -105,6 +112,51 @@ pub async fn open(db_path: &Path) -> Result<SqlitePool> {
 
     ensure_instance_identity(&pool).await?;
     Ok(pool)
+}
+
+/// Migrations this executable would apply to an existing database, in order.
+///
+/// Empty for a database that is up to date, and for one that has never been
+/// migrated (a new installation), which has nothing to lose. Reads only.
+pub async fn pending_migrations(pool: &SqlitePool) -> Result<Vec<i64>> {
+    let applied = applied_migrations(pool).await?;
+    if applied.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(MIGRATOR
+        .iter()
+        .filter(|migration| migration.migration_type.is_up_migration())
+        .map(|migration| migration.version)
+        .filter(|version| !applied.contains(version))
+        .collect())
+}
+
+/// Applied migrations this executable does not know: the database was
+/// upgraded by a newer release. Reads only.
+pub async fn newer_migrations(pool: &SqlitePool) -> Result<Vec<i64>> {
+    Ok(applied_migrations(pool)
+        .await?
+        .into_iter()
+        .filter(|version| MIGRATOR.iter().all(|known| known.version != *version))
+        .collect())
+}
+
+/// Successfully applied migration versions, in order; empty when the
+/// database has never been migrated.
+async fn applied_migrations(pool: &SqlitePool) -> Result<Vec<i64>> {
+    let tracked: Option<String> = sqlx::query_scalar(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations'",
+    )
+    .fetch_optional(pool)
+    .await
+    .context("looking for the migrations table")?;
+    if tracked.is_none() {
+        return Ok(Vec::new());
+    }
+    sqlx::query_scalar("SELECT version FROM _sqlx_migrations WHERE success = 1 ORDER BY version")
+        .fetch_all(pool)
+        .await
+        .context("reading applied migrations")
 }
 
 /// Opens an existing database without creating one and without migrating.

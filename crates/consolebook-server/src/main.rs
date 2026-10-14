@@ -173,7 +173,18 @@ async fn serve(bind: SocketAddr, settings: BackupSettings) -> Result<ExitCode> {
     data_dir.ensure_layout()?;
     let lock = ServeLock::acquire(&data_dir)?;
     tracing::debug!(lock = %lock.path().display(), "holding installation lock");
-    let pool = storage::open(&data_dir.database()).await?;
+    let pool = backup::open_migrated(
+        &data_dir,
+        Some(&lock),
+        settings
+            .copy_dir
+            .as_deref()
+            .map(|dir| backup::OffServerCopy {
+                dir,
+                keep: settings.keep,
+            }),
+    )
+    .await?;
     let installation_id = storage::installation_id(&pool).await?;
     tracing::info!(
         version = VERSION,
@@ -244,7 +255,7 @@ fn now_unix() -> i64 {
 
 async fn run_setup_code(data_dir: &std::path::Path) -> Result<ExitCode> {
     let data_dir = DataDir::new(data_dir);
-    let pool = storage::open(&data_dir.database()).await?;
+    let pool = backup::open_migrated(&data_dir, None, None).await?;
     match setup::issue_setup_code(&pool).await? {
         None => {
             eprintln!("this installation is already initialized; setup is unavailable");
@@ -263,7 +274,7 @@ async fn run_setup_code(data_dir: &std::path::Path) -> Result<ExitCode> {
 
 async fn run_recover(data_dir: &std::path::Path, username: &str) -> Result<ExitCode> {
     let data_dir = DataDir::new(data_dir);
-    let pool = storage::open(&data_dir.database()).await?;
+    let pool = backup::open_migrated(&data_dir, None, None).await?;
     match users::issue_reset_code(&pool, username, ResetOrigin::Recovery).await? {
         Ok(issued) => {
             println!("{}", issued.code.raw);
