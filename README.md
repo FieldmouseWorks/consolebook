@@ -92,6 +92,13 @@ coordination; read-only storage without usable sidecars can prevent diagnosis.
 Its connection-local PRAGMA checks describe the diagnostic connection.
 See [ADR 0016](docs/decisions/0016-read-only-diagnostics.md) for the precise contract.
 
+## Versions and releases
+
+Releases follow Semantic Versioning, pre-1.0 ([ADR 0022](docs/decisions/0022-product-versioning.md)).
+`consolebook-server --version`, `/api/health`, and the interface footer report the version
+and the source commit of the running build. Changes are listed in [CHANGELOG.md](CHANGELOG.md);
+the procedure is in [docs/releasing.md](docs/releasing.md).
+
 ## Privacy
 
 Examples and test fixtures must be invented. Do not commit real agency names, employee information, operational narratives, credentials, exports, screenshots, or training records.

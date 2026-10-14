@@ -1,39 +1,85 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import { goto, invalidateAll } from '$app/navigation';
+	import { page } from '$app/state';
+	import { logout } from '$lib/api';
 	import type { ShellData } from './+layout';
 
 	let { data, children }: { data: ShellData; children: Snippet } = $props();
+
+	let can = (capability: string) => data.session?.capabilities.includes(capability) ?? false;
+
+	/** A section link is current on its own path and anything beneath it. */
+	function current(href: string): 'page' | undefined {
+		const path = page.url.pathname;
+		if (href === '/') return path === '/' ? 'page' : undefined;
+		return path === href || path.startsWith(`${href}/`) ? 'page' : undefined;
+	}
+
+	// Leave the current page by ordinary navigation before ending the
+	// session, so a page that must keep the reader (a draft with unsaved
+	// or refused text) can refuse and say why while the session still works.
+	let signingOut = $state(false);
+	async function signOut() {
+		signingOut = true;
+		try {
+			const here = (): string => page.url.pathname;
+			if (here() !== '/') {
+				await goto('/');
+				if (here() !== '/') return;
+			}
+			await logout();
+			await invalidateAll();
+			await goto('/login');
+		} finally {
+			signingOut = false;
+		}
+	}
 </script>
 
 <div class="shell">
 	<header>
-		<span class="wordmark">Consolebook</span>
-		{#if data.instance.agency}
-			<span class="agency">{data.instance.agency}</span>
-		{/if}
+		<div class="brand">
+			<a class="wordmark" href="/">Consolebook</a>
+			{#if data.instance.agency}
+				<span class="agency">{data.instance.agency}</span>
+			{/if}
+		</div>
 		{#if data.session}
 			<nav class="primary" aria-label="Primary">
-				<a href="/">Home</a>
-				<a href="/programs">Programs</a>
-				{#if data.session.capabilities.includes("manage_retention") || data.session.capabilities.includes("manage_users")}
-					<a href="/retention">Retention</a>
+				<a href="/" aria-current={current('/')}>
+					Home
+					{#if data.unreadNotices > 0}
+						<span class="badge" aria-label="{data.unreadNotices} unread notices">
+							{data.unreadNotices}
+						</span>
+					{/if}
+				</a>
+				<a href="/programs" aria-current={current('/programs')}>Programs</a>
+				{#if can('manage_retention') || can('manage_users')}
+					<a href="/retention" aria-current={current('/retention')}>Retention</a>
 				{/if}
-				{#if data.session.capabilities.includes('view_own_records')}
-					<a href="/records">My records</a>
+				{#if can('view_own_records')}
+					<a href="/records" aria-current={current('/records')}>My records</a>
 				{/if}
 			</nav>
-		{/if}
-		{#if data.unreadNotices > 0}
-			<span class="badge" aria-label="{data.unreadNotices} unread notices">
-				{data.unreadNotices}
-			</span>
+			<div class="account">
+				<span class="who" title={data.session.user.username}>
+					{data.session.user.display_name || data.session.user.username}
+				</span>
+				<button type="button" class="signout" disabled={signingOut} onclick={signOut}>
+					Sign out
+				</button>
+			</div>
 		{/if}
 	</header>
 	<main>
 		{@render children()}
 	</main>
 	<footer>
-		Consolebook {data.instance.version} · pre-alpha · AGPL-3.0-only
+		Consolebook {data.instance.version}
+		<span class="commit" title="Source commit of this build">({data.instance.commit})</span>
+		· pre-alpha · AGPL-3.0-only
 	</footer>
 </div>
 
@@ -60,47 +106,104 @@
 	}
 	header {
 		display: flex;
-		align-items: baseline;
-		gap: 0.75rem;
-		padding: 0.9rem 1.5rem;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem 1.5rem;
+		padding: 0.65rem 1.5rem;
 		background: light-dark(#1f2a3d, #0e1420);
 		color: #f2f5fa;
+	}
+	.brand {
+		display: flex;
+		align-items: baseline;
+		gap: 0.75rem;
+		min-width: 0;
 	}
 	.wordmark {
 		font-weight: 700;
 		letter-spacing: 0.02em;
+		color: #f2f5fa;
+		text-decoration: none;
 	}
 	.agency {
-		opacity: 0.85;
+		opacity: 0.8;
 		font-size: 0.95rem;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 	.badge {
-		margin-left: auto;
+		display: inline-block;
+		margin-left: 0.3rem;
 		background: #c8401a;
 		color: #ffffff;
-		font-size: 0.8rem;
+		font-size: 0.75rem;
 		font-weight: 700;
+		line-height: 1.4;
 		border-radius: 999px;
-		padding: 0.1rem 0.55rem;
-		align-self: center;
+		padding: 0 0.45rem;
+		vertical-align: 0.1em;
 	}
 	nav.primary {
 		display: flex;
-		gap: 1rem;
-		margin-left: 1rem;
+		flex-wrap: wrap;
+		gap: 0.25rem;
 		font-size: 0.95rem;
 	}
 	nav.primary a {
 		color: #f2f5fa;
 		text-decoration: none;
-		opacity: 0.85;
+		opacity: 0.8;
+		padding: 0.3rem 0.6rem;
+		border-radius: 6px;
 	}
 	nav.primary a:hover {
 		opacity: 1;
-		text-decoration: underline;
+		background: rgb(255 255 255 / 0.08);
+	}
+	nav.primary a[aria-current='page'] {
+		opacity: 1;
+		background: rgb(255 255 255 / 0.14);
+		font-weight: 600;
+	}
+	.account {
+		margin-left: auto;
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		font-size: 0.9rem;
+		min-width: 0;
+	}
+	.who {
+		opacity: 0.85;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		max-width: 14rem;
+	}
+	button.signout {
+		background: transparent;
+		color: #f2f5fa;
+		border: 1px solid rgb(255 255 255 / 0.35);
+		padding: 0.25rem 0.75rem;
+		font-size: 0.85rem;
+	}
+	button.signout:hover {
+		background: rgb(255 255 255 / 0.1);
+	}
+	@media (max-width: 40rem) {
+		header {
+			padding: 0.6rem 1rem;
+		}
+		nav.primary {
+			order: 3;
+			width: 100%;
+			margin: 0 -0.6rem;
+		}
 	}
 	main {
 		flex: 1;
+		min-width: 0;
 		width: 100%;
 		/* Wide enough for authoring tables; forms cap themselves at 44rem. */
 		max-width: 64rem;
@@ -112,6 +215,9 @@
 		font-size: 0.8rem;
 		opacity: 0.65;
 		text-align: center;
+	}
+	.commit {
+		font-family: ui-monospace, monospace;
 	}
 
 	:global(h1) {
@@ -138,7 +244,7 @@
 		padding: 1.5rem;
 		margin: 0 0 1.25rem;
 	}
-	:global(section.panel h2) {
+	:global(section.panel h2, section.card h2) {
 		font-size: 1.1rem;
 		margin: 0 0 0.75rem;
 	}
@@ -192,8 +298,14 @@
 		border: 1px solid light-dark(#b9c0cb, #4a5261);
 	}
 	:global(button:disabled) {
-		opacity: 0.6;
-		cursor: default;
+		background: light-dark(#d5d9e0, #353b46);
+		color: light-dark(#5f6774, #98a1ae);
+		cursor: not-allowed;
+	}
+	:global(button.secondary:disabled) {
+		background: transparent;
+		color: light-dark(#8a919c, #6f7886);
+		border-color: light-dark(#d5d9e0, #3a414d);
 	}
 	:global(button.small) {
 		padding: 0.3rem 0.7rem;
@@ -203,6 +315,24 @@
 		width: 100%;
 		border-collapse: collapse;
 		font-size: 0.95rem;
+	}
+	/* A wide table scrolls inside its card instead of pushing the page
+	   sideways; on narrow screens every table becomes its own scroller. */
+	:global(section.card, section.panel, form.card) {
+		overflow-x: auto;
+	}
+	@media (max-width: 48rem) {
+		:global(table.grid) {
+			display: block;
+			overflow-x: auto;
+		}
+		:global(section.card, section.panel, form.card) {
+			padding: 1rem;
+		}
+	}
+	/* Dates, times, and identifiers read as one unit. */
+	:global(.nowrap) {
+		white-space: nowrap;
 	}
 	:global(table.grid th),
 	:global(table.grid td) {
@@ -233,13 +363,17 @@
 	}
 	:global(div.row) {
 		display: flex;
+		flex-wrap: wrap;
 		gap: 0.5rem;
 		align-items: center;
 		margin: 0 0 0.5rem;
 	}
-	:global(div.row input),
+	:global(div.row input:not([type='checkbox'])),
 	:global(div.row select) {
 		margin: 0;
+		width: auto;
+		flex: 1 1 10rem;
+		min-width: 0;
 	}
 	:global(ul.problems) {
 		background: light-dark(#fbe9e9, #3a1d20);

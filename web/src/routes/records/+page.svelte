@@ -19,6 +19,7 @@
 	);
 
 	let records: TimelineRecord[] = $state([]);
+	let awaiting = $derived(records.filter((r) => r.acknowledgment_kind === null).length);
 	let loaded = $state(false);
 	let error = $state('');
 
@@ -117,6 +118,62 @@
 	agreement.
 </p>
 
+{#if !canViewOwn}
+	<p class="error" role="alert">This page is not available to this account.</p>
+{:else if !loaded}
+	<p class="quiet">Loading…</p>
+{:else if error}
+	<p class="error" role="alert">{error}</p>
+{:else if records.length === 0}
+	<section class="card">
+		<h2>Evaluations</h2>
+		<p class="quiet">
+			No finalized records yet. A record appears here once it is finalized.
+		</p>
+	</section>
+{:else}
+	<section class="panel">
+		<h2>Evaluations</h2>
+		{#if awaiting > 0}
+			<p class="awaiting">
+				{awaiting} {awaiting === 1 ? 'record is' : 'records are'} waiting for your
+				acknowledgment. Open one to acknowledge it or respond.
+			</p>
+		{/if}
+		<table class="grid">
+			<thead>
+				<tr>
+					<th>Date</th>
+					<th>Form</th>
+					<th>Program</th>
+					<th>Finalized</th>
+					<th>Acknowledgment</th>
+					<th></th>
+				</tr>
+			</thead>
+			<tbody>
+				{#each records as record (record.record_id)}
+					<tr>
+						<td class="nowrap">{record.business_date ?? '—'}</td>
+						<td>{record.form_name}</td>
+						<td>{record.program_name} — v{record.version_number}</td>
+						<td class="nowrap">{instant(record.finalized_at)}</td>
+						<td>
+							<span class="pill" class:pending={record.acknowledgment_kind === null}>
+								{ackLabel(record.acknowledgment_kind)}
+							</span>
+							{#if record.record_version_number > 1}
+								<span class="pill">Amended — v{record.record_version_number}</span>
+							{/if}
+						</td>
+						<td><a href={`/drafts/${record.record_id}`}>Open</a></td>
+					</tr>
+				{/each}
+			</tbody>
+		</table>
+	</section>
+{/if}
+
 {#if canViewOwn}
 	<section class="panel">
 		<h2>My packets</h2>
@@ -202,55 +259,15 @@
 	</section>
 {/if}
 
-{#if !canViewOwn}
-	<p class="error" role="alert">This page is not available to this account.</p>
-{:else if !loaded}
-	<p class="quiet">Loading…</p>
-{:else if error}
-	<p class="error" role="alert">{error}</p>
-{:else if records.length === 0}
-	<section class="card">
-		<p class="quiet">
-			No finalized records yet. A record appears here once it is finalized.
-		</p>
-	</section>
-{:else}
-	<section class="panel">
-		<table class="grid">
-			<thead>
-				<tr>
-					<th>Date</th>
-					<th>Form</th>
-					<th>Program</th>
-					<th>Finalized</th>
-					<th>Acknowledgment</th>
-					<th></th>
-				</tr>
-			</thead>
-			<tbody>
-				{#each records as record (record.record_id)}
-					<tr>
-						<td>{record.business_date ?? '—'}</td>
-						<td>{record.form_name}</td>
-						<td>{record.program_name} — v{record.version_number}</td>
-						<td>{instant(record.finalized_at)}</td>
-						<td>
-							<span class="pill" class:pending={record.acknowledgment_kind === null}>
-								{ackLabel(record.acknowledgment_kind)}
-							</span>
-							{#if record.record_version_number > 1}
-								<span class="pill">Amended — v{record.record_version_number}</span>
-							{/if}
-						</td>
-						<td><a href={`/drafts/${record.record_id}`}>Open</a></td>
-					</tr>
-				{/each}
-			</tbody>
-		</table>
-	</section>
-{/if}
 
 <style>
+	.awaiting {
+		background: light-dark(#fdf1d7, #3b301e);
+		border: 1px solid light-dark(#ecd49c, #6b5530);
+		border-radius: 6px;
+		padding: 0.6rem 0.8rem;
+		margin: 0 0 1rem;
+	}
 	.quiet {
 		opacity: 0.7;
 		margin: 0;

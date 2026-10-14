@@ -87,6 +87,7 @@ async fn instance_reports_initialization_state() {
     assert_eq!(body["initialized"], false);
     assert_eq!(body["agency"], serde_json::Value::Null);
     assert_eq!(body["version"], consolebook_server::VERSION);
+    assert_eq!(body["commit"], consolebook_server::BUILD_COMMIT);
 
     let code = setup::issue_setup_code(&pool)
         .await

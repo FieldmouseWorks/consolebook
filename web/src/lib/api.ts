@@ -8,6 +8,8 @@ export type { ApiErrorBody } from './api/transport';
 export interface Instance {
 	initialized: boolean;
 	version: string;
+	/** Source commit of the running build (ADR 0022), or `unknown`. */
+	commit: string;
 	agency: string | null;
 }
 
@@ -26,6 +28,7 @@ export interface Session {
 export interface Health {
 	status: string;
 	version: string;
+	commit: string;
 	database: string;
 }
 

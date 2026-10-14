@@ -23,13 +23,13 @@ use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
-use crate::VERSION;
 use crate::audit::{self, EventKind};
 use crate::capabilities::{self, Capability};
 use crate::secrets;
 use crate::sessions;
 use crate::setup::{self, SetupRefusal};
 use crate::users::{self, IssueRefusal, ResetOrigin, ResetOutcome};
+use crate::{BUILD_COMMIT, VERSION};
 
 /// Name of the session cookie.
 pub const SESSION_COOKIE: &str = "consolebook_session";
@@ -209,6 +209,7 @@ fn removal_cookie() -> Cookie<'static> {
 struct Health {
     status: &'static str,
     version: &'static str,
+    commit: &'static str,
     database: &'static str,
 }
 
@@ -219,6 +220,7 @@ async fn health(State(state): State<AppState>) -> Response {
     let body = Health {
         status: if database_ok { "ok" } else { "degraded" },
         version: VERSION,
+        commit: BUILD_COMMIT,
         database: if database_ok { "ok" } else { "unavailable" },
     };
     let code = if database_ok {
@@ -235,16 +237,18 @@ async fn health(State(state): State<AppState>) -> Response {
 struct Instance {
     initialized: bool,
     version: &'static str,
+    commit: &'static str,
     agency: Option<String>,
 }
 
 /// Unauthenticated installation facts the web shell needs to route:
-/// whether setup has run, the running version, and the agency name.
+/// whether setup has run, the running version and commit, and the agency name.
 async fn instance(State(state): State<AppState>) -> Result<Json<Instance>, ApiError> {
     let agency = setup::agency_name(&state.pool).await?;
     Ok(Json(Instance {
         initialized: agency.is_some(),
         version: VERSION,
+        commit: BUILD_COMMIT,
         agency,
     }))
 }

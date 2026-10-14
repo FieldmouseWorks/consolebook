@@ -3,6 +3,8 @@ members = ["crates/consolebook-server"]
 resolver = "2"
 
 [workspace.package]
+# The product version: the single source every surface reports (ADR 0022).
+version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
 repository = "https://github.com/FieldmouseWorks/consolebook"

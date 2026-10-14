@@ -22,7 +22,7 @@ test('author, publish, and compare a program version', async ({ page, setupCode 
 	await page.getByLabel('Username').fill('avery.admin');
 	await page.getByLabel('Password').fill(PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page.getByRole('heading', { name: 'Installation status' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible();
 
 	// Programs is in the primary navigation.
 	await page.getByRole('link', { name: 'Programs' }).click();
@@ -69,7 +69,7 @@ test('author, publish, and compare a program version', async ({ page, setupCode 
 	await expect(page.getByRole('button', { name: 'Save draft' })).toHaveCount(0);
 
 	// Create a trainee from the status page and enroll them here.
-	await page.getByRole('link', { name: 'Home' }).click();
+	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 	await page.getByLabel('New username').fill('jordan.trainee');
 	await page.getByLabel('Display name').fill('Jordan Trainee');
 	await page.getByRole('button', { name: 'Create user' }).click();
