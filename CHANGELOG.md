@@ -15,6 +15,8 @@ not a production-readiness statement.
 - Before a new version migrates the database, `serve` takes a validated
   backup of it as it was and does not start without one; the install guide
   shows how to go back with the previous release.
+- A version that finds a database upgraded by a newer release refuses it in
+  plain words and names the way back.
 
 ## [0.1.0] - 2026-10-14
 

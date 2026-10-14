@@ -117,8 +117,9 @@ journalctl -u consolebook | grep 'took a validated backup first'
 ```
 
 There is no downgrade: an older version refuses a database a newer one has
-changed. To go back after an upgrade, restore that backup with the release
-that wrote it:
+changed, and says so ("upgraded by a newer Consolebook"; 0.1.0 says
+"migration N was previously applied but is missing"). To go back after an
+upgrade, restore that backup with the release that wrote it:
 
 ```sh
 sudo systemctl stop consolebook

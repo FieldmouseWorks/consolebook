@@ -138,3 +138,47 @@ async fn startup_does_not_migrate_when_the_backup_cannot_be_written() {
         "the database is untouched"
     );
 }
+
+#[tokio::test]
+async fn an_older_build_refuses_a_newer_database_plainly() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let data_dir = DataDir::new(tmp.path().join("data"));
+    data_dir.ensure_layout().expect("layout");
+    storage::open(&data_dir.database())
+        .await
+        .expect("create")
+        .close()
+        .await;
+    // What a later release leaves: one more applied migration than this
+    // build knows.
+    let future = newest_version() + 1;
+    let pool = connect(&data_dir.database()).await;
+    sqlx::query(
+        "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time)
+         VALUES (?, 'invented future migration', 1, X'00', 0)",
+    )
+    .bind(future)
+    .execute(&pool)
+    .await
+    .expect("invented future migration");
+    pool.close().await;
+    let before = applied(&data_dir.database()).await;
+
+    assert!(
+        backup::before_migrating(&data_dir, 14)
+            .await
+            .expect("check")
+            .is_none(),
+        "nothing this build knows is pending"
+    );
+    let err = storage::open(&data_dir.database())
+        .await
+        .expect_err("a newer database is refused");
+    let message = format!("{err:#}");
+    assert!(
+        message.contains("upgraded by a newer Consolebook"),
+        "{message}"
+    );
+    assert!(message.contains(&future.to_string()), "{message}");
+    assert_eq!(applied(&data_dir.database()).await, before);
+}
