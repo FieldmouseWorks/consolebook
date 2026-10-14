@@ -82,15 +82,15 @@ pub async fn run(data_dir: &DataDir, keep: usize) -> Result<BackupReport> {
     })
 }
 
-/// The snapshots currently in `backups/`, oldest first. The timestamped
-/// names sort chronologically; this listing is discovery only — nothing
-/// about a backup's validity is inferred from its name.
+/// The snapshots currently in `backups/`, oldest first by the UTC time in
+/// their names; this listing is discovery only — nothing about a backup's
+/// validity is inferred from its name.
 pub fn snapshots(data_dir: &DataDir) -> Result<Vec<PathBuf>> {
     snapshots_in(&data_dir.backups())
 }
 
 /// The snapshot files in `dir` (local `backups/` or a copy directory),
-/// oldest first by their timestamped names.
+/// oldest first by the UTC time in their names.
 pub fn snapshots_in(dir: &Path) -> Result<Vec<PathBuf>> {
     let dir = dir.to_path_buf();
     let mut found = Vec::new();
@@ -109,8 +109,22 @@ pub fn snapshots_in(dir: &Path) -> Result<Vec<PathBuf>> {
             found.push(entry.path());
         }
     }
-    found.sort();
+    // By the stamp, not the whole name: `consolebook-prerestore-<stamp>`
+    // would otherwise sort after every `consolebook-<stamp>`, and stay
+    // "newest" for good after a restore (#105).
+    found.sort_by_key(|path| snapshot_order(path));
     Ok(found)
+}
+
+/// The UTC stamp a snapshot name ends with, then the whole name.
+fn snapshot_order(path: &Path) -> (String, String) {
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let stem = name.strip_suffix(".db").unwrap_or(&name);
+    let stamp = stem.rsplit('-').next().unwrap_or(stem).to_owned();
+    (stamp, name)
 }
 
 /// Unix mtime of the newest snapshot, for scheduling and diagnostics.
