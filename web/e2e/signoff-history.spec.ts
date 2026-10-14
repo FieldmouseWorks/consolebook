@@ -3,7 +3,7 @@
 // signoffs a program-version change left behind, and gains no write control
 // anywhere. All fixture data is invented.
 
-import { expect, test } from './fixtures';
+import { expect, signOut, test } from './fixtures';
 import type { Page } from '@playwright/test';
 
 const PASSWORD = 'invented-passphrase-1';
@@ -138,8 +138,7 @@ test('a trainee reads their own complete signoff history', async ({ page, setupC
 	const matrix = await matrixResponse.json();
 	expect(matrix.tasks.length).toBeGreaterThan(0);
 	await page.goto('/');
-	await page.getByRole('button', { name: 'Sign out' }).click();
-	await expect(page).toHaveURL(/\/login$/);
+	await signOut(page);
 	await resetAndLogin(page, 'casey.coord', casey.reset_code, PASSWORD);
 	await page.goto(`/enrollments/${enrollment.id}`);
 	await expect(page.getByRole('heading', { name: 'Task signoffs' })).toBeVisible();
@@ -152,8 +151,7 @@ test('a trainee reads their own complete signoff history', async ({ page, setupC
 
 	// Back to the administrator for the version change.
 	await page.goto('/');
-	await page.getByRole('button', { name: 'Sign out' }).click();
-	await expect(page).toHaveURL(/\/login$/);
+	await signOut(page);
 	await page.getByLabel('Username').fill('avery.admin');
 	await page.getByLabel('Password').fill(PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
@@ -177,8 +175,7 @@ test('a trainee reads their own complete signoff history', async ({ page, setupC
 
 	// The trainee signs in and finds their signoffs where their records are.
 	await page.goto('/');
-	await page.getByRole('button', { name: 'Sign out' }).click();
-	await expect(page).toHaveURL(/\/login$/);
+	await signOut(page);
 	await resetAndLogin(page, 'taylor.trainee', trainee.reset_code, TAYLOR_PASSWORD);
 	await page.getByRole('link', { name: 'My records' }).click();
 	await expect(page.getByRole('heading', { name: 'My task signoffs' })).toBeVisible();
@@ -225,8 +222,7 @@ test('a trainee reads their own complete signoff history', async ({ page, setupC
 	// Another trainee holding the same own-records grant is refused: the
 	// read is scoped to the reader's own enrollment, not to trainees.
 	await page.goto('/');
-	await page.getByRole('button', { name: 'Sign out' }).click();
-	await expect(page).toHaveURL(/\/login$/);
+	await signOut(page);
 	await resetAndLogin(page, 'riley.trainee', riley.reset_code, RILEY_PASSWORD);
 	const refused = await page.request.get(`/api/enrollments/${enrollment.id}/signoff-history`);
 	expect(refused.status()).toBe(403);

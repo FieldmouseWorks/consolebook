@@ -42,6 +42,9 @@ pub struct AppState {
     /// process, so each server — and each test's server — bounds its own
     /// producers.
     pub export_slots: std::sync::Arc<tokio::sync::Semaphore>,
+    /// How this server takes and copies backups, for the health read; absent
+    /// for a state built without a data directory (most tests).
+    pub backups: Option<std::sync::Arc<crate::backup_copy::BackupSettings>>,
 }
 
 impl AppState {
@@ -53,7 +56,15 @@ impl AppState {
             export_slots: std::sync::Arc::new(tokio::sync::Semaphore::new(
                 crate::exports_http::EXPORT_SLOTS,
             )),
+            backups: None,
         }
+    }
+
+    /// The same state, reporting backup health from `settings`.
+    #[must_use]
+    pub fn with_backups(mut self, settings: crate::backup_copy::BackupSettings) -> Self {
+        self.backups = Some(std::sync::Arc::new(settings));
+        self
     }
 }
 
@@ -69,6 +80,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/auth/reset", post(reset_password))
         .route("/api/users", get(list_users).post(create_user))
         .route("/api/getting-started", get(getting_started))
+        .route("/api/backups/status", get(backup_status))
         .route("/api/notices", get(list_notices))
         .route("/api/notices/{id}/read", post(mark_notice_read))
         .merge(crate::programs_http::routes())
@@ -583,6 +595,28 @@ async fn getting_started(
             StatusCode::FORBIDDEN,
             "capability_required",
             "setup progress requires the manage_users capability",
+        )),
+    }
+}
+
+/// Backup health for administrators (ADR 0024).
+async fn backup_status(
+    State(state): State<AppState>,
+    current: CurrentUser,
+) -> Result<Json<crate::backup_copy::BackupStatus>, ApiError> {
+    let Some(settings) = state.backups.as_deref() else {
+        return Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "backups_not_configured",
+            "this server was started without backup settings",
+        ));
+    };
+    match crate::backup_copy::status_for(&state.pool, current.user.id, settings).await? {
+        Ok(status) => Ok(Json(status)),
+        Err(crate::backup_copy::StatusRefusal::CapabilityRequired) => Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "capability_required",
+            "backup status requires the manage_users capability",
         )),
     }
 }

@@ -40,7 +40,13 @@ first Milestone 5 slices ([roadmap](docs/roadmap.md)).
   (`install/install.sh`), static x86_64 and arm64 release archives, and an
   operator guide ([docs/install.md](docs/install.md)).
 - A "Getting started" checklist on the administrator's home that follows the
-  installation from first run to its first finalized evaluation.
+  installation from first run to its first finalized evaluation, and an
+  optional guided setup: people in a batch with a printable sign-in sheet,
+  and an editable example program.
+- Backup copies off the server (`--backup-dir` / `CONSOLEBOOK_BACKUP_COPY_DIR`,
+  ADR 0024): each validated backup is copied to a second disk or share and
+  verified byte for byte; backup health on the administrator's home, with a
+  warning until copies are current; `--data-dir` to place the data.
 - An interface that leads each role with its own work, shows who is signed in
   with sign out on every page, works at phone width, and explains refused or
   missing pages in plain words.

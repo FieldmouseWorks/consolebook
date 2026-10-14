@@ -6,7 +6,7 @@
 // one invented draft. Every race is synchronized on a held HTTP request
 // rather than a sleep, so the sequence is deterministic.
 
-import { expect, test } from './fixtures';
+import { expect, signOut, test } from './fixtures';
 import type { Browser, BrowserContext, Page } from '@playwright/test';
 
 const PASSWORD = 'invented-passphrase-1';
@@ -2427,8 +2427,7 @@ test('signing out from a draft with a failed save keeps the draft and the sessio
 		await author.unroute(`**/api/drafts/${seeded.draftId}/content`);
 		await author.getByLabel(MOST).fill('Invented corrected note saved on retry.');
 		await expectSaved(author);
-		await author.getByRole('button', { name: 'Sign out' }).click();
-		await expect(author).toHaveURL(/\/login$/);
+		await signOut(author);
 		expect((await author.request.get('/api/auth/session')).status()).toBe(401);
 	} finally {
 		await authorContext.close();

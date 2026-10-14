@@ -27,13 +27,19 @@ Other platforms build from source until they are packaged.
 | --- | --- | --- |
 | Executable | `/usr/local/bin/consolebook` | root, 0755 |
 | Service account | `consolebook` system user and group, no login shell | — |
-| Data directory (`CONSOLEBOOK_DATA_DIR`) | `/var/lib/consolebook` | `consolebook`, 0750 |
+| Data directory (`CONSOLEBOOK_DATA_DIR`) | `/var/lib/consolebook`, or `--data-dir` | `consolebook`, 0750 |
+| Backup copy directory (`CONSOLEBOOK_BACKUP_COPY_DIR`, ADR 0024) | none, or `--backup-dir` | `consolebook`, 0750 |
 | Settings | `/etc/consolebook/consolebook.env` | root, 0644 |
 | Service | `consolebook.service` in `/etc/systemd/system/` | root, 0644 |
+| Writable paths for the service | `consolebook.service.d/paths.conf` drop-in | root, 0644 |
 | Default listen address | `127.0.0.1:7770` (`--lan` for `0.0.0.0:7770`) | — |
 
 The settings file is the operator's: the installer creates it once and
-afterwards changes only the line an option names (`--listen`). The unit file
+afterwards changes only the line an option names (`--listen`, `--data-dir`,
+`--backup-dir`). It refuses to change the data directory of an installation
+whose current directory holds a database, because the service would start an
+empty installation in its place; moving records is a manual step the install
+guide documents. The unit file
 is the product's: each install replaces it, so hardening and fixes reach
 existing installations. Local changes to the unit belong in a systemd drop-in.
 
@@ -41,10 +47,11 @@ existing installations. Local changes to the unit belong in a systemd drop-in.
 
 The unit runs as the service account with `NoNewPrivileges`,
 `ProtectSystem=strict`, `ProtectHome`, private `/tmp` and devices, and
-`ReadWritePaths` limited to the data directory. The service cannot rewrite
-its own executable, unit, or settings. A setting that needs a new writable
-path (for example, a backup copy directory) is added by the installer through
-a drop-in, not by widening the base unit.
+`ReadWritePaths` limited to the default data directory. The service cannot
+rewrite its own executable, unit, or settings. A setting that needs another
+writable path (a chosen data directory, a backup copy directory) is granted
+by the installer's `paths.conf` drop-in, which it rewrites from the settings
+file on each install, never by widening the base unit.
 
 ### Install and upgrade
 
