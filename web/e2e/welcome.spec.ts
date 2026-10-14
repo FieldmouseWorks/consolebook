@@ -26,14 +26,14 @@ test('guided setup adds people and starts from the example program', async ({
 	await expect(page.getByRole('heading', { name: 'Guided setup', level: 1 })).toBeVisible();
 
 	// Three prefilled role rows; names suggest usernames.
-	await page.getByLabel('Name, row 1').fill('Casey Coordinator');
+	await page.getByLabel('Name, row 1', { exact: true }).fill('Casey Coordinator');
 	await expect(page.getByLabel('Username, row 1')).toHaveValue('casey.coordinator');
-	await page.getByLabel('Name, row 2').fill('Jordan Q. Trainer');
+	await page.getByLabel('Name, row 2', { exact: true }).fill('Jordan Q. Trainer');
 	await expect(page.getByLabel('Username, row 2')).toHaveValue('jordan.trainer');
-	await page.getByLabel('Name, row 3').fill('Taylor Trainee');
+	await page.getByLabel('Name, row 3', { exact: true }).fill('Taylor Trainee');
 	// A fourth row reuses the administrator's username and must be refused alone.
 	await page.getByRole('button', { name: 'Add another row' }).click();
-	await page.getByLabel('Name, row 4').fill('Duplicate Person');
+	await page.getByLabel('Name, row 4', { exact: true }).fill('Duplicate Person');
 	await page.getByLabel('Username, row 4').fill('avery.admin');
 	await page.getByRole('button', { name: 'Create 4 accounts' }).click();
 
