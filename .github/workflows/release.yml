@@ -149,6 +149,14 @@ jobs:
           curl -fsS http://127.0.0.2:7771/api/instance | grep -q '"public_url":"https://consolebook.example.invalid"'
           sudo journalctl -u consolebook --no-pager | grep -q 'session cookies are marked Secure'
           sudo journalctl -u consolebook --no-pager | grep -q 'open https://consolebook.example.invalid/ in a web browser'
+          # A malformed address is refused before the running service is touched.
+          if sudo install/install.sh --from "dist/consolebook-linux-${{ matrix.arch }}.tar.gz" \
+            --public-url 'https://consolebook.example.invalid:notaport' 2>bad-url.log; then
+            echo "a malformed public URL was accepted" >&2; exit 1
+          fi
+          grep -q 'nothing was changed' bad-url.log
+          systemctl is-active consolebook
+          grep -q '^CONSOLEBOOK_PUBLIC_URL=https://consolebook.example.invalid$' /etc/consolebook/consolebook.env
           # The printed command for a supervisor other than systemd carries it too.
           sudo install/install.sh --from "dist/consolebook-linux-${{ matrix.arch }}.tar.gz" \
             --no-service | tee no-service.log

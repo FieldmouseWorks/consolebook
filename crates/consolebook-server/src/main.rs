@@ -97,6 +97,11 @@ enum Command {
         #[command(subcommand)]
         action: ExportAction,
     },
+    /// Check a public URL as `serve` would and print its origin. The
+    /// installer runs it before changing anything, so a value the server
+    /// would refuse never stops a working service.
+    #[command(hide = true)]
+    CheckPublicUrl { url: PublicUrl },
     /// Print a fresh first-run setup code for an uninitialized installation.
     SetupCode,
     /// Issue a password reset code for a locked-out administrator.
@@ -164,6 +169,10 @@ async fn main() -> ExitCode {
             action: ExportAction::Verify { archive },
         } => run_export_verify(&archive),
         Command::SetupCode => run_setup_code(&cli.data_dir).await,
+        Command::CheckPublicUrl { url } => {
+            println!("{url}");
+            Ok(ExitCode::SUCCESS)
+        }
         Command::Recover { username } => run_recover(&cli.data_dir, &username).await,
     };
     match result {

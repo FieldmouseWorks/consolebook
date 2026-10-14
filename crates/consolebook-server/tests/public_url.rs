@@ -140,3 +140,28 @@ async fn the_instance_reports_the_public_url_when_set() {
         assert_eq!(body["public_url"], expected);
     }
 }
+
+/// The installer validates `--public-url` with this command before it stops
+/// a working service, so it must agree with `serve`'s parser exactly.
+#[test]
+fn the_installer_check_uses_the_server_parser() {
+    let check = |raw: &str| {
+        std::process::Command::new(env!("CARGO_BIN_EXE_consolebook-server"))
+            .args(["check-public-url", raw])
+            .output()
+            .expect("run")
+    };
+    let ok = check("https://consolebook.example.org/");
+    assert!(ok.status.success(), "{ok:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&ok.stdout),
+        "https://consolebook.example.org\n"
+    );
+    for bad in [
+        "https://:",
+        "https://consolebook.example.org:notaport",
+        "consolebook.example.org",
+    ] {
+        assert!(!check(bad).status.success(), "{bad} was accepted");
+    }
+}

@@ -252,6 +252,12 @@ release=$(find "$work" -mindepth 1 -maxdepth 1 -type d -name 'consolebook-*' | h
 if [ -z "$release" ] || [ ! -x "$release/consolebook" ]; then
 	fail "the archive does not contain a consolebook executable"
 fi
+# The server's own parser judges the address, before anything is stopped or
+# written: a value it would refuse at start must not take a working service down.
+if [ -n "$public_url" ]; then
+	public_url=$("$release/consolebook" check-public-url "$public_url") ||
+		fail "--public-url $public_url is not a usable address (scheme, host, and optional port only); nothing was changed"
+fi
 
 # --- Install files -----------------------------------------------------------
 upgrading=no
