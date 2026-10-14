@@ -12,7 +12,6 @@
 		getNotices,
 		installationExportPath,
 		issueResetCode,
-		logout,
 		markNoticeRead,
 		myAssignments,
 		mySessions,
@@ -27,7 +26,7 @@
 		type Role,
 		type SessionDisposition
 	} from '$lib/api';
-	import { instant } from '$lib/format';
+	import { capabilityName, instant, localSpan } from '$lib/format';
 	import type { ShellData } from './+layout';
 
 	let { data }: { data: ShellData } = $props();
@@ -46,6 +45,9 @@
 	);
 	let canReview = $derived(
 		data.session?.capabilities.includes('review_evaluation') ?? false
+	);
+	let canViewOwn = $derived(
+		data.session?.capabilities.includes('view_own_records') ?? false
 	);
 	let canExport = $derived(
 		data.session?.capabilities.includes('export_records') ?? false
@@ -98,17 +100,33 @@
 		await invalidateAll();
 	}
 
+	// Unread notices lead; read ones stay one click away. Five unread are
+	// shown before the rest fold behind "Show all".
+	const NOTICE_PREVIEW = 5;
+	let showAllNotices = $state(false);
+	let unread = $derived(notices.filter((n) => n.read_at === null));
+	let shownNotices = $derived(
+		showAllNotices ? notices : unread.slice(0, NOTICE_PREVIEW)
+	);
+	let markingAll = $state(false);
+	async function markAllRead() {
+		markingAll = true;
+		try {
+			for (const notice of unread) {
+				await markNoticeRead(notice.id);
+			}
+		} finally {
+			notices = (await getNotices()).notices;
+			markingAll = false;
+			await invalidateAll();
+		}
+	}
+
 	let resetUsername = $state('');
 	let issued: { username: string; reset_code: string; expires_at: number } | null =
 		$state(null);
 	let issueError = $state('');
 	let busy = $state(false);
-
-	async function signOut() {
-		await logout();
-		await invalidateAll();
-		await goto('/login');
-	}
 
 	// Session members work their sessions from here even without a durable
 	// assignment: membership is the grant.
@@ -229,102 +247,40 @@
 	}
 </script>
 
-<h1>Installation status</h1>
-<p class="lede">Signed in as {session?.user.display_name}.</p>
+<h1>Home</h1>
+<p class="lede">Signed in as {session?.user.display_name} · {data.instance.agency}</p>
 
-<section class="card">
-	<dl class="facts">
-		<dt>Agency</dt>
-		<dd>{data.instance.agency}</dd>
-		<dt>Signed in as</dt>
-		<dd>{session?.user.username}</dd>
-		<dt>Capabilities</dt>
-		<dd>{session?.capabilities.join(', ') || 'none'}</dd>
-		<dt>Session expires</dt>
-		<dd>{session ? instant(session.expires_at) : '—'}</dd>
-		<dt>Server version</dt>
-		<dd>{data.instance.version}</dd>
-		<dt>Database</dt>
-		<dd>{health ? health.database : 'checking…'}</dd>
-	</dl>
-</section>
-
-<section class="card">
-	<h2>Notices</h2>
-	{#if notices.length === 0}
-		<p class="quiet">No notices.</p>
-	{:else}
-		<ul class="notices">
-			{#each notices as notice (notice.id)}
-				<li class:unread={notice.read_at === null}>
-					<p>{notice.message}</p>
-					<p class="meta">
-						{instant(notice.created_at)}
-						{#if notice.read_at === null}
-							<button class="secondary small" onclick={() => acknowledge(notice)}>
-								Mark read
-							</button>
-						{/if}
-					</p>
-				</li>
-			{/each}
-		</ul>
-	{/if}
-</section>
-
-{#if canExport}
+{#if canReview}
 	<section class="card">
-		<h2>Record exports</h2>
-		{#if summary === null}
-			<p class="quiet">Checking finalized records…</p>
-		{:else if summary.version_count === 0}
-			<p class="quiet">No finalized records yet; there is nothing to export.</p>
-		{:else}
-			<p>
-				This installation holds {summary.version_count} finalized
-				{summary.version_count === 1 ? 'version' : 'versions'} across
-				{summary.record_count}
-				{summary.record_count === 1 ? 'record' : 'records'}. An export carries
-				every one as its stored canonical bytes beside a manifest and verifies
-				from the archive alone with <code>consolebook-server export verify</code>.
-			</p>
-			<button type="button" class="secondary" disabled={busy} onclick={exportInstallation}>
-				Export every finalized record
-			</button>
-			{#if exported}
-				<p class="quiet" role="status">Downloaded {exported}.</p>
-			{/if}
-		{/if}
-		{#if exportError}
-			<p class="error" role="alert">{exportError}</p>
-		{/if}
-	</section>
-{/if}
-
-{#if canViewAssigned}
-	<section class="card">
-		<h2>My trainees</h2>
-		{#if assigned.length === 0}
-			<p class="quiet">No active training assignments.</p>
+		<h2>Review queue</h2>
+		{#if queue.length === 0}
+			<p class="quiet">Nothing awaiting review.</p>
 		{:else}
 			<table class="grid">
 				<thead>
 					<tr>
 						<th>Trainee</th>
 						<th>Program</th>
-						<th>Assigned</th>
+						<th>Owner</th>
+						<th>Submitted</th>
+						<th></th>
 					</tr>
 				</thead>
 				<tbody>
-					{#each assigned as row (row.assignment_id)}
+					{#each queue as row (row.record_id)}
 						<tr>
-							<td>
-								<a href={`/enrollments/${row.enrollment_id}`}>
-									{row.trainee_display_name}
-								</a>
-							</td>
+							<td>{row.trainee_display_name}</td>
 							<td>{row.program_name} — v{row.version_number}</td>
-							<td>{instant(row.assigned_at)}</td>
+							<td>{row.owner_display_name}</td>
+							<td class="nowrap">{instant(row.submitted_at)}</td>
+							<td>
+								<a href={`/drafts/${row.record_id}`}>
+									{row.eligible ? 'Review' : 'Open'}
+								</a>
+								{#if !row.eligible}
+									<span class="quiet-inline">(you contributed)</span>
+								{/if}
+							</td>
 						</tr>
 					{/each}
 				</tbody>
@@ -334,36 +290,38 @@
 {/if}
 
 {#if canAuthor}
-	<section class="card">
+	<section class="panel">
 		<h2>My sessions</h2>
 		{#if sessions.length === 0}
-			<p class="quiet">No sessions yet.</p>
+			<p class="quiet">No sessions yet. A coordinator records sessions on a trainee's enrollment.</p>
 		{:else}
-			<table class="grid">
+			<table class="grid sessions">
 				<thead>
 					<tr>
-						<th>Date</th>
-						<th>Local time</th>
+						<th>When</th>
 						<th>Trainee</th>
-						<th>Program</th>
 						<th>Status</th>
-						<th>Draft</th>
-						<th></th>
+						<th>Daily report</th>
+						<th>Close session</th>
 					</tr>
 				</thead>
 				<tbody>
 					{#each sessions as session (session.session_id)}
+						{@const span = localSpan(session.local_start, session.local_end)}
 						<tr>
-							<td>{session.business_date}</td>
-							<td>
-								{session.local_start.replace('T', ' ')}
-								{#if session.local_end}
-									– {session.local_end.replace('T', ' ')}
-								{/if}
+							<td class="nowrap when">
+								<strong>{session.business_date}</strong>
+								<span class="sub">{span.times} <abbr title={session.timezone}>local</abbr></span>
 							</td>
-							<td>{session.trainee_display_name}</td>
-							<td>{session.program_name} — v{session.version_number}</td>
-							<td>{session.disposition ?? 'open'}</td>
+							<td>
+								<a href={`/enrollments/${session.enrollment_id}`}>{session.trainee_display_name}</a>
+								<span class="sub">{session.program_name} — v{session.version_number}</span>
+							</td>
+							<td class="state">
+								<span class="pill status {session.disposition ?? 'open'}">
+									{session.disposition ?? 'open'}
+								</span>
+							</td>
 							<td>
 								{#if session.draft_id !== null}
 									<a href={`/drafts/${session.draft_id}`}>Open draft</a>
@@ -402,40 +360,44 @@
 									<span class="quiet-inline">—</span>
 								{/if}
 							</td>
-							<td>
+							<td class:closed={session.disposition !== null}>
 								{#if session.disposition === null}
-									<div class="sessionbar">
-										<input
-											aria-label="Local end"
-											type="datetime-local"
-											bind:value={sessionEnd[session.session_id]}
-										/>
-										<button
-											type="button"
-											class="small"
-											disabled={busy || !sessionEnd[session.session_id]}
-											onclick={() => closeMine(session, 'completed')}
-										>
-											Complete
-										</button>
-										<button
-											type="button"
-											class="secondary small"
-											disabled={busy || !sessionEnd[session.session_id]}
-											onclick={() => closeMine(session, 'interrupted')}
-										>
-											Interrupt
-										</button>
-										{#if session.draft_id === null}
+									<div class="closebar">
+										<label class="inline">
+											Local end
+											<input
+												type="datetime-local"
+												bind:value={sessionEnd[session.session_id]}
+											/>
+										</label>
+										<div class="sessionbar">
+											<button
+												type="button"
+												class="small"
+												disabled={busy || !sessionEnd[session.session_id]}
+												onclick={() => closeMine(session, 'completed')}
+											>
+												Complete
+											</button>
 											<button
 												type="button"
 												class="secondary small"
-												disabled={busy}
-												onclick={() => closeMine(session, 'cancelled')}
+												disabled={busy || !sessionEnd[session.session_id]}
+												onclick={() => closeMine(session, 'interrupted')}
 											>
-												Cancel session
+												Interrupt
 											</button>
-										{/if}
+											{#if session.draft_id === null}
+												<button
+													type="button"
+													class="secondary small"
+													disabled={busy}
+													onclick={() => closeMine(session, 'cancelled')}
+												>
+													Cancel session
+												</button>
+											{/if}
+										</div>
 									</div>
 								{/if}
 							</td>
@@ -450,37 +412,30 @@
 	</section>
 {/if}
 
-{#if canReview}
-	<section class="card">
-		<h2>Review queue</h2>
-		{#if queue.length === 0}
-			<p class="quiet">Nothing awaiting review.</p>
+{#if canViewAssigned}
+	<section class="panel">
+		<h2>My trainees</h2>
+		{#if assigned.length === 0}
+			<p class="quiet">No active training assignments.</p>
 		{:else}
 			<table class="grid">
 				<thead>
 					<tr>
 						<th>Trainee</th>
 						<th>Program</th>
-						<th>Owner</th>
-						<th>Submitted</th>
-						<th></th>
+						<th>Assigned</th>
 					</tr>
 				</thead>
 				<tbody>
-					{#each queue as row (row.record_id)}
+					{#each assigned as row (row.assignment_id)}
 						<tr>
-							<td>{row.trainee_display_name}</td>
-							<td>{row.program_name} — v{row.version_number}</td>
-							<td>{row.owner_display_name}</td>
-							<td>{instant(row.submitted_at)}</td>
 							<td>
-								<a href={`/drafts/${row.record_id}`}>
-									{row.eligible ? 'Review' : 'Open'}
+								<a href={`/enrollments/${row.enrollment_id}`}>
+									{row.trainee_display_name}
 								</a>
-								{#if !row.eligible}
-									<span class="quiet-inline">(you contributed)</span>
-								{/if}
 							</td>
+							<td>{row.program_name} — v{row.version_number}</td>
+							<td class="nowrap">{instant(row.assigned_at)}</td>
 						</tr>
 					{/each}
 				</tbody>
@@ -489,9 +444,100 @@
 	</section>
 {/if}
 
+{#if canViewOwn && !canAuthor && !canReview && !canManageUsers}
+	<section class="card">
+		<h2>Your training records</h2>
+		<p>
+			Your finalized evaluations, task signoffs, and downloadable packets are
+			kept together. When a trainer's evaluation of you is finalized it appears
+			there for you to acknowledge, and a notice shows here.
+		</p>
+		<p><a href="/records">Open your training records</a></p>
+	</section>
+{/if}
+
+<section class="panel">
+	<div class="cardhead">
+		<h2>Notices</h2>
+		{#if unread.length > 0}
+			<span class="count">{unread.length} unread</span>
+			<button
+				type="button"
+				class="secondary small"
+				disabled={markingAll}
+				onclick={markAllRead}
+			>
+				Mark all read
+			</button>
+		{/if}
+	</div>
+	{#if notices.length === 0}
+		<p class="quiet">No notices.</p>
+	{:else}
+		{#if shownNotices.length === 0}
+			<p class="quiet">Nothing new.</p>
+		{:else}
+			<ul class="notices">
+				{#each shownNotices as notice (notice.id)}
+					<li class:unread={notice.read_at === null}>
+						<p>{notice.message}</p>
+						<p class="meta">
+							{instant(notice.created_at)}
+							{#if notice.read_at === null}
+								<button class="secondary small" onclick={() => acknowledge(notice)}>
+									Mark read
+								</button>
+							{/if}
+						</p>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+		{#if notices.length > shownNotices.length || showAllNotices}
+			<button
+				type="button"
+				class="linkish"
+				aria-expanded={showAllNotices}
+				onclick={() => (showAllNotices = !showAllNotices)}
+			>
+				{showAllNotices ? 'Show unread only' : `Show all ${notices.length} notices`}
+			</button>
+		{/if}
+	{/if}
+</section>
+
+{#if canExport}
+	<section class="card">
+		<h2>Record exports</h2>
+		{#if summary === null}
+			<p class="quiet">Checking finalized records…</p>
+		{:else if summary.version_count === 0}
+			<p class="quiet">No finalized records yet; there is nothing to export.</p>
+		{:else}
+			<p>
+				This installation holds {summary.version_count} finalized
+				{summary.version_count === 1 ? 'version' : 'versions'} across
+				{summary.record_count}
+				{summary.record_count === 1 ? 'record' : 'records'}. An export carries
+				every one as its stored canonical bytes beside a manifest and verifies
+				from the archive alone with <code>consolebook-server export verify</code>.
+			</p>
+			<button type="button" class="secondary" disabled={busy} onclick={exportInstallation}>
+				Export every finalized record
+			</button>
+			{#if exported}
+				<p class="quiet" role="status">Downloaded {exported}.</p>
+			{/if}
+		{/if}
+		{#if exportError}
+			<p class="error" role="alert">{exportError}</p>
+		{/if}
+	</section>
+{/if}
+
 {#if canManageUsers}
 	<section class="card">
-		<h2>Create a user</h2>
+		<h2>Add a person</h2>
 		<p>
 			The account starts with the chosen role's capabilities and no password.
 			Relay the one-time code below; their first sign-in sets a password
@@ -551,7 +597,29 @@
 	</section>
 {/if}
 
-<button class="secondary" onclick={signOut}>Sign out</button>
+<details class="about">
+	<summary>About this installation</summary>
+	<dl class="facts">
+		<dt>Agency</dt>
+		<dd>{data.instance.agency}</dd>
+		<dt>Signed in as</dt>
+		<dd>{session?.user.display_name} ({session?.user.username})</dd>
+		<dt>You can</dt>
+		<dd>
+			{#if session && session.capabilities.length > 0}
+				{session.capabilities.map(capabilityName).join(' · ')}
+			{:else}
+				Nothing yet; ask an administrator.
+			{/if}
+		</dd>
+		<dt>Session expires</dt>
+		<dd>{session ? instant(session.expires_at) : '—'}</dd>
+		<dt>Server version</dt>
+		<dd>{data.instance.version}</dd>
+		<dt>Database</dt>
+		<dd>{health ? health.database : 'checking…'}</dd>
+	</dl>
+</details>
 
 <style>
 	h2 {
@@ -608,8 +676,128 @@
 		align-items: center;
 		flex-wrap: wrap;
 	}
-	.sessionbar input {
+	.sub {
+		display: block;
+		font-size: 0.85rem;
+		opacity: 0.75;
+	}
+	abbr {
+		text-decoration: none;
+	}
+	.pill.status {
+		text-transform: capitalize;
+	}
+	.pill.status.open {
+		background: light-dark(#fdf1d7, #3b301e);
+		color: light-dark(#7a5410, #e4c26d);
+	}
+	.pill.status.completed {
+		background: light-dark(#dcefdd, #1e3524);
+		color: light-dark(#1e5c28, #9fd3a8);
+	}
+	.pill.status.interrupted,
+	.pill.status.cancelled {
+		background: light-dark(#eceef2, #2a303b);
+		color: light-dark(#4b5361, #b4bcc8);
+	}
+	table.sessions td {
+		vertical-align: top;
+	}
+	/* On a phone each session is a card: when and status on one line,
+	   then the trainee, then the actions, so nothing hides off to the side. */
+	@media (max-width: 48rem) {
+		table.sessions {
+			display: block;
+			overflow: visible;
+		}
+		table.sessions thead {
+			display: none;
+		}
+		table.sessions tbody,
+		table.sessions tr {
+			display: block;
+		}
+		table.sessions tr {
+			display: grid;
+			grid-template-columns: 1fr auto;
+			gap: 0.4rem 0.75rem;
+			padding: 0.75rem 0;
+			border-bottom: 1px solid light-dark(#e3e6eb, #2a303b);
+		}
+		table.sessions td {
+			display: block;
+			padding: 0;
+			border: 0;
+			grid-column: 1 / -1;
+		}
+		table.sessions td.when {
+			grid-column: 1;
+		}
+		table.sessions td.closed {
+			display: none;
+		}
+		table.sessions td.when {
+			grid-row: 1;
+		}
+		table.sessions td.state {
+			grid-column: 2;
+			grid-row: 1;
+			text-align: right;
+		}
+		.closebar {
+			min-width: 0;
+		}
+	}
+	.closebar {
+		display: grid;
+		gap: 0.35rem;
+		min-width: 15rem;
+	}
+	label.inline {
 		margin: 0;
-		width: auto;
+		font-size: 0.8rem;
+		font-weight: 600;
+		opacity: 0.85;
+	}
+	label.inline input {
+		display: block;
+		margin: 0.15rem 0 0;
+		font-weight: 400;
+	}
+	.cardhead {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		margin: 0 0 0.5rem;
+	}
+	.cardhead h2 {
+		margin: 0;
+	}
+	.count {
+		font-size: 0.85rem;
+		opacity: 0.75;
+		margin-right: auto;
+	}
+	button.linkish {
+		background: none;
+		border: 0;
+		padding: 0.25rem 0;
+		color: light-dark(#2456a6, #7fabf5);
+		font-weight: 600;
+		font-size: 0.9rem;
+	}
+	button.linkish:hover {
+		text-decoration: underline;
+	}
+	details.about {
+		max-width: 44rem;
+		margin: 2rem 0 0;
+		font-size: 0.92rem;
+	}
+	details.about summary {
+		cursor: pointer;
+		font-weight: 600;
+		opacity: 0.8;
+		margin: 0 0 0.75rem;
 	}
 </style>

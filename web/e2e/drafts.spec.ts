@@ -124,7 +124,7 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 	await page.getByLabel('Username').fill('avery.admin');
 	await page.getByLabel('Password').fill(PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page.getByRole('heading', { name: 'Installation status' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible();
 
 	// Seed the published program, people, enrollment, assignment, and an
 	// open session over the API; the cookie rides page.request.
@@ -220,7 +220,7 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 	const draftUrl = page.url();
 
 	// Rowan finds the session on their list, opens the draft, and submits.
-	await page.getByRole('link', { name: 'Home' }).click();
+	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 	await page.getByRole('button', { name: 'Sign out' }).click();
 	await resetAndLogin(page, 'rowan.trainer', rowan.reset_code, ROWAN_PASSWORD);
 	await expect(page.getByRole('heading', { name: 'My sessions' })).toBeVisible();
@@ -243,7 +243,7 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 
 	// The coordinator finds the draft on the review queue; a change
 	// request needs its comment, then reopens the draft.
-	await page.getByRole('link', { name: 'Home' }).click();
+	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 	await page.getByRole('button', { name: 'Sign out' }).click();
 	await resetAndLogin(page, 'casey.coord', casey.reset_code, CASEY_PASSWORD);
 	await expect(page.getByRole('heading', { name: 'Review queue' })).toBeVisible();
@@ -261,7 +261,7 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 	).toBeVisible();
 
 	// The owner revises the reopened draft and resubmits.
-	await page.getByRole('link', { name: 'Home' }).click();
+	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 	await page.getByRole('button', { name: 'Sign out' }).click();
 	await page.getByLabel('Username').fill('rowan.trainer');
 	await page.getByLabel('Password').fill(ROWAN_PASSWORD);
@@ -277,7 +277,7 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 
 	// The same reviewer approves the resubmission; the draft stays
 	// frozen and the verdicts stand in the record.
-	await page.getByRole('link', { name: 'Home' }).click();
+	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 	await page.getByRole('button', { name: 'Sign out' }).click();
 	await page.getByLabel('Username').fill('casey.coord');
 	await page.getByLabel('Password').fill(CASEY_PASSWORD);
@@ -329,7 +329,7 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 
 	// Taylor signs in, finds the record on their timeline, and
 	// acknowledges receipt with a response.
-	await page.getByRole('link', { name: 'Home' }).click();
+	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 	await page.getByRole('button', { name: 'Sign out' }).click();
 	await resetAndLogin(page, 'taylor.trainee', trainee.reset_code, TAYLOR_PASSWORD);
 	await page.getByRole('link', { name: 'My records' }).click();
@@ -370,12 +370,12 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 
 	// A correction is an amendment, never an edit: the coordinator
 	// reopens the sealed record with a reason...
-	await page.getByRole('link', { name: 'Home' }).click();
+	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 	await page.getByRole('button', { name: 'Sign out' }).click();
 	await page.getByLabel('Username').fill('casey.coord');
 	await page.getByLabel('Password').fill(CASEY_PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page.getByRole('heading', { name: 'Installation status' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible();
 	await page.goto(draftUrl);
 	await expect(page.getByRole('heading', { name: 'Amend' })).toBeVisible();
 	await page
@@ -386,12 +386,12 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 	await expect(page.getByText('Draft', { exact: true })).toBeVisible();
 
 	// ...the owner corrects the reopened copy and resubmits...
-	await page.getByRole('link', { name: 'Home' }).click();
+	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 	await page.getByRole('button', { name: 'Sign out' }).click();
 	await page.getByLabel('Username').fill('rowan.trainer');
 	await page.getByLabel('Password').fill(ROWAN_PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page.getByRole('heading', { name: 'Installation status' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible();
 	await page.goto(draftUrl);
 	await page
 		.getByLabel('Least acceptable performance.')
@@ -403,12 +403,12 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 	// ...the reviewer approves and seals version 2, chained to the
 	// original, which stays readable in the history with its
 	// acknowledgment.
-	await page.getByRole('link', { name: 'Home' }).click();
+	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 	await page.getByRole('button', { name: 'Sign out' }).click();
 	await page.getByLabel('Username').fill('casey.coord');
 	await page.getByLabel('Password').fill(CASEY_PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page.getByRole('heading', { name: 'Installation status' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible();
 	await page.goto(draftUrl);
 	await page.getByLabel('Decision').selectOption({ label: 'Approve' });
 	await page.getByRole('button', { name: 'Decide' }).click();
@@ -438,7 +438,7 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 
 	// The successor never inherits acknowledgment: Taylor's timeline
 	// shows the amended record awaiting them again.
-	await page.getByRole('link', { name: 'Home' }).click();
+	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 	await page.getByRole('button', { name: 'Sign out' }).click();
 	await page.getByLabel('Username').fill('taylor.trainee');
 	await page.getByLabel('Password').fill(TAYLOR_PASSWORD);
@@ -452,12 +452,12 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 
 	// The coordinator signs off tasks on the enrollment page: the first
 	// signoff is a plain act, changing it is an override with a reason.
-	await page.getByRole('link', { name: 'Home' }).click();
+	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 	await page.getByRole('button', { name: 'Sign out' }).click();
 	await page.getByLabel('Username').fill('casey.coord');
 	await page.getByLabel('Password').fill(CASEY_PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page.getByRole('heading', { name: 'Installation status' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible();
 	await page.goto(`/enrollments/${enrollment.id}`);
 	await expect(page.getByRole('heading', { name: 'Task signoffs' })).toBeVisible();
 	await page.getByRole('button', { name: 'Observed', exact: true }).first().click();
