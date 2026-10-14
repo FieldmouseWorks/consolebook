@@ -3,16 +3,14 @@ name: release
 # Builds static Linux release archives, proves the installer end to end on a
 # real systemd host (fresh install, setup code, upgrade), and on a version tag
 # publishes them as a GitHub release. docs/releasing.md owns the procedure;
-# ADR 0022 owns what a version means.
+# ADR 0022 owns what a version means. It runs on every pull request, not only
+# installer changes: any Rust, dependency, or web change can break the static
+# musl build, and that must fail before merge, not after a tag is pushed.
 on:
   push:
     tags: ['v*']
   pull_request:
     branches: [main]
-    paths:
-      - 'install/**'
-      - 'scripts/package-release.sh'
-      - '.github/workflows/release.yml'
   workflow_dispatch:
 
 permissions:
