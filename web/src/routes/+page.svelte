@@ -204,55 +204,55 @@
 
 	// The first day, in order: each step is done when the installation's
 	// counts say so, and links to where it happens (docs/install.md).
-	let setupSteps = $derived(
-		progress === null
-			? []
-			: [
-					{
-						label: 'Add people: a coordinator, a trainer, and a trainee',
-						done:
-							progress.coordinators > 0 && progress.trainers > 0 && progress.trainees > 0,
-						href: '#add-person',
-						hint: 'Each gets a one-time code to choose a password.'
-					},
-					{
-						label: 'Create a training program',
-						done: progress.programs > 0,
-						href: '/programs',
-						hint: 'Phases, competencies and tasks, a rating scale, and a form.'
-					},
-					{
-						label: 'Publish a program version',
-						done: progress.published_versions > 0,
-						href: '/programs',
-						hint: 'Published versions are frozen; records pin them.'
-					},
-					{
-						label: 'Enroll a trainee',
-						done: progress.enrollments > 0,
-						href: '/programs',
-						hint: "From the published version's page."
-					},
-					{
-						label: 'Assign a trainer',
-						done: progress.assignments > 0,
-						href: null,
-						hint: "On the trainee's enrollment page."
-					},
-					{
-						label: 'Record a training session',
-						done: progress.sessions > 0,
-						href: null,
-						hint: "Also on the enrollment page; the trainer then sees it on their home."
-					},
-					{
-						label: 'Finalize a first evaluation',
-						done: progress.finalized_records > 0,
-						href: null,
-						hint: 'The trainer writes it, a coordinator reviews and finalizes it.'
-					}
-				]
-	);
+	let setupSteps = $derived.by(() => {
+		const counts = progress;
+		if (counts === null) return [];
+		return [
+			{
+				label: 'Add people: a coordinator, a trainer, and a trainee',
+				done:
+					counts.coordinators > 0 && counts.trainers > 0 && counts.trainees > 0,
+				href: '#add-person',
+				hint: 'Each gets a one-time code to choose a password.'
+			},
+			{
+				label: 'Create a training program',
+				done: counts.programs > 0,
+				href: '/programs',
+				hint: 'Phases, competencies and tasks, a rating scale, and a form.'
+			},
+			{
+				label: 'Publish a program version',
+				done: counts.published_versions > 0,
+				href: '/programs',
+				hint: 'Published versions are frozen; records pin them.'
+			},
+			{
+				label: 'Enroll a trainee',
+				done: counts.enrollments > 0,
+				href: '/programs',
+				hint: "From the published version's page."
+			},
+			{
+				label: 'Assign a trainer',
+				done: counts.assignments > 0,
+				href: null,
+				hint: "On the trainee's enrollment page."
+			},
+			{
+				label: 'Record a training session',
+				done: counts.sessions > 0,
+				href: null,
+				hint: "Also on the enrollment page; the trainer then sees it on their home."
+			},
+			{
+				label: 'Finalize a first evaluation',
+				done: counts.finalized_records > 0,
+				href: null,
+				hint: 'The trainer writes it, a coordinator reviews and finalizes it.'
+			}
+		];
+	});
 	let setupDone = $derived(setupSteps.filter((step) => step.done).length);
 
 	let newUsername = $state('');
