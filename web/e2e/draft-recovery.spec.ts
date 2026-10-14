@@ -2388,6 +2388,8 @@ test('a failed ordinary save cannot silently leave by SPA navigation', async ({
 		await author.unroute(`**/api/drafts/${seeded.draftId}/content`);
 		await author.getByLabel(MOST).fill('Invented corrected note saved on retry.');
 		await expectSaved(author);
+		// The saved retry withdraws the refusal; nothing says it did not save.
+		await expect(author.getByRole('alert')).toHaveCount(0);
 		await expectUnloadReady(author);
 		await markSpa(author);
 		await homeSessions(author);

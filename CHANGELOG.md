@@ -18,6 +18,11 @@ not a production-readiness statement.
 - A version that finds a database upgraded by a newer release refuses it in
   plain words and names the way back.
 
+### Fixed
+
+- A draft that saves after a failed save no longer keeps saying "The draft
+  did not save" ([#83](https://github.com/FieldmouseWorks/consolebook/issues/83)).
+
 ## [0.1.0] - 2026-10-14
 
 The first versioned release: everything built through Milestone 4 and the
