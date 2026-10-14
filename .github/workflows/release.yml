@@ -76,12 +76,16 @@ jobs:
           grep -q "\"commit\":\"$(git rev-parse --short=12 HEAD)\"" health.json
           systemctl is-active consolebook
           test "$(stat -c %U /var/lib/consolebook)" = consolebook
+      # The upgrade also moves the service to a specific, non-default
+      # address, so the installer's own health probe must follow the bind.
       - name: Installer, upgrade in place
         run: |
-          sudo install/install.sh --from "dist/consolebook-linux-${{ matrix.arch }}.tar.gz" | tee upgrade.log
+          sudo install/install.sh --from "dist/consolebook-linux-${{ matrix.arch }}.tar.gz" \
+            --listen 127.0.0.2:7771 | tee upgrade.log
           grep -q 'Setup code' upgrade.log  # still uninitialized, so a fresh code is offered
+          grep -q 'http://127.0.0.2:7771/' upgrade.log
           systemctl is-active consolebook
-          curl -fsS http://127.0.0.1:7770/api/instance
+          curl -fsS http://127.0.0.2:7771/api/instance
       # Jobs share archives through a draft release, published once all pass.
       - name: Upload to the draft release
         if: startsWith(github.ref, 'refs/tags/v')
