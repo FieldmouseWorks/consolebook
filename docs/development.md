@@ -28,6 +28,7 @@ tests show what is implemented. [Roadmap](roadmap.md) owns milestone status.
 | Trainee packets | `trainee_packet.rs`, `packet_verify.rs` | [ADR 0015](decisions/0015-trainee-packet.md), [ADR 0017](decisions/0017-packet-pin-timeline-verification.md), [Packet format](formats/trainee-packet.md) |
 | Retention policy and holds | `retention.rs`, `retention/`, `retention_http.rs` | [ADR 0020](decisions/0020-retention-policy-and-hold-administration.md), [Operator guide](retention.md); disposition execution remains [#64](https://github.com/FieldmouseWorks/consolebook/issues/64) |
 | Web shell and HTTP | `http.rs`, `web_assets.rs`, `notices.rs`, domain `*_http.rs` modules | [ADR 0005](decisions/0005-embedded-web-interface.md), web map below |
+| Versions and releases | `lib.rs` (`VERSION`, `BUILD_COMMIT`), `../build.rs`, `tests/release_version.rs` | [ADR 0022](decisions/0022-product-versioning.md), [Releasing](releasing.md), [Changelog](../CHANGELOG.md) |
 | Preview operations | Separate host installation | [Preview runbook](preview.md) |
 
 `lib.rs` exposes the library modules. Integration tests in

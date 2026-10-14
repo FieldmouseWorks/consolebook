@@ -1,0 +1,38 @@
+# Changelog
+
+Notable changes to Consolebook, by release. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
+[ADR 0022](docs/decisions/0022-product-versioning.md): Semantic Versioning,
+pre-1.0, with portable formats and migrations versioned separately.
+
+Consolebook is pre-alpha. A release is a reproducible, identifiable build,
+not a production-readiness statement.
+
+## [Unreleased]
+
+## [0.1.0] - 2026-10-14
+
+The first versioned release: everything built through Milestone 4 and the
+first Milestone 5 slices ([roadmap](docs/roadmap.md)).
+
+### Added
+
+- One executable and one SQLite data directory: first-run setup code, local
+  administrator, sign-in, administrator-issued password resets, local
+  recovery, `doctor` (read-only diagnostics), validated backups and restore.
+- Versioned program configuration: programs, immutable published versions,
+  phases and transitions, competencies, tasks, rating scales, evaluation
+  forms, comparison, export and import.
+- Training workflow: users and capabilities, enrollments and phase history,
+  assignments, training sessions in agency-local time, daily evaluation
+  drafts with autosave and attribution, review and change requests, notices.
+- Defensible records: canonical record format, immutable finalized
+  versions with content and chain hashes, acknowledgments, responses and
+  refusals, amendments as successor versions, weekly summaries, task
+  signoffs, and a trainee's own record timeline and signoff history.
+- Exports: verifiable record exports and trainee packets, checked offline
+  with `consolebook-server export verify`.
+- Retention administration: explicit authority, versioned retention
+  policies, and attributed record holds. Disposition is not yet executed.
+- Build identity: `--version`, `/api/instance`, `/api/health`, the startup
+  log, and the interface footer report the version and source commit.

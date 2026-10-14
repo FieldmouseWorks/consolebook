@@ -12,11 +12,12 @@ use consolebook_server::doctor::Verdict;
 use consolebook_server::serve_lock::ServeLock;
 use consolebook_server::users::{IssueRefusal, ResetOrigin};
 use consolebook_server::{
-    VERSION, backup, doctor, export_verify, http, restore, scheduler, setup, storage, users,
+    BUILD_COMMIT, BUILD_IDENTITY, VERSION, backup, doctor, export_verify, http, restore, scheduler,
+    setup, storage, users,
 };
 
 #[derive(Parser)]
-#[command(name = "consolebook", version = VERSION, about = "Training-record system for emergency communications centers (pre-alpha)")]
+#[command(name = "consolebook", version = BUILD_IDENTITY, about = "Training-record system for emergency communications centers (pre-alpha)")]
 struct Cli {
     /// Installation data directory (one directory per agency installation).
     #[arg(
@@ -161,6 +162,7 @@ async fn serve(
     let installation_id = storage::installation_id(&pool).await?;
     tracing::info!(
         version = VERSION,
+        commit = BUILD_COMMIT,
         installation_id,
         data_dir = %data_dir.root().display(),
         "starting Consolebook (pre-alpha)"

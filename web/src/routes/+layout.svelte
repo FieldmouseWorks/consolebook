@@ -33,7 +33,9 @@
 		{@render children()}
 	</main>
 	<footer>
-		Consolebook {data.instance.version} · pre-alpha · AGPL-3.0-only
+		Consolebook {data.instance.version}
+		<span class="commit" title="Source commit of this build">({data.instance.commit})</span>
+		· pre-alpha · AGPL-3.0-only
 	</footer>
 </div>
 
@@ -112,6 +114,9 @@
 		font-size: 0.8rem;
 		opacity: 0.65;
 		text-align: center;
+	}
+	.commit {
+		font-family: ui-monospace, monospace;
 	}
 
 	:global(h1) {

@@ -26,8 +26,9 @@ cookie. The app itself does not yet set that attribute (ADR 0004).
 
 The service runs a copied release executable. Editing the checkout, rebuilding
 the web app, or merging a PR does not deploy it. There is no automatic deploy
-pipeline or built-in Git revision display; the reported `0.0.0` cannot identify
-which commit is running. Record the source commit and executable SHA-256 with
+pipeline. Builds from `0.1.0` report their version and source commit in the
+footer, `consolebook --version`, and `/api/health` (ADR 0022); an older binary
+reports `0.0.0` without a commit. Still record the executable SHA-256 with
 each deployment.
 
 ## Read-only status checks

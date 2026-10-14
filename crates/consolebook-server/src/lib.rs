@@ -52,5 +52,18 @@ pub mod zip_container;
 /// Version of the running build, as reported by `/api/health` and `doctor`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// The source commit this binary was built from, recorded by `build.rs`
+/// (ADR 0022): a release build pins it with `CONSOLEBOOK_BUILD_COMMIT`;
+/// otherwise it is the checkout's `HEAD`, or `unknown` without git.
+pub const BUILD_COMMIT: &str = env!("CONSOLEBOOK_BUILD_COMMIT");
+
+/// Version and commit together, as `--version` and the startup log show them.
+pub const BUILD_IDENTITY: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (",
+    env!("CONSOLEBOOK_BUILD_COMMIT"),
+    ")"
+);
+
 pub mod retention;
 pub mod retention_http;

@@ -84,6 +84,7 @@ async fn health_endpoint_reports_ok_with_database() {
     assert_eq!(body["status"], "ok");
     assert_eq!(body["database"], "ok");
     assert_eq!(body["version"], consolebook_server::VERSION);
+    assert_eq!(body["commit"], consolebook_server::BUILD_COMMIT);
 }
 
 #[tokio::test]
