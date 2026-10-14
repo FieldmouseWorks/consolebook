@@ -261,13 +261,15 @@ async fn opening_for_use_backs_up_migrates_and_audits() {
     older_installation(&data_dir).await;
     let older = applied(&data_dir.database()).await;
 
-    let pool = backup::open_migrated(&data_dir, None).await.expect("open");
+    let pool = backup::open_migrated(&data_dir, None, None)
+        .await
+        .expect("open");
     pool.close().await;
     assert_eq!(backup::snapshots(&data_dir).expect("list").len(), 1);
     assert_eq!(applied(&data_dir.database()).await, older + 1);
     assert_eq!(backups_audited(&data_dir.database()).await, 1);
 
-    let pool = backup::open_migrated(&data_dir, None)
+    let pool = backup::open_migrated(&data_dir, None, None)
         .await
         .expect("reopen");
     pool.close().await;
@@ -360,7 +362,7 @@ async fn a_running_server_blocks_a_migrating_command_but_not_an_ordinary_one() {
     let older = applied(&data_dir.database()).await;
 
     let server = ServeLock::acquire(&data_dir).expect("a server holds the installation");
-    let err = backup::open_migrated(&data_dir, None)
+    let err = backup::open_migrated(&data_dir, None, None)
         .await
         .expect_err("migrating beside a running server is refused");
     assert!(
@@ -371,7 +373,7 @@ async fn a_running_server_blocks_a_migrating_command_but_not_an_ordinary_one() {
     assert!(names(&data_dir).is_empty(), "no snapshot taken");
     drop(server);
 
-    backup::open_migrated(&data_dir, None)
+    backup::open_migrated(&data_dir, None, None)
         .await
         .expect("migrates once the server is gone")
         .close()
@@ -380,7 +382,7 @@ async fn a_running_server_blocks_a_migrating_command_but_not_an_ordinary_one() {
 
     // Nothing pending: `recover` works beside a running server.
     let _server = ServeLock::acquire(&data_dir).expect("a server holds the installation");
-    backup::open_migrated(&data_dir, None)
+    backup::open_migrated(&data_dir, None, None)
         .await
         .expect("an ordinary command needs no lock")
         .close()
@@ -414,4 +416,63 @@ async fn a_later_backup_is_newer_than_the_pre_migration_snapshot() {
         copy.copy.file_name().expect("name").to_string_lossy(),
         later
     );
+}
+
+/// A failed upgrade most needs its recovery point off the server, and the
+/// scheduler that would copy it never starts then: the copy happens before
+/// migrating. An unreachable share does not block the upgrade.
+#[tokio::test]
+async fn the_pre_migration_backup_is_copied_off_the_server_before_migrating() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let data_dir = DataDir::new(tmp.path().join("data"));
+    data_dir.ensure_layout().expect("layout");
+    older_installation(&data_dir).await;
+    let share = tempfile::tempdir_in("/dev/shm").expect("these tests need /dev/shm (a tmpfs)");
+
+    backup::open_migrated(
+        &data_dir,
+        None,
+        Some(backup::OffServerCopy {
+            dir: share.path(),
+            keep: 14,
+        }),
+    )
+    .await
+    .expect("open")
+    .close()
+    .await;
+    let local = names(&data_dir);
+    let copied: Vec<String> = backup::snapshots_in(share.path())
+        .expect("list")
+        .iter()
+        .map(|path| {
+            path.file_name()
+                .expect("name")
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    assert_eq!(
+        copied, local,
+        "the pre-migration snapshot is off the server"
+    );
+
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let data_dir = DataDir::new(tmp.path().join("data"));
+    data_dir.ensure_layout().expect("layout");
+    older_installation(&data_dir).await;
+    let older = applied(&data_dir.database()).await;
+    backup::open_migrated(
+        &data_dir,
+        None,
+        Some(backup::OffServerCopy {
+            dir: &share.path().join("not-mounted"),
+            keep: 14,
+        }),
+    )
+    .await
+    .expect("an unreachable share does not block the upgrade")
+    .close()
+    .await;
+    assert_eq!(applied(&data_dir.database()).await, older + 1);
 }

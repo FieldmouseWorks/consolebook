@@ -301,7 +301,16 @@ impl PreMigrationBackup {
 /// `serve` passes the lock it holds; any other command takes it here when a
 /// migration is pending, and refuses while a server holds it. With nothing
 /// pending, no lock is needed, so `recover` works beside a running server.
-pub async fn open_migrated(data_dir: &DataDir, held: Option<&ServeLock>) -> Result<SqlitePool> {
+///
+/// With an off-server copy configured, the snapshot is also copied there
+/// before migrating, so a failed upgrade's recovery point does not live
+/// only on the database's disk. That copy is best effort: an unreachable
+/// share is reported, and the next start's catch-up retries it.
+pub async fn open_migrated(
+    data_dir: &DataDir,
+    held: Option<&ServeLock>,
+    copy: Option<OffServerCopy<'_>>,
+) -> Result<SqlitePool> {
     let _exclusive = match held {
         None if migration_pending(data_dir).await? => Some(ServeLock::acquire(data_dir).context(
             "this version migrates the database, which needs the installation to itself; \
@@ -317,12 +326,32 @@ pub async fn open_migrated(data_dir: &DataDir, held: Option<&ServeLock>) -> Resu
             "this version migrates the database; took a validated backup first \
              (to go back: stop the service, install the previous release, and restore this snapshot)"
         );
+        if let Some(copy) = copy {
+            match crate::backup_copy::copy_snapshot(backup.snapshot(), copy.dir, copy.keep) {
+                Ok(report) => tracing::info!(
+                    copy = %report.copy.display(),
+                    sha256 = report.sha256,
+                    "pre-migration backup copied off the server and verified"
+                ),
+                Err(err) => tracing::warn!(
+                    "could not copy the pre-migration backup off the server: {err:#}; \
+                     it is in backups/, and the next start retries"
+                ),
+            }
+        }
     }
     let pool = storage::open(&data_dir.database()).await?;
     if let Some(backup) = pre_migration {
         backup.record(&pool).await?;
     }
     Ok(pool)
+}
+
+/// The off-server copy directory and its retention count (ADR 0024).
+#[derive(Debug, Clone, Copy)]
+pub struct OffServerCopy<'a> {
+    pub dir: &'a Path,
+    pub keep: usize,
 }
 
 /// Explicit durability step: fsync a file and its directory entry.
