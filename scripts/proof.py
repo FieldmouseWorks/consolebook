@@ -32,7 +32,9 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
@@ -61,7 +63,24 @@ class SetupError(Exception):
 # --- Sequence source ---------------------------------------------------------
 
 
-def parse_sequence(text: str) -> tuple[list[str], str | None]:
+def runs_e2e(line: str) -> bool:
+    """Whether a gate line invokes the browser suite as a command.
+
+    The line is split into shell commands at `&&`, `||`, and `;`; one of them,
+    without grouping parentheses and leading `NAME=value` assignments, must be
+    exactly `npm run e2e`. Text that merely mentions it (`echo npm run e2e`)
+    does not count.
+    """
+    for command in re.split(r"&&|\|\||;", line):
+        words = command.replace("(", " ").replace(")", " ").split()
+        while words and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=\S*", words[0]):
+            words.pop(0)
+        if words == E2E_MARKER.split():
+            return True
+    return False
+
+
+def parse_sequence(text: str) -> tuple[list[str], str]:
     """Return (gate steps, system-browser line or None) from CONTRIBUTING.md text."""
     lines = text.splitlines()
     try:
@@ -94,7 +113,7 @@ def parse_sequence(text: str) -> tuple[list[str], str | None]:
     if not steps:
         raise SetupError("CONTRIBUTING.md: the gate block has no commands")
     # A receipt that says "passed" must include the browser suite exactly once.
-    e2e = sum(E2E_MARKER in s for s in steps)
+    e2e = sum(runs_e2e(s) for s in steps)
     if e2e != 1:
         raise SetupError(
             f"CONTRIBUTING.md: expected one gate step running '{E2E_MARKER}', found {e2e}"
@@ -103,26 +122,24 @@ def parse_sequence(text: str) -> tuple[list[str], str | None]:
     browser_lines = [
         s for block in blocks[1:] for s in block if f"{BROWSER_VAR}=" in s
     ]
-    if len(browser_lines) > 1:
+    if len(browser_lines) != 1:
         raise SetupError(
             f"CONTRIBUTING.md: expected one {BROWSER_VAR}= line, found {len(browser_lines)}"
         )
-    if browser_lines and E2E_MARKER not in browser_lines[0]:
+    if not runs_e2e(browser_lines[0]):
         raise SetupError(
             f"CONTRIBUTING.md: the {BROWSER_VAR}= line must run '{E2E_MARKER}'"
         )
-    return steps, (browser_lines[0] if browser_lines else None)
+    return steps, browser_lines[0]
 
 
-def with_system_browser(steps: list[str], browser_line: str | None, chromium: str) -> list[str]:
+def with_system_browser(steps: list[str], browser_line: str, chromium: str) -> list[str]:
     """Swap the browser step for CONTRIBUTING.md's system-browser line."""
-    if browser_line is None:
-        raise SetupError(f"CONTRIBUTING.md documents no {BROWSER_VAR}= line to use")
     if browser_line.count(BROWSER_PLACEHOLDER) != 1:
         raise SetupError(
             f"CONTRIBUTING.md: the {BROWSER_VAR}= line must contain '{BROWSER_PLACEHOLDER}' once"
         )
-    hits = [i for i, s in enumerate(steps) if E2E_MARKER in s]
+    hits = [i for i, s in enumerate(steps) if runs_e2e(s)]
     if len(hits) != 1:
         raise SetupError(
             f"CONTRIBUTING.md: expected one gate step running '{E2E_MARKER}', found {len(hits)}"
@@ -153,20 +170,43 @@ def git(root: Path, *args: str) -> bytes:
     ).stdout
 
 
+def status_entries(root: Path) -> list[tuple[str, str]]:
+    """`git status` as (two-letter code, path) pairs, paths unquoted.
+
+    Reads the NUL-separated form, so names with spaces, quotes, or non-ASCII
+    characters arrive exactly as on disk; a rename's second (source) path is
+    folded into its entry.
+    """
+    raw = git(root, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+    fields = raw.decode("utf-8", errors="surrogateescape").split("\0")
+    entries: list[tuple[str, str]] = []
+    i = 0
+    while i < len(fields):
+        record = fields[i]
+        i += 1
+        if not record:
+            continue
+        code, path = record[:2], record[3:]
+        if code[0] in "RC":
+            path = f"{fields[i]} -> {path}"
+            i += 1
+        entries.append((code, path))
+    return entries
+
+
 def candidate_state(root: Path) -> dict:
     """Revision, tree, and dirty state: what the receipt's results are about."""
-    status = git(root, "status", "--porcelain=v1", "--untracked-files=all").decode()
+    entries = status_entries(root)
     untracked = {}
-    for line in status.splitlines():
-        if line.startswith("?? "):
-            rel = line[3:]
+    for code, rel in entries:
+        if code == "??":
             p = root / rel
             untracked[rel] = sha256_file(p) if p.is_file() else None
     return {
         "head": git(root, "rev-parse", "HEAD").decode().strip(),
         "tree": git(root, "rev-parse", "HEAD^{tree}").decode().strip(),
-        "dirty": bool(status.strip()),
-        "status": status.splitlines(),
+        "dirty": bool(entries),
+        "status": [f"{code} {path}" for code, path in entries],
         "tracked_diff_sha256": hashlib.sha256(git(root, "diff", "HEAD", "--binary")).hexdigest(),
         "untracked_sha256": untracked,
     }
@@ -251,6 +291,11 @@ def new_receipt_dir(base: Path, head: str, dirty: bool) -> Path:
     raise SetupError(f"could not create a fresh receipt directory under {base}")
 
 
+def _terminated(_signum: int, _frame: object) -> None:
+    """SIGTERM (a cancelled CI job or container stop) ends a run like Ctrl-C."""
+    raise KeyboardInterrupt
+
+
 def run_step(cmd: str, root: Path, env: dict, log_path: Path) -> int:
     with log_path.open("wb") as log:
         proc = subprocess.Popen(
@@ -313,6 +358,7 @@ def run_sequence(
           f"{'system Chromium at ' + chromium if chromium else 'Playwright-managed Chromium'}")
     print(f"{ME}: receipt directory: {out_dir}")
 
+    previous_term = signal.signal(signal.SIGTERM, _terminated)
     t0 = time.monotonic()
     # "passed" is set only when every step ran and exited 0; any other end,
     # including an unexpected exception, leaves a non-passing receipt.
@@ -348,17 +394,24 @@ def run_sequence(
         result = "interrupted"
         print(f"\n{ME}: interrupted; writing the receipt", file=sys.stderr)
     finally:
-        receipt["finished_at"] = now()
-        receipt["duration_s"] = round(time.monotonic() - t0, 3)
-        receipt["result"] = result
-        receipt["failed_step"] = failed
-        after = candidate_state(root)
-        receipt["candidate_unchanged_during_run"] = after == before
-        if after != before:
-            receipt["candidate_after"] = after
-        receipt["browser"] = browser_identity(root, chromium) if artifacts else None
-        receipt["artifacts"] = collect_artifacts(root, out_dir, receipt["steps"]) if artifacts else {}
-        write_receipt(receipt, out_dir)
+        # A second termination must not cut the receipt short.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        try:
+            receipt["finished_at"] = now()
+            receipt["duration_s"] = round(time.monotonic() - t0, 3)
+            receipt["result"] = result
+            receipt["failed_step"] = failed
+            after = candidate_state(root)
+            receipt["candidate_unchanged_during_run"] = after == before
+            if after != before:
+                receipt["candidate_after"] = after
+            receipt["browser"] = browser_identity(root, chromium) if artifacts else None
+            receipt["artifacts"] = (
+                collect_artifacts(root, out_dir, receipt["steps"]) if artifacts else {}
+            )
+            write_receipt(receipt, out_dir)
+        finally:
+            signal.signal(signal.SIGTERM, previous_term)
     return receipt, out_dir
 
 
@@ -470,6 +523,32 @@ def self_test(root: Path) -> int:
         check(saved["result"] == "error" and saved["failed_step"] == 1, "result error at step 1")
         check([s["status"] for s in saved["steps"]] == ["error", "not-run"], "statuses error, not-run")
 
+    print("termination control: SIGTERM mid-run keeps an interrupted receipt")
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        r, d = run_sequence(["kill -TERM $PPID; sleep 5", "echo never"], root, base,
+                            chromium=None, invocation=inv, artifacts=False)
+        saved = json.loads((d / "receipt.json").read_text())
+        check(saved["result"] == "interrupted" and saved["failed_step"] == 1,
+              "result interrupted at step 1")
+        check([s["status"] for s in saved["steps"]] == ["interrupted", "not-run"],
+              "statuses interrupted, not-run")
+        check(signal.getsignal(signal.SIGTERM) is not _terminated,
+              "the previous SIGTERM handler is restored")
+
+    print("candidate: untracked names are read exactly, not as quoted display text")
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        subprocess.run(["git", "-C", str(repo), "-c", "user.name=Invented", "-c",
+                        "user.email=invented@example.invalid", "commit", "-q",
+                        "--allow-empty", "-m", "invented"], check=True)
+        name = "caf\u00e9 'notes'.txt"
+        (repo / name).write_text("invented")
+        state = candidate_state(repo)
+        check(state["untracked_sha256"].get(name) == hashlib.sha256(b"invented").hexdigest(),
+              "a non-ASCII untracked file is hashed under its real name")
+
     print("artifacts: hashed only when their producing step passed in this run")
     step = {"command": f"x && {BINARY_PRODUCER}", "status": "not-run"}
     check(not produced([step], BINARY_PRODUCER), "a not-run build yields no binary hash")
@@ -477,7 +556,12 @@ def self_test(root: Path) -> int:
 
     print("parser: reads CONTRIBUTING.md and fails closed on drift")
     steps, alt = parse_sequence((root / "CONTRIBUTING.md").read_text())
-    check(sum(E2E_MARKER in s for s in steps) == 1, "one browser step in the gate block")
+    check(sum(runs_e2e(s) for s in steps) == 1, "one browser step in the gate block")
+    check(runs_e2e(f"(cd web && npx playwright install chromium && {E2E_MARKER})")
+          and runs_e2e(f"(cd web && {BROWSER_VAR}=/c {E2E_MARKER})"),
+          "invocations of the suite are recognized")
+    check(not runs_e2e(f"echo {E2E_MARKER}") and not runs_e2e("npm run e2e-other"),
+          "text that only mentions the suite is not an invocation")
     swapped = with_system_browser(steps, alt, "/opt/x y/chromium")
     check(any(f"{BROWSER_VAR}='/opt/x y/chromium'" in s for s in swapped)
           and not any(BROWSER_PLACEHOLDER in s for s in swapped),
@@ -493,6 +577,10 @@ def self_test(root: Path) -> int:
         ("a system-browser line that skips the suite",
          f"{SECTION}\n```sh\n(cd web && {E2E_MARKER})\n```\n\n```sh\n"
          f"echo {BROWSER_VAR}={BROWSER_PLACEHOLDER}\n```\n"),
+        ("no system-browser alternative", f"{SECTION}\n```sh\n(cd web && {E2E_MARKER})\n```\n"),
+        ("a gate step that only mentions the suite",
+         f"{SECTION}\n```sh\necho {E2E_MARKER}\n```\n\n```sh\n"
+         f"(cd web && {BROWSER_VAR}={BROWSER_PLACEHOLDER} {E2E_MARKER})\n```\n"),
     ]:
         try:
             parse_sequence(text)
