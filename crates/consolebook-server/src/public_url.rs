@@ -94,12 +94,23 @@ fn authority(rest: &str) -> Result<(), &'static str> {
     if host.is_empty() {
         return Err("has no host");
     }
-    if !rest.starts_with('[')
-        && !host.split('.').all(|label| {
+    if !rest.starts_with('[') {
+        if !host.split('.').all(|label| {
             !label.is_empty() && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
-        })
-    {
-        return Err("has an invalid host name");
+        }) {
+            return Err("has an invalid host name");
+        }
+        // Browsers read a host whose last label is numeric (decimal or 0x)
+        // as an IPv4 address and rewrite or refuse anything but the plain
+        // dotted form, so only that form is accepted.
+        let last = host.rsplit('.').next().unwrap_or(host);
+        let numeric = last.chars().all(|c| c.is_ascii_digit())
+            || last
+                .get(..2)
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("0x"));
+        if numeric && host.parse::<std::net::Ipv4Addr>().is_err() {
+            return Err("has an invalid IPv4 address");
+        }
     }
     if let Some(port) = port
         && !port.parse::<u16>().is_ok_and(|port| port > 0)
@@ -124,6 +135,8 @@ mod tests {
         let url: PublicUrl = "https://[2001:db8::1]:8443".parse().expect("valid");
         assert_eq!(url.origin(), "https://[2001:db8::1]:8443");
         assert!("https://[2001:db8::1]".parse::<PublicUrl>().is_ok());
+        assert!("https://localhost:8443".parse::<PublicUrl>().is_ok());
+        assert!("https://cb1.example.org".parse::<PublicUrl>().is_ok());
     }
 
     #[test]
@@ -148,6 +161,11 @@ mod tests {
             "https://[2001:db8::1]x",
             "https://consolebook..example.org",
             "https://consolebook_example.org",
+            "https://999.999.999.999",
+            "https://0x7f.0.0.1",
+            "https://127.1",
+            "https://010.0.0.1",
+            "https://example.0x10",
         ] {
             assert!(raw.parse::<PublicUrl>().is_err(), "{raw} was accepted");
         }

@@ -213,11 +213,15 @@ async fn serve(
     if let Some((code, expires_at)) = setup::issue_setup_code(&pool).await? {
         // The one deliberate secret in the log: the operator needs it to
         // complete first-run setup, and it is useless once setup completes
-        // or the code expires.
+        // or the code expires. It names the address people use: setup over
+        // plain HTTP would end at a sign-in whose Secure cookie never sticks.
+        let address = public_url
+            .as_ref()
+            .map_or_else(|| format!("http://{bind}"), |url| url.origin().to_owned());
         tracing::warn!(
             setup_code = code.raw,
             expires_in_minutes = (expires_at - now_unix()) / 60,
-            "installation is not initialized; open http://{bind}/ in a web browser and enter this setup code"
+            "installation is not initialized; open {address}/ in a web browser and enter this setup code"
         );
     }
 

@@ -148,6 +148,7 @@ jobs:
           grep -q '^CONSOLEBOOK_PUBLIC_URL=https://consolebook.example.invalid$' /etc/consolebook/consolebook.env
           curl -fsS http://127.0.0.2:7771/api/instance | grep -q '"public_url":"https://consolebook.example.invalid"'
           sudo journalctl -u consolebook --no-pager | grep -q 'session cookies are marked Secure'
+          sudo journalctl -u consolebook --no-pager | grep -q 'open https://consolebook.example.invalid/ in a web browser'
           # The printed command for a supervisor other than systemd carries it too.
           sudo install/install.sh --from "dist/consolebook-linux-${{ matrix.arch }}.tar.gz" \
             --no-service | tee no-service.log
