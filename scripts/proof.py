@@ -189,8 +189,9 @@ def status_entries(root: Path) -> list[tuple[str, str]]:
     """`git status` as (two-letter code, path) pairs, paths unquoted.
 
     Reads the NUL-separated form, so names with spaces, quotes, or non-ASCII
-    characters arrive exactly as on disk; a rename's second (source) path is
-    folded into its entry.
+    characters arrive exactly as on disk; a rename's or copy's second (source)
+    path is folded into its entry. Either column can carry the rename: `X` for
+    a staged one, `Y` for a worktree rename of an intent-to-add file.
     """
     raw = git(root, "status", "--porcelain=v1", "-z", "--untracked-files=all")
     fields = raw.decode("utf-8", errors="surrogateescape").split("\0")
@@ -202,7 +203,7 @@ def status_entries(root: Path) -> list[tuple[str, str]]:
         if not record:
             continue
         code, path = record[:2], record[3:]
-        if code[0] in "RC":
+        if any(c in "RC" for c in code):
             path = f"{fields[i]} -> {path}"
             i += 1
         entries.append((code, path))
@@ -311,11 +312,32 @@ def _terminated(_signum: int, _frame: object) -> None:
     raise KeyboardInterrupt
 
 
+def stop_group(proc: subprocess.Popen) -> None:
+    """Ends a step and everything it started before the receipt is written.
+
+    Each step leads its own process group, so subshells, `npx`, and test
+    servers are signalled with it: SIGTERM first, then SIGKILL for whatever
+    is left, so nothing in the group can still change the candidate after
+    the runner snapshots it.
+    """
+    for sig, grace in ((signal.SIGTERM, 10), (signal.SIGKILL, None)):
+        try:
+            os.killpg(proc.pid, sig)
+        except ProcessLookupError:
+            break
+        try:
+            proc.wait(timeout=grace)
+        except subprocess.TimeoutExpired:
+            continue
+    proc.wait()
+
+
 def run_step(cmd: str, root: Path, env: dict, log_path: Path) -> int:
     with log_path.open("wb") as log:
         proc = subprocess.Popen(
             ["sh", "-c", cmd], cwd=root, env=env,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            start_new_session=True,
         )
         try:
             assert proc.stdout is not None
@@ -325,8 +347,7 @@ def run_step(cmd: str, root: Path, env: dict, log_path: Path) -> int:
                 log.write(chunk)
             return proc.wait()
         except KeyboardInterrupt:
-            proc.terminate()
-            proc.wait()
+            stop_group(proc)
             raise
 
 
@@ -550,6 +571,12 @@ def self_test(root: Path) -> int:
               "statuses interrupted, not-run")
         check(signal.getsignal(signal.SIGTERM) is not _terminated,
               "the previous SIGTERM handler is restored")
+        marker = base / "late-write"
+        run_sequence([f"(trap '' TERM; sleep 2; touch '{marker}') & kill -TERM $PPID; wait"],
+                     root, base, chromium=None, invocation=inv, artifacts=False)
+        time.sleep(3)
+        check(not marker.exists(),
+              "a child that ignores SIGTERM is stopped before it can change the candidate")
 
     print("candidate: untracked names are read exactly, not as quoted display text")
     with tempfile.TemporaryDirectory() as tmp:
@@ -563,6 +590,17 @@ def self_test(root: Path) -> int:
         state = candidate_state(repo)
         check(state["untracked_sha256"].get(name) == hashlib.sha256(b"invented").hexdigest(),
               "a non-ASCII untracked file is hashed under its real name")
+        (repo / "README").write_text("invented readme\n")
+        subprocess.run(["git", "-C", str(repo), "add", "README"], check=True)
+        subprocess.run(["git", "-C", str(repo), "-c", "user.name=Invented", "-c",
+                        "user.email=invented@example.invalid", "commit", "-q",
+                        "-m", "invented"], check=True)
+        (repo / "README").rename(repo / "renamed")
+        subprocess.run(["git", "-C", str(repo), "add", "-N", "renamed"], check=True)
+        (repo / "zzz-after").write_text("invented")
+        state = candidate_state(repo)
+        check(" R README -> renamed" in state["status"] and "zzz-after" in state["untracked_sha256"],
+              "a worktree rename keeps its source and the untracked file after it")
 
     print("artifacts: hashed only when their producing step passed in this run")
     step = {"command": f"x && {BINARY_PRODUCER}", "status": "not-run"}
