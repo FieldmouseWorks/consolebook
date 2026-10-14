@@ -13,8 +13,8 @@ use consolebook_server::{programs, setup, storage};
 const PASSWORD: &str = "invented-passphrase-1";
 
 fn template() -> String {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../web/src/lib/setup/example-program.json");
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/lib/setup/example-program.json");
     std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("reading {}: {err}", path.display()))
 }
 
