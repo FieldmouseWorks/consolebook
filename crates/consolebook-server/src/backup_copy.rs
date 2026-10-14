@@ -9,9 +9,14 @@
 //! back through the operating system, which may answer from its cache; it
 //! proves what was written, not the remote medium.
 //!
+//! A copy directory on the same filesystem as the local snapshots is never
+//! used or counted: that is what an unmounted share or disk looks like (its
+//! empty mount point), and a copy there shares the failure it exists to
+//! survive.
+//!
 //! Health is read from the files themselves, never from stored state: a
 //! copy is current exactly when the newest local snapshot's file name is
-//! present in the copy directory.
+//! present in a copy directory on another filesystem.
 
 use std::fs::File;
 use std::io::Read;
@@ -45,14 +50,18 @@ pub struct CopyReport {
 
 /// Copies one validated local snapshot into `copy_dir` and prunes there.
 ///
-/// Refuses a missing or non-directory target and an existing copy of the
-/// same name. A copy that does not match the snapshot is removed; the local
-/// snapshot is never touched.
+/// Refuses a missing or non-directory target, one on the snapshot's own
+/// filesystem, and an existing copy of the same name. A copy that does not
+/// match the snapshot, or whose rename cannot be made durable, is removed so
+/// the next attempt makes it again; the local snapshot is never touched.
 pub fn copy_snapshot(snapshot: &Path, copy_dir: &Path, keep: usize) -> Result<CopyReport> {
     let name = snapshot
         .file_name()
         .context("snapshot path has no file name")?
         .to_owned();
+    let local_dir = snapshot
+        .parent()
+        .context("snapshot path has no parent directory")?;
     let metadata = std::fs::metadata(copy_dir).with_context(|| {
         format!(
             "backup copy directory {} is not reachable",
@@ -64,6 +73,9 @@ pub fn copy_snapshot(snapshot: &Path, copy_dir: &Path, keep: usize) -> Result<Co
             "backup copy directory {} is not a directory",
             copy_dir.display()
         );
+    }
+    if let Some(problem) = shares_filesystem(copy_dir, local_dir)? {
+        bail!("backup copy directory {}: {problem}", copy_dir.display());
     }
     let target = copy_dir.join(&name);
     if target.exists() {
@@ -94,7 +106,15 @@ pub fn copy_snapshot(snapshot: &Path, copy_dir: &Path, keep: usize) -> Result<Co
     }
     std::fs::rename(&partial, &target)
         .with_context(|| format!("naming the copy {}", target.display()))?;
-    backup::persist(&target)?;
+    if let Err(err) = backup::persist(&target) {
+        // A copy whose name is in place counts as current, so one that may
+        // not survive a crash must not keep that name.
+        let _ = std::fs::remove_file(&target);
+        return Err(err.context(format!(
+            "{} was removed so it is copied again",
+            target.display()
+        )));
+    }
     let pruned = backup::prune_in(copy_dir, keep)?;
     Ok(CopyReport {
         copy: target,
@@ -117,6 +137,26 @@ pub fn catch_up(data_dir: &DataDir, copy_dir: &Path, keep: usize) -> Result<Opti
         return Ok(None);
     }
     copy_snapshot(&newest, copy_dir, keep).map(Some)
+}
+
+const SAME_FILESYSTEM: &str = "is on the same filesystem as the local backups, so it is not \
+     off this server's disk; if it should be a network share or another disk, it is not mounted";
+
+/// `Some(reason)` when `copy_dir` is on the same filesystem as `local_dir`.
+#[cfg(unix)]
+fn shares_filesystem(copy_dir: &Path, local_dir: &Path) -> Result<Option<&'static str>> {
+    use std::os::unix::fs::MetadataExt;
+    let device = |path: &Path| {
+        std::fs::metadata(path)
+            .map(|metadata| metadata.dev())
+            .with_context(|| format!("reading {}", path.display()))
+    };
+    Ok((device(copy_dir)? == device(local_dir)?).then_some(SAME_FILESYSTEM))
+}
+
+#[cfg(not(unix))]
+fn shares_filesystem(_copy_dir: &Path, _local_dir: &Path) -> Result<Option<&'static str>> {
+    Ok(None)
 }
 
 fn sha256_file(path: &Path) -> Result<String> {
@@ -207,7 +247,7 @@ pub fn status(settings: &BackupSettings) -> Result<BackupStatus> {
         .map(|name| name.to_string_lossy().into_owned());
     let copy = match &settings.copy_dir {
         None => CopyStatus::NotConfigured,
-        Some(dir) => copy_status(dir, newest_local.as_deref()),
+        Some(dir) => copy_status(dir, &local_dir, newest_local.as_deref()),
     };
     Ok(BackupStatus {
         interval_hours: settings.interval_hours,
@@ -222,7 +262,7 @@ pub fn status(settings: &BackupSettings) -> Result<BackupStatus> {
     })
 }
 
-fn copy_status(dir: &Path, newest_local: Option<&str>) -> CopyStatus {
+fn copy_status(dir: &Path, local_dir: &Path, newest_local: Option<&str>) -> CopyStatus {
     let directory = dir.display().to_string();
     match std::fs::metadata(dir) {
         Ok(metadata) if metadata.is_dir() => {}
@@ -236,6 +276,21 @@ fn copy_status(dir: &Path, newest_local: Option<&str>) -> CopyStatus {
             return CopyStatus::Unreachable {
                 directory,
                 problem: err.to_string(),
+            };
+        }
+    }
+    match shares_filesystem(dir, local_dir) {
+        Ok(None) => {}
+        Ok(Some(problem)) => {
+            return CopyStatus::Unreachable {
+                directory,
+                problem: problem.to_owned(),
+            };
+        }
+        Err(err) => {
+            return CopyStatus::Unreachable {
+                directory,
+                problem: format!("{err:#}"),
             };
         }
     }

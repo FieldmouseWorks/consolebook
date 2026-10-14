@@ -85,10 +85,22 @@ jobs:
           grep -q 'http://127.0.0.2:7771/' upgrade.log
           systemctl is-active consolebook
           curl -fsS http://127.0.0.2:7771/api/instance
-      # The sandboxed service must be able to write the copy directory and
-      # must copy its first validated snapshot there (ADR 0024).
+      # The installer refuses a copy directory that is not mounted (a plain
+      # local directory is what an unmounted share looks like) and leaves the
+      # running service alone. A separate tmpfs then stands in for the share:
+      # the sandboxed service must be able to write it and must copy its
+      # first validated snapshot there (ADR 0024).
       - name: Installer, backup copies off the data disk
         run: |
+          sudo mkdir -p /srv/not-mounted
+          if sudo install/install.sh --from "dist/consolebook-linux-${{ matrix.arch }}.tar.gz" \
+            --backup-dir /srv/not-mounted 2>refused.log; then
+            echo "an unmounted copy directory was accepted" >&2; exit 1
+          fi
+          grep -q 'same filesystem as the data directory' refused.log
+          systemctl is-active consolebook
+          sudo mkdir -p /srv/consolebook-copies
+          sudo mount -t tmpfs -o size=64m tmpfs /srv/consolebook-copies
           sudo install/install.sh --from "dist/consolebook-linux-${{ matrix.arch }}.tar.gz" \
             --backup-dir /srv/consolebook-copies | tee copies.log
           grep -q 'Backups are also copied to /srv/consolebook-copies' copies.log

@@ -30,12 +30,15 @@ the share is down, but the product presses for it (below).
 
 After a local snapshot validates (ADR 0006), and only then:
 
-1. refuse when the copy directory is missing or not a directory, or a copy
-   of the same name exists (copies are never overwritten);
+1. refuse when the copy directory is missing or not a directory, is on the
+   same filesystem as the local snapshots (the empty mount point of an
+   unmounted share looks exactly like that), or already holds a copy of the
+   same name (copies are never overwritten);
 2. copy to `<name>.partial`, fsync it, and verify it **byte for byte**
    against the local snapshot by SHA-256 read back from the copy; a mismatch
    removes the partial file;
-3. rename into place, fsync the file and its directory; and
+3. rename into place and fsync the file and its directory; if that fails,
+   remove the copy so it is not counted and is made again; and
 4. prune the copy directory to the same retention count, by the same rule:
    oldest first, never the last remaining copy.
 
@@ -57,15 +60,18 @@ the next backup.
 `GET /api/backups/status` (`manage_users`, enforced by the service) reports
 the interval, retention, the local snapshot count and newest snapshot, and
 the copy state: `not_configured`, `unreachable` (with the reason), `behind`,
-or `current`. A copy is **current exactly when the newest local snapshot's
-file name is present in the copy directory**. Snapshot names carry their UTC
+or `current`. A copy directory on the local snapshots' filesystem is
+`unreachable`, never `current`. A copy is **current exactly when the newest
+local snapshot's file name is present in a copy directory on another
+filesystem**. Snapshot names carry their UTC
 timestamp, so the check needs no stored state and does not depend on clocks
 or modification times on the share.
 
 ### The product presses for a copy
 
-The installer takes `--backup-dir` and ends with a prominent warning without
-it. `serve` logs a warning at start without a copy directory. The
+The installer takes `--backup-dir`, which must already be mounted (it
+refuses a missing directory or one on the data directory's filesystem, and
+never creates one), and ends with a prominent warning without it. `serve` logs a warning at start without a copy directory. The
 administrator's home shows backup health, with a warning that stays until
 copies are current. The Getting started checklist has a step that is done
 only when they are, and the guided setup shows the status with the exact

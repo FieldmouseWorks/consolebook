@@ -13,9 +13,9 @@ records the locations, service account, and upgrade behavior this page relies on
 
 First, decide where a **second copy of every backup** will live: another disk
 in the server, or a network share (NAS) mounted on it, say at
-`/mnt/backups/consolebook`. Consolebook backs itself up automatically, but a
-backup on the same disk as the records dies with that disk. Then run one
-command on the server:
+`/mnt/backups/consolebook`, and mount it before installing. Consolebook backs
+itself up automatically, but a backup on the same disk as the records dies with
+that disk. Then run one command on the server:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/FieldmouseWorks/consolebook/main/install/install.sh | sudo sh -s -- --backup-dir /mnt/backups/consolebook
@@ -125,8 +125,12 @@ curl -fsSL https://raw.githubusercontent.com/FieldmouseWorks/consolebook/main/in
 ```
 
 On a network share, make sure the `consolebook` account can write it (for
-example a CIFS mount with `uid=consolebook`). The copy directory must be outside
-the data directory. Copies are plain SQLite files: protect the share the way
+example a CIFS mount with `uid=consolebook`), and mount it at boot (`/etc/fstab`
+or a systemd mount unit). The copy directory must already exist on another
+filesystem than the data directory: the installer refuses it otherwise, and
+never creates it. If the share is not mounted later, its mount point is just an
+empty local directory; Consolebook refuses to copy there, keeps backups local,
+and reports the copy location as unreachable until the share is back. Copies are plain SQLite files: protect the share the way
 you protect the server.
 
 ```sh

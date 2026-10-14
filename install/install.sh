@@ -10,8 +10,8 @@
 # starts it and prints the address and first-run setup code.
 #
 # Options (after `sh -s --` when piping):
-#   --backup-dir DIR  also copy every backup to DIR: another disk or a mounted
-#                     network share (strongly recommended; see docs/install.md)
+#   --backup-dir DIR  also copy every backup to DIR, an already-mounted network
+#                     share or another disk (strongly recommended; see docs/install.md)
 #   --data-dir DIR    keep the database and local backups in DIR
 #                     (default /var/lib/consolebook)
 #   --version X.Y.Z   install that release instead of the latest
@@ -64,8 +64,8 @@ usage() {
 	cat <<'EOF'
 Install or upgrade Consolebook (Linux with systemd). Run as root.
 
-  --backup-dir DIR  also copy every backup to DIR: another disk or a mounted
-                    network share (strongly recommended)
+  --backup-dir DIR  also copy every backup to DIR, an already-mounted network
+                    share or another disk (strongly recommended)
   --data-dir DIR    keep the database and local backups in DIR
                     (default /var/lib/consolebook)
   --version X.Y.Z   install that release instead of the latest
@@ -176,6 +176,28 @@ if [ -n "$effective_copy" ]; then
 		;;
 	esac
 fi
+# The copy directory must already be a mounted share or another disk. The
+# installer never creates it: on an unmounted share that would put the
+# "off-server" copies on this server's own disk.
+existing_ancestor() {
+	dir=$1
+	while [ ! -d "$dir" ]; do dir=$(dirname "$dir"); done
+	printf '%s\n' "$dir"
+}
+copy_problem() {
+	if [ ! -d "$1" ]; then
+		echo "does not exist; mount the share or disk there first"
+	elif [ "$(stat -c %d "$1")" = "$(stat -c %d "$(existing_ancestor "$effective_data")")" ]; then
+		echo "is on the same filesystem as the data directory; mount the share or disk there first"
+	fi
+}
+if [ -n "$backup_dir" ]; then
+	problem=$(copy_problem "$backup_dir")
+	[ -z "$problem" ] || fail "--backup-dir $backup_dir $problem"
+elif [ -n "$effective_copy" ]; then
+	problem=$(copy_problem "$effective_copy")
+	[ -z "$problem" ] || say "warning: backup copy directory $effective_copy $problem; backups stay local until it is"
+fi
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT INT TERM
@@ -256,11 +278,11 @@ DATA=$(sed -n 's/^CONSOLEBOOK_DATA_DIR=//p' "$ENV_FILE" | tail -n 1)
 DATA=${DATA:-$DEFAULT_DATA}
 COPY=$(sed -n 's/^CONSOLEBOOK_BACKUP_COPY_DIR=//p' "$ENV_FILE" | tail -n 1)
 install -d -m 0750 -o "$ACCOUNT" -g "$ACCOUNT" "$DATA"
-if [ -n "$COPY" ]; then
+if [ -n "$COPY" ] && [ -d "$COPY" ]; then
 	# A mounted share may not accept ownership changes; it must be writable
 	# by the account either way, which the service proves on its first copy.
-	install -d -m 0750 "$COPY" 2>/dev/null || mkdir -p "$COPY"
 	chown "$ACCOUNT:$ACCOUNT" "$COPY" 2>/dev/null || true
+	chmod 0750 "$COPY" 2>/dev/null || true
 fi
 bind=$(sed -n 's/^CONSOLEBOOK_BIND=//p' "$ENV_FILE" | tail -n 1)
 bind=${bind:-$DEFAULT_LISTEN}

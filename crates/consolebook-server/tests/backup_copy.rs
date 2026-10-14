@@ -19,6 +19,8 @@ const PASSWORD: &str = "invented-passphrase-1";
 
 struct Fixture {
     tmp: tempfile::TempDir,
+    /// A directory on another filesystem, standing in for a mounted share.
+    other_fs: tempfile::TempDir,
     data_dir: DataDir,
     pool: sqlx::SqlitePool,
     admin_id: i64,
@@ -46,8 +48,10 @@ impl Fixture {
         .await
         .expect("initialize")
         .expect("accepted");
+        let other_fs = other_filesystem(tmp.path());
         Self {
             tmp,
+            other_fs,
             data_dir,
             pool,
             admin_id,
@@ -55,7 +59,7 @@ impl Fixture {
     }
 
     fn copy_dir(&self) -> std::path::PathBuf {
-        let dir = self.tmp.path().join("offsite");
+        let dir = self.other_fs.path().join("offsite");
         std::fs::create_dir_all(&dir).expect("create copy dir");
         dir
     }
@@ -68,6 +72,20 @@ impl Fixture {
             copy_dir: copy_dir.map(Path::to_path_buf),
         }
     }
+}
+
+/// Copies must land on another filesystem. `/dev/shm` is a separate tmpfs
+/// on Linux hosts and CI runners; fail loudly rather than test nothing.
+fn other_filesystem(beside: &Path) -> tempfile::TempDir {
+    use std::os::unix::fs::MetadataExt;
+    let dir = tempfile::tempdir_in("/dev/shm").expect("these tests need /dev/shm (a tmpfs)");
+    let dev = |p: &Path| std::fs::metadata(p).expect("metadata").dev();
+    assert_ne!(
+        dev(dir.path()),
+        dev(beside),
+        "/dev/shm must be a different filesystem from the temp directory"
+    );
+    dir
 }
 
 #[tokio::test]
@@ -129,6 +147,35 @@ async fn a_copy_that_cannot_be_made_leaves_the_local_snapshot_intact() {
     backup::validate_snapshot(&report.snapshot)
         .await
         .expect("the local snapshot still validates");
+}
+
+#[tokio::test]
+async fn a_copy_directory_on_the_local_filesystem_is_never_used_or_counted() {
+    // An unmounted share leaves its empty mount point on the local disk.
+    let fx = Fixture::new().await;
+    let report = backup::run(&fx.data_dir, 2).await.expect("backup");
+    let mount_point = fx.tmp.path().join("share-not-mounted");
+    std::fs::create_dir_all(&mount_point).expect("mount point");
+
+    let err = backup_copy::copy_snapshot(&report.snapshot, &mount_point, 2).expect_err("local");
+    assert!(format!("{err:#}").contains("same filesystem"), "{err:#}");
+    assert!(
+        backup_copy::catch_up(&fx.data_dir, &mount_point, 2).is_err(),
+        "the retry refuses it too"
+    );
+    assert_eq!(
+        std::fs::read_dir(&mount_point).expect("list").count(),
+        0,
+        "nothing is written to the local stand-in"
+    );
+
+    let status = backup_copy::status(&fx.settings(Some(&mount_point))).expect("status");
+    match status.copy {
+        CopyStatus::Unreachable { problem, .. } => {
+            assert!(problem.contains("not mounted"), "{problem}");
+        }
+        other => panic!("expected unreachable, got {other:?}"),
+    }
 }
 
 #[tokio::test]
