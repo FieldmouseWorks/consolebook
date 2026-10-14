@@ -626,7 +626,7 @@
 							<td class="nowrap">{session.business_date}</td>
 							<td class="nowrap">
 								{localSpan(session.local_start, session.local_end).times}
-								<span class="quiet-inline tz">{session.timezone}</span>
+								<span class="quiet-inline tz">({session.timezone})</span>
 							</td>
 							<td>{session.phase_name ?? '—'}</td>
 							<td>

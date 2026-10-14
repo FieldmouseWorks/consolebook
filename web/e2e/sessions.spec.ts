@@ -132,7 +132,7 @@ test('record, close, and read sessions with local time semantics', async ({ page
 	});
 
 	// The trainer signs in and finds the sessions on their own list.
-	await page.getByRole('link', { name: 'Home' }).click();
+	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 	await page.getByRole('button', { name: 'Sign out' }).click();
 	await page.goto(`/reset`);
 	await page.getByLabel('Username').fill('jordan.trainer');

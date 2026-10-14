@@ -116,7 +116,7 @@ test('assign a trainer, record phase history, and read it scoped', async ({ page
 	await expect(page.getByText('Paused')).toBeVisible();
 
 	// The trainer sets a password through the reset flow and signs in.
-	await page.getByRole('link', { name: 'Home' }).click();
+	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 	await page.getByRole('button', { name: 'Sign out' }).click();
 	await expect(page).toHaveURL(/\/login$/);
 	await page.goto(`/reset`);

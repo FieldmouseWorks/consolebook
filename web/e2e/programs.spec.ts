@@ -69,7 +69,7 @@ test('author, publish, and compare a program version', async ({ page, setupCode 
 	await expect(page.getByRole('button', { name: 'Save draft' })).toHaveCount(0);
 
 	// Create a trainee from the status page and enroll them here.
-	await page.getByRole('link', { name: 'Home' }).click();
+	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 	await page.getByLabel('New username').fill('jordan.trainee');
 	await page.getByLabel('Display name').fill('Jordan Trainee');
 	await page.getByRole('button', { name: 'Create user' }).click();
