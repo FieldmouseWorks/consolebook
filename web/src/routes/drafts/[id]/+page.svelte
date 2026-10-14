@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { beforeNavigate, goto } from '$app/navigation';
+	import ProblemState from '$lib/ui/ProblemState.svelte';
 	import { navigating, page } from '$app/state';
 	import { untrack } from 'svelte';
 	import {
@@ -73,6 +74,8 @@
 
 	let view: DraftView | null = $state(null);
 	let error = $state('');
+	// The HTTP status of the last failed draft load, for the page-level problem state.
+	let loadStatus: number | null = $state(null);
 	let invalidRouteUrl = $state(false);
 	let busy = $state(false);
 	let retryingLatest = $state(false);
@@ -280,6 +283,7 @@
 			}
 			view = null;
 			sealed = null;
+			loadStatus = err instanceof ApiError ? err.status : null;
 			error = err instanceof ApiError ? err.message : 'the server could not be reached';
 			return null;
 		}
@@ -932,7 +936,7 @@
 	{#if invalidRouteUrl}
 		<p class="error" role="alert">Invalid draft or version URL.</p>
 	{:else if error}
-		<p class="error" role="alert">{error}</p>
+		<ProblemState status={loadStatus} detail={error} />
 	{:else}
 		<p class="quiet">Loading…</p>
 	{/if}
@@ -1168,58 +1172,6 @@
 					{/each}
 				</ul>
 			{/if}
-			<h3>Integrity</h3>
-			<p class="quiet small-note">Content hash: <code>{sealed.meta.content_hash}</code></p>
-			<p class="quiet small-note">Chain hash: <code>{sealed.meta.chain_hash}</code></p>
-			<div class="row route">
-				<button type="button" class="secondary" onclick={verifyNow}>
-					Verify hashes
-				</button>
-				{#if verification !== null}
-					{#if verification.content_hash_ok && verification.chain_hash_ok}
-						<span class="quiet-inline" role="status">
-							Recomputed from the stored record: both fingerprints match.
-						</span>
-					{:else}
-						<span class="error" role="alert">
-							The stored fingerprints do not match the stored record.
-						</span>
-					{/if}
-				{/if}
-			</div>
-			<p class="quiet small-note">
-				Verification proves this record reproduces consistently from what is
-				stored; it is not by itself proof against a writer with direct
-				database access.
-			</p>
-			<div class="row route">
-				<button
-					type="button"
-					class="secondary"
-					disabled={busy}
-					onclick={exportSealedVersion}
-				>
-					Export this version
-				</button>
-				<button
-					type="button"
-					class="secondary"
-					disabled={busy}
-					onclick={() => exportArchive(recordExportPath(draftId))}
-				>
-					Export all versions
-				</button>
-				{#if exported}
-					<span class="quiet-inline" role="status">Downloaded {exported}.</span>
-				{/if}
-				{#if exportError}
-					<span class="error" role="alert">{exportError}</span>
-				{/if}
-			</div>
-			<p class="quiet small-note">
-				An export carries the stored record bytes verbatim beside a manifest
-				and verifies anywhere with <code>consolebook-server export verify</code>.
-			</p>
 		</section>
 
 		{#if !viewingSuperseded}
@@ -1676,6 +1628,63 @@
 			</div>
 		{/if}
 	</section>
+
+	{#if view.status === 'finalized' && sealed !== null}
+		<section class="panel">
+			<h2>Integrity and export</h2>
+			<p class="quiet small-note">Content hash: <code>{sealed.meta.content_hash}</code></p>
+			<p class="quiet small-note">Chain hash: <code>{sealed.meta.chain_hash}</code></p>
+			<div class="row route">
+				<button type="button" class="secondary" onclick={verifyNow}>
+					Verify hashes
+				</button>
+				{#if verification !== null}
+					{#if verification.content_hash_ok && verification.chain_hash_ok}
+						<span class="quiet-inline" role="status">
+							Recomputed from the stored record: both fingerprints match.
+						</span>
+					{:else}
+						<span class="error" role="alert">
+							The stored fingerprints do not match the stored record.
+						</span>
+					{/if}
+				{/if}
+			</div>
+			<p class="quiet small-note">
+				Verification proves this record reproduces consistently from what is
+				stored; it is not by itself proof against a writer with direct
+				database access.
+			</p>
+			<div class="row route">
+				<button
+					type="button"
+					class="secondary"
+					disabled={busy}
+					onclick={exportSealedVersion}
+				>
+					Export this version
+				</button>
+				<button
+					type="button"
+					class="secondary"
+					disabled={busy}
+					onclick={() => exportArchive(recordExportPath(draftId))}
+				>
+					Export all versions
+				</button>
+				{#if exported}
+					<span class="quiet-inline" role="status">Downloaded {exported}.</span>
+				{/if}
+				{#if exportError}
+					<span class="error" role="alert">{exportError}</span>
+				{/if}
+			</div>
+			<p class="quiet small-note">
+				An export carries the stored record bytes verbatim beside a manifest
+				and verifies anywhere with <code>consolebook-server export verify</code>.
+			</p>
+		</section>
+	{/if}
 {/if}
 
 <style>

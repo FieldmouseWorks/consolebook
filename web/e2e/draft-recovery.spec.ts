@@ -98,7 +98,7 @@ async function seed(
 	await page.getByLabel('Username').fill('avery.admin');
 	await page.getByLabel('Password').fill(PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page.getByRole('heading', { name: 'Installation status' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible();
 
 	const program = await (
 		await page.request.post(`/api/programs`, { data: { name: content.name } })
@@ -432,7 +432,7 @@ async function spaToDraft(page: Page, draftId: number, traineeName: string): Pro
 
 /** Goes to the home page's session list, inside the app. */
 async function homeSessions(page: Page): Promise<void> {
-	await page.getByRole('link', { name: 'Home' }).click();
+	await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 	await expect(page.getByRole('heading', { name: 'My sessions' })).toBeVisible();
 	await expectSpaAlive(page);
 }
@@ -478,7 +478,7 @@ async function signIn(
 	await page.getByLabel('Username').fill(username);
 	await page.getByLabel('Password').fill(password);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page.getByRole('heading', { name: 'Installation status' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible();
 	return page;
 }
 
@@ -1382,15 +1382,15 @@ test('an ordinary edit saves before a retried SPA departure', async ({
 
 		// Leaving inside the debounce window starts a mounted save. The
 		// writer leaves deliberately after seeing that it finished.
-		await loser.getByRole('link', { name: 'Home' }).click();
+		await loser.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 		await saveReply.arrived;
 		await expect(loser).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
 		await expect(loser.getByRole('alert')).toContainText('Try leaving again after it saves');
 		saveReply.release();
 		await expectSaved(loser);
 		await expectUnloadReady(loser);
-		await loser.getByRole('link', { name: 'Home' }).click();
-		await expect(loser.getByRole('heading', { name: 'Installation status' })).toBeVisible();
+		await loser.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
+		await expect(loser.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible();
 
 		// The queued edit reaches the server anyway, once.
 		await expect
@@ -1685,7 +1685,7 @@ test('a retried navigation saves the later edit with the accepted revision', asy
 		await held.first.arrived;
 		const later = 'Second invented note from the north desk.';
 		await author.getByLabel(MOST).fill(later);
-		await author.getByRole('link', { name: 'Home' }).click();
+		await author.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
 		await expect(author.getByLabel(MOST)).toHaveValue(later);
 		await expect(author.getByRole('alert')).toContainText('Try leaving again after it saves');
@@ -2329,14 +2329,14 @@ test('a queued follow-up save keeps SPA departure on the draft until accepted', 
 		await held.first.arrived;
 		const later = 'Invented later note queued while the first save waits.';
 		await author.getByLabel(MOST).fill(later);
-		await author.getByRole('link', { name: 'Home' }).click();
+		await author.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
 		await expect(author.getByRole('alert')).toContainText('Try leaving again after it saves');
 		await dismissTabClose(author);
 		await expect(author.getByLabel(MOST)).toHaveValue(later);
 		held.first.release();
 		await second.arrived;
-		await author.getByRole('link', { name: 'Home' }).click();
+		await author.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
 		await dismissTabClose(author);
 		await expect(author.getByLabel(MOST)).toHaveValue(later);
@@ -2381,7 +2381,7 @@ test('a failed ordinary save cannot silently leave by SPA navigation', async ({
 		const unsaved = 'Invented note whose save could not reach the server.';
 		await author.getByLabel(MOST).fill(unsaved);
 		await expect(author.locator('.savestate')).toHaveText('Save failed');
-		await author.getByRole('link', { name: 'Home' }).click();
+		await author.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 		await expect(author.getByRole('alert')).toContainText('Stay on this draft');
 		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
 		await expect(author.getByLabel(MOST)).toHaveValue(unsaved);
@@ -2391,6 +2391,45 @@ test('a failed ordinary save cannot silently leave by SPA navigation', async ({
 		await expectUnloadReady(author);
 		await markSpa(author);
 		await homeSessions(author);
+	} finally {
+		await authorContext.close();
+	}
+});
+
+test('signing out from a draft with a failed save keeps the draft and the session', async ({
+	page,
+	setupCode,
+	browser
+}) => {
+	const seeded = await seed(page, browser, setupCode);
+	const authorContext = await browser.newContext();
+	const author = await signIn(authorContext, JORDAN, seeded.jordanResetCode, JORDAN_PASSWORD);
+	try {
+		await author.goto(seeded.draftUrl);
+		await expect(author.getByLabel(MOST)).toBeVisible();
+		await author.route(`**/api/drafts/${seeded.draftId}/content`, async (route) => {
+			await route.abort('failed');
+		});
+		const unsaved = 'Invented note whose save could not reach the server.';
+		await author.getByLabel(MOST).fill(unsaved);
+		await expect(author.locator('.savestate')).toHaveText('Save failed');
+
+		// The header's sign out leaves by ordinary navigation first, so the
+		// draft's guard refuses while the session still works.
+		await author.getByRole('button', { name: 'Sign out' }).click();
+		await expect(author.getByRole('alert')).toContainText('Stay on this draft');
+		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
+		await expect(author.getByLabel(MOST)).toHaveValue(unsaved);
+		const probe = await author.request.get('/api/auth/session');
+		expect(probe.status()).toBe(200);
+
+		// Once the text is saved, the same button signs out.
+		await author.unroute(`**/api/drafts/${seeded.draftId}/content`);
+		await author.getByLabel(MOST).fill('Invented corrected note saved on retry.');
+		await expectSaved(author);
+		await author.getByRole('button', { name: 'Sign out' }).click();
+		await expect(author).toHaveURL(/\/login$/);
+		expect((await author.request.get('/api/auth/session')).status()).toBe(401);
 	} finally {
 		await authorContext.close();
 	}
@@ -2428,7 +2467,7 @@ test('an unchanged failed save can retry until it reaches the server', async ({
 		await author.getByLabel(MOST).fill(unsaved);
 		await expect(author.locator('.savestate')).toHaveText('Save failed');
 		await expect.poll(() => bodies.length).toBe(1);
-		await author.getByRole('link', { name: 'Home' }).click();
+		await author.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 		await expect(author.getByRole('alert')).toContainText('Stay on this draft');
 		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
 		const retry = author.getByRole('button', { name: 'Retry save' });
@@ -2437,7 +2476,7 @@ test('an unchanged failed save can retry until it reaches the server', async ({
 		await expect.poll(() => bodies.length).toBe(2);
 		await expect(author.locator('.savestate')).toHaveText('Save failed');
 		expect(bodies[1], 'retry must send the same unchanged snapshot').toBe(bodies[0]);
-		await author.getByRole('link', { name: 'Home' }).click();
+		await author.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
 		await expect(author.getByLabel(MOST)).toHaveValue(unsaved);
 		const stillUnsaved = await (await page.request.get(`/api/drafts/${seeded.draftId}`)).json();
@@ -2446,7 +2485,7 @@ test('an unchanged failed save can retry until it reaches the server', async ({
 		await thirdAttempt.arrived;
 		expect(bodies[2], 'restored connectivity must send the same unchanged snapshot').toBe(bodies[0]);
 		expect(JSON.parse(bodies[2]).revision).toBe(before.revision);
-		await author.getByRole('link', { name: 'Home' }).click();
+		await author.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
 		await expect(author.getByRole('alert')).toContainText('Try leaving again after it saves');
 		thirdAttempt.release();
@@ -2585,7 +2624,7 @@ test('a first save refused by a frozen draft survives a failed reload', async ({
 			message: 'a frozen refusal must reload the authoritative draft'
 		}).toBe(1);
 		await reload.arrived;
-		await author.getByRole('link', { name: 'Home' }).click();
+		await author.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
 		await expect(author.getByRole('alert')).toContainText('latest draft is still loading');
 		reload.release();
@@ -2893,7 +2932,7 @@ test('a frozen failed save permits deliberate SPA departure after recovery', asy
 		await expect(refusedText(author, MOST)).toHaveText(
 			'Invented local note withheld by the frozen draft.'
 		);
-		await author.getByRole('link', { name: 'Home' }).click();
+		await author.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 		await expect(author).toHaveURL(/\/$/);
 		await expectSpaAlive(author);
 		await expect(author.locator('details.refused')).toHaveCount(0);
@@ -2977,7 +3016,7 @@ test('a failed save during SPA departure keeps the ordinary edit on its draft', 
 		const unsaved = 'Invented handover text from a disconnected desk.';
 		await author.getByLabel(MOST).fill(unsaved);
 		await save.arrived;
-		await author.getByRole('link', { name: 'Home' }).click();
+		await author.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 		save.release();
 		await expect(author.locator('.savestate')).toHaveText('Save failed');
 		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
@@ -3091,7 +3130,7 @@ test('an allowed SPA departure locks clean draft fields until the route settles'
 			await layout.released;
 			await route.fulfill({ response });
 		});
-		const leaving = author.getByRole('link', { name: 'Home' }).click();
+		const leaving = author.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 		await layout.arrived;
 		await expect(author.getByLabel(MOST)).toBeDisabled();
 		layout.release();
@@ -3144,18 +3183,18 @@ test('a refused save stays on its draft until the writer sees recovery', async (
 		await page.goto(seeded.draftUrl);
 		await page.getByLabel(MOST).fill('Invented winning note from the other desk.');
 		await expectSaved(page);
-		await author.getByRole('link', { name: 'Home' }).click();
+		await author.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 		await expect(author.getByRole('alert')).toContainText('Try leaving again after it saves');
 		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
 		losing.release();
 		await reload.arrived;
-		await author.getByRole('link', { name: 'Home' }).click();
+		await author.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 		await expect(author.getByRole('alert')).toContainText('latest draft is still loading');
 		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
 		await dismissTabClose(author);
 		reload.release();
 		await expect(refusedText(author, MOST)).toHaveText(refused);
-		await author.getByRole('link', { name: 'Home' }).click();
+		await author.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 		await expect(author).toHaveURL(/\/$/);
 		await expectSpaAlive(author);
 		await expect(author.locator('details.refused')).toHaveCount(0);
@@ -3195,7 +3234,7 @@ test('overlapping SPA navigation keeps the draft locked until the current route 
 			}
 			await route.continue();
 		});
-		void author.getByRole('link', { name: 'Home' }).click();
+		void author.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 		await firstLayout.arrived;
 		await expect(author.getByLabel(MOST)).toBeDisabled();
 		// Real SPA entries exist for Home and this draft. Back starts a
@@ -3251,7 +3290,7 @@ test('a stranded router state requires an explicit same-entry resume', async ({
 			await layout.released;
 			try { await route.fulfill({ response }); } catch { /* abandoned navigation */ }
 		});
-		void author.getByRole('link', { name: 'Home' }).click();
+		void author.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 		await layout.arrived;
 		await expect(author.getByLabel(MOST)).toBeDisabled();
 		await author.evaluate(() => history.back());
@@ -3273,7 +3312,7 @@ test('a stranded router state requires an explicit same-entry resume', async ({
 			await route.abort('failed');
 		});
 		await author.getByLabel(MOST).fill(unsaved);
-		await author.getByRole('link', { name: 'Home' }).click();
+		await author.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Home' }).click();
 		await expect(author.locator('.savestate')).toHaveText('Save failed');
 		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}#current$`));
 		await expect(author.getByLabel(MOST)).toHaveValue(unsaved);

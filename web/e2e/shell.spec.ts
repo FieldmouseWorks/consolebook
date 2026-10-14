@@ -31,9 +31,10 @@ test('full shell lifecycle', async ({ page, setupCode }) => {
 	// Correct password reaches status.
 	await page.getByLabel('Password').fill(PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page.getByRole('heading', { name: 'Installation status' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible();
 	await expect(page.getByText('Example County Communications').first()).toBeVisible();
-	await expect(page.getByText('manage_users')).toBeVisible();
+	await page.getByText('About this installation').click();
+	await expect(page.getByText('Manage users')).toBeVisible();
 
 	// The notices panel exists and is quiet on a healthy installation.
 	await expect(page.getByRole('heading', { name: 'Notices' })).toBeVisible();
@@ -51,7 +52,7 @@ test('full shell lifecycle', async ({ page, setupCode }) => {
 	// the session that issued it.
 	await page.goto('/reset');
 	// Still signed in → guard bounces to status; sign out first.
-	await expect(page.getByRole('heading', { name: 'Installation status' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible();
 	await page.getByRole('button', { name: 'Sign out' }).click();
 	await expect(page).toHaveURL(/\/login$/);
 
@@ -70,7 +71,7 @@ test('full shell lifecycle', async ({ page, setupCode }) => {
 	await expect(page.getByRole('alert')).toContainText('incorrect');
 	await page.getByLabel('Password').fill(NEW_PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page.getByRole('heading', { name: 'Installation status' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible();
 
 	// Setup is permanently unavailable: visiting it bounces home.
 	await page.goto('/setup');
