@@ -91,6 +91,16 @@ cargo build -p consolebook-server
 (cd web && npx playwright install chromium && npm run e2e)
 ```
 
+`scripts/proof.py` runs this exact block, one line per step from the
+repository root, stops at the first failure, and writes a local receipt under
+the ignored `.proof/` (`--chromium PATH` uses the system-browser line below;
+`--list` prints what it will run). The block is therefore executable input:
+keep one command per line, and keep exactly one line running `npm run e2e`
+and one documented `CONSOLEBOOK_E2E_CHROMIUM=/path/to/chromium` alternative,
+or the script refuses to run. The
+[consolebook-proof skill](.agents/skills/consolebook-proof/SKILL.md) routes a
+change to its focused proof before this full run.
+
 `scripts/check-guidance-names.sh` is the rung-2 guard for one recurring
 class: tracked agent guidance naming specific models or vendors instead of
 roles. Its scanned set, pattern list, and entrypoint-name allowlist live at
