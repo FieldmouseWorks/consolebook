@@ -74,6 +74,14 @@
 
 	let view: DraftView | null = $state(null);
 	let error = $state('');
+	// The message the ordinary save chain last put in `error`. A save that
+	// reaches the server clears it, but only while it is still the message
+	// shown, so a later, unrelated problem is never dismissed by a save.
+	let saveProblem: string | null = null;
+	function showSaveProblem(message: string): void {
+		error = message;
+		saveProblem = message;
+	}
 	// The HTTP status of the last failed draft load, for the page-level problem state.
 	let loadStatus: number | null = $state(null);
 	let invalidRouteUrl = $state(false);
@@ -153,21 +161,23 @@
 		if (navigation.willUnload && (origin.hasUnsavedOrdinaryEdits || origin.hasPendingRecovery)) {
 			navigation.cancel();
 			if (navigation.type !== 'leave') {
-				error = origin.hasPendingRecovery
-					? 'The latest draft is still loading after a save stopped. Wait before leaving.'
-					: 'The draft has unsaved changes. Wait for the save to finish before leaving.';
+				if (origin.hasPendingRecovery) {
+					error = 'The latest draft is still loading after a save stopped. Wait before leaving.';
+				} else {
+					showSaveProblem('The draft has unsaved changes. Wait for the save to finish before leaving.');
+				}
 			}
 			return;
 		}
 		if (navigation.willUnload) return;
 		if (origin.hasFailedOrdinarySave) {
 			navigation.cancel();
-			error = 'The draft did not save. Stay on this draft and save again before leaving.';
+			showSaveProblem('The draft did not save. Stay on this draft and save again before leaving.');
 			return;
 		}
 		if (origin.hasUnsavedOrdinaryEdits) {
 			navigation.cancel();
-			error = 'The draft is saving. Try leaving again after it saves.';
+			showSaveProblem('The draft is saving. Try leaving again after it saves.');
 			void origin.flush().then(() => {
 				if (editor === origin && origin.saveState === 'saved' &&
 					!origin.hasUnsavedOrdinaryEdits) {
@@ -358,7 +368,7 @@
 	 */
 	function heldByRefusal(act: string): boolean {
 		if (editor.saveState === 'failed') {
-			error = `The draft did not save; ${act} waits until it does.`;
+			showSaveProblem(`The draft did not save; ${act} waits until it does.`);
 			return true;
 		}
 		if (editor.unresolved) {
@@ -399,7 +409,12 @@
 			return;
 		}
 		if (result.status === 'failed') {
-			error = `The draft did not save: ${result.message}`;
+			showSaveProblem(`The draft did not save: ${result.message}`);
+		} else if (result.status === 'saved') {
+			if (saveProblem !== null && error === saveProblem) {
+				error = '';
+			}
+			saveProblem = null;
 		}
 	}
 

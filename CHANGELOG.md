@@ -17,6 +17,16 @@ not a production-readiness statement.
   and the sign-in page points browsers that arrived by another address to it
   (ADR 0025). The install guide gives a tested Caddy configuration for HTTPS.
 
+### Fixed
+
+- A phase change that waited behind another write is no longer refused as
+  out of order; it is judged at the moment it can commit ([#108](https://github.com/FieldmouseWorks/consolebook/issues/108)).
+- After a restore, the set-aside database no longer counts as the newest
+  backup: snapshots order by their time, so off-server copy status,
+  catch-up copies, and retention follow the latest backup ([#105](https://github.com/FieldmouseWorks/consolebook/issues/105)).
+- A draft that saves after a failed save no longer keeps saying "The draft
+  did not save" ([#83](https://github.com/FieldmouseWorks/consolebook/issues/83)).
+
 ## [0.1.0] - 2026-10-14
 
 The first versioned release: everything built through Milestone 4 and the
