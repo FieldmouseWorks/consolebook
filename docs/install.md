@@ -6,7 +6,7 @@ systemd (Ubuntu, Debian, RHEL, Rocky, Alma, Fedora, and similar), x86_64 or
 arm64, and an administrator account that can use `sudo`.
 
 Consolebook is pre-alpha. Use invented data until your agency has decided it is
-ready for real records. [ADR 0024](decisions/0023-linux-installation-lifecycle.md)
+ready for real records. [ADR 0023](decisions/0023-linux-installation-lifecycle.md)
 records the locations, service account, and upgrade behavior this page relies on.
 
 ## 1. Install
