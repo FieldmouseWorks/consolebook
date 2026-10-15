@@ -74,6 +74,15 @@ enum Command {
         /// copies are current (ADR 0024). Read only.
         #[arg(long, env = "CONSOLEBOOK_BACKUP_COPY_DIR")]
         backup_copy_dir: Option<PathBuf>,
+        /// Hours between the service's automatic backups, to judge whether
+        /// the newest is overdue.
+        #[arg(
+            long,
+            env = "CONSOLEBOOK_BACKUP_INTERVAL_HOURS",
+            default_value_t = scheduler::DEFAULT_INTERVAL_HOURS,
+            value_parser = clap::value_parser!(u64).range(1..)
+        )]
+        backup_interval_hours: u64,
     },
     /// Take a validated, consistent snapshot of the database into backups/.
     Backup {
@@ -164,8 +173,15 @@ async fn main() -> ExitCode {
             };
             serve(bind, settings, public_url).await
         }
-        Command::Doctor { backup_copy_dir } => {
-            run_doctor(&cli.data_dir, backup_copy_dir.as_deref()).await
+        Command::Doctor {
+            backup_copy_dir,
+            backup_interval_hours,
+        } => {
+            let options = doctor::Options {
+                backup_copy_dir: backup_copy_dir.as_deref(),
+                backup_interval_hours,
+            };
+            run_doctor(&cli.data_dir, &options).await
         }
         Command::Backup {
             keep,
@@ -284,12 +300,9 @@ async fn serve(
     Ok(ExitCode::SUCCESS)
 }
 
-async fn run_doctor(
-    data_dir: &std::path::Path,
-    backup_copy_dir: Option<&std::path::Path>,
-) -> Result<ExitCode> {
+async fn run_doctor(data_dir: &std::path::Path, options: &doctor::Options<'_>) -> Result<ExitCode> {
     let data_dir = DataDir::new(data_dir);
-    let findings = doctor::run(&data_dir, backup_copy_dir).await;
+    let findings = doctor::run(&data_dir, options).await;
     for finding in &findings {
         let mark = match finding.verdict {
             Verdict::Ok => "ok  ",

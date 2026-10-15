@@ -142,7 +142,11 @@ async fn a_replacement_server_never_copies_over_the_installation_it_replaces() {
         "the copy directory holds the newest backup"
     );
     // doctor names the same newest backup, not the database set aside.
-    let findings = doctor::run(&replacement, Some(&share)).await;
+    let options = doctor::Options {
+        backup_copy_dir: Some(&share),
+        ..doctor::Options::default()
+    };
+    let findings = doctor::run(&replacement, &options).await;
     let backups = findings
         .iter()
         .find(|finding| finding.check == "backups")
