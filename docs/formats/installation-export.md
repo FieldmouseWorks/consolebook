@@ -667,29 +667,38 @@ The format's table and column lists are enforced, not just written down:
   producer.
 - A third test pins a fingerprint of the structure the specification holds
   to each `format_version`: tables, keys, columns with their types,
-  nullability, references, and agreements, which columns are vocabularies
-  (and which vocabulary), exclusions, and columns carried as units. It does
-  not cover vocabulary members, which grow within a version (see
-  Vocabularies). A changed structure fails it until `format_version` is
+  nullability, text forms, references, and agreements, which columns are
+  vocabularies (and which vocabulary), exclusions, and columns carried as
+  units. It does not cover vocabulary members, which grow within a version
+  (see Vocabularies). A changed structure fails it until `format_version` is
   bumped and the new version's fingerprint is recorded beside the earlier
-  ones; a recorded fingerprint is never edited.
+  ones. A recorded fingerprint is never edited. Review keeps that rule,
+  because a test cannot tell a re-recorded fingerprint from a new one.
 - A golden version-1 archive, produced once from an invented installation
   with a row in every carried table, is committed with the tests and must
-  verify on every build. It pins the manifest shape and the verifier's rules,
-  so a change that would need a version bump fails there when the bump is
-  skipped. A failure means a new `format_version`, whose ADR decides how
-  version-1 archives keep verifying; the version-1 file is never regenerated
-  to make the test pass.
+  verify on every build. It pins the manifest shape, and the verifier's
+  rules as far as its data exercises them. A change that makes the
+  version-1 archive read differently therefore fails there when the version
+  bump is skipped. A failure means a new `format_version`, whose ADR decides
+  how version-1 archives keep verifying. The version-1 file is never
+  regenerated to make the test pass, and regeneration refuses to overwrite
+  it.
 
-Loosening a verifier rule is caught by that rule's negative control, not by
-either pin: the fingerprint and the golden archive only notice changes that
-make a version-1 archive read differently.
+Loosening a verifier rule that has a negative control fails that control.
+Neither pin catches three kinds of change, so review must:
+- loosening a rule that has no control;
+- tightening a rule in a way the golden data happens to satisfy (such a
+  change rejects version-1 archives that an earlier build accepts);
+- a recorded fingerprint edited together with the specification and this
+  document.
 
 The coverage guard has limits, and states them. It reads vocabularies from
 stored `CHECK ... IN (...)` lists, so a vocabulary enforced only by a trigger,
 a flag column without a stored `CHECK` (`draft_rating.not_observed`, which a
-trigger holds to `0` or `1`), and text forms checked with `GLOB` (the
-`evaluation_version` hashes) are not compared with the specification. In
+trigger holds to `0` or `1`), text forms checked with `GLOB` (the
+`evaluation_version` hashes), and unusual identifier spellings (bracketed or
+backquoted names, `COLLATE`, or an expression before `IN`) are not compared
+with the specification. In
 those cases the guard under-verifies, and the producer's and verifier's rules
 still apply. It never lets a table or column leave unaccounted for.
 

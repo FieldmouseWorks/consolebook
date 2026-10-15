@@ -8,22 +8,41 @@ use super::*;
 
 /// The committed version-1 archive.
 const GOLDEN_V1: &[u8] = include_bytes!("../fixtures/installation-export-v1.zip");
-const GOLDEN_V1_PATH: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/tests/fixtures/installation-export-v1.zip"
-);
+/// Set to `1` to let [`regenerate`] write a golden archive.
+const REGENERATE_ENV: &str = "CONSOLEBOOK_REGENERATE_GOLDEN";
 
-/// Regenerates the golden archive from the populated fixture. Legitimate
-/// only together with a new `format_version`, and then as a new file for
-/// that version beside this one: never to make the version-1 test pass.
-/// Run with `cargo test -p consolebook-server --test installation_export
-/// -- --ignored golden::regenerate`.
+/// Writes the golden archive for the current `INSTALLATION_FORMAT_VERSION`,
+/// `tests/fixtures/installation-export-v{N}.zip`, from the populated
+/// fixture. Legitimate only when a new `format_version` is defined, to
+/// create that version's archive beside the earlier ones; never to make an
+/// existing version's test pass.
+///
+/// Three guards keep a habit from rewriting history: it is ignored by
+/// default; even when ignored tests run (`--include-ignored`) it does
+/// nothing unless `CONSOLEBOOK_REGENERATE_GOLDEN=1` is set; and it refuses
+/// to overwrite a file that exists. Run with
+/// `CONSOLEBOOK_REGENERATE_GOLDEN=1 cargo test -p consolebook-server
+/// --test installation_export -- --ignored golden::regenerate`.
 #[tokio::test]
-#[ignore = "writes the committed golden archive; only with a new format_version"]
+#[ignore = "writes a new golden archive; only with a new format_version"]
 async fn regenerate() {
+    if std::env::var(REGENERATE_ENV).as_deref() != Ok("1") {
+        println!(
+            "skipped: set {REGENERATE_ENV}=1 to write a golden archive for a new format_version"
+        );
+        return;
+    }
+    let path = format!(
+        "{}/tests/fixtures/installation-export-v{INSTALLATION_FORMAT_VERSION}.zip",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    assert!(
+        !std::path::Path::new(&path).exists(),
+        "{path} exists; a golden archive is never regenerated. Define a new format_version first."
+    );
     let p = populate().await;
     let bytes = export(&p.fx, p.fx.admin_id).await;
-    std::fs::write(GOLDEN_V1_PATH, &bytes).expect("write golden archive");
+    std::fs::write(&path, &bytes).expect("write golden archive");
 }
 
 /// Rows per carried table in the golden archive.

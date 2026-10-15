@@ -219,6 +219,30 @@ async fn every_further_check_names_its_finding() {
                 out_of_order("capability_grant", same_user, "user_id, capability"),
             ),
             (
+                "content_hash not in its text form",
+                // The unit states the same non-hex hash, so the form rule
+                // fires rather than a row/unit disagreement.
+                {
+                    let bad = "Z".repeat(64);
+                    let edited = edit_version(&summary_v1, &|row| {
+                        row["content_hash"] = Value::from("Z".repeat(64));
+                    });
+                    with_manifest(&edited, |manifest| {
+                        for unit in manifest["units"].as_array_mut().expect("units") {
+                            if unit["record_id"] == summary_v1["evaluation_record_id"] {
+                                unit["content_hash"] = Value::from(bad.clone());
+                            }
+                        }
+                    })
+                },
+                installation(InstallationFinding::RowValue {
+                    path: path("evaluation_version"),
+                    row: row_of(&versions, &summary_v1),
+                    column: "content_hash".to_owned(),
+                    detail: "not 64 lowercase hex".to_owned(),
+                }),
+            ),
+            (
                 "row and unit disagree on record_schema",
                 edit_version(&amended_v1, &|row| row["record_schema"] = Value::from(1)),
                 disagrees(&amended_v1, "record_schema"),

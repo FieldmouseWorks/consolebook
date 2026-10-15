@@ -144,14 +144,19 @@ download; one pull request.
   document, producer, verifier, and fixtures (CONTRIBUTING.md). The coverage
   test fails a table or column the format has not decided on. Vocabularies
   grow within a format version and never lose a value; a reader meeting an
-  unknown value reports it, as this verifier does. A recorded fingerprint
-  pins the structure the specification holds (tables, keys, columns,
-  references, agreements, which columns are vocabularies, exclusions, and
-  columns carried as units) per `format_version`. A golden version-1 archive
-  pins the manifest shape and the verifier's rules and makes skipping a
-  version bump fail. Loosening a verifier rule is caught by its negative
-  control, not by either pin. A build refuses an unknown
-  format version by name. The ADR for a later version decides how earlier
+  unknown value reports it, as this verifier does.
+- A recorded fingerprint pins the structure the specification holds per
+  `format_version`: tables, keys, columns, text forms, references,
+  agreements, which columns are vocabularies, exclusions, and columns carried
+  as units.
+- A golden version-1 archive pins the manifest shape, and the verifier's
+  rules as far as its data exercises them. Skipping a version bump for a
+  change that makes that archive read differently therefore fails.
+- A loosened rule that has a negative control fails that control.
+- Review remains the guard for three things: a tightening the golden data
+  happens to satisfy, a rule loosened with no control, and a recorded
+  fingerprint edited together with the specification.
+- A build refuses an unknown format version by name. The ADR for a later version decides how earlier
   archives keep verifying.
 - The format exposes the storage schema's names and shapes to whoever reads an
   export. That is the point (the agency's data as it is held), and the format
