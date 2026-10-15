@@ -98,7 +98,11 @@ scripts/restore-drill/run.sh consolebook-linux-x86_64.tar.gz consolebook-linux-x
 ```
 
 Without `HOST_B_BINARY`, host B installs the same release. With it, host B
-runs that build, which drills recovery into a newer version. The script is
+runs that build, which drills recovery into a newer version. The script
+exits 0 and prints `DRILL PASSED` only when restoring the newest copy brings
+back every record, acknowledgment, and export unchanged, and `doctor` reports
+every line `ok`. Run with v0.1.0 as host B too, it fails on both counts, as
+#115 did. The script is
 no substitute for the drill on real machines: it has no systemd, no network
 share, and no disk that fails.
 

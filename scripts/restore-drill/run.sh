@@ -16,10 +16,23 @@ t0=$(date +%s.%N)
 step() { printf '\n== [%6.1fs] %s\n' "$(awk "BEGIN { print $(date +%s.%N) - $t0 }")" "$*"; }
 health() { for _ in $(seq 100); do curl -fsS "http://127.0.0.1:$1/api/health" 2>/dev/null && return 0; sleep 0.1; done; return 1; }
 stop() { kill -TERM "$1"; wait "$1" || true; }
-doctor() {  # 0.1.0's doctor has no --backup-copy-dir
-  if "$1" doctor --help | grep -q backup-copy-dir; then "$1" doctor --backup-copy-dir "$COPY" || true; else "$1" doctor || true; fi
+# Every doctor line must be ok. The service copies its newest backup off the
+# server on its first scheduler pass, so give that a few seconds. 0.1.0's
+# doctor has no --backup-copy-dir.
+doctor() {
+  local args=() out
+  if "$1" doctor --help | grep -q backup-copy-dir; then args=(--backup-copy-dir "$COPY"); fi
+  for _ in $(seq 20); do
+    if out=$("$1" doctor "${args[@]}") && ! grep -qv '^ok ' <<<"$out"; then
+      echo "$out"; return 0
+    fi
+    sleep 0.5
+  done
+  echo "$out"; echo "DRILL FAILED: doctor reports a line that is not ok"; return 1
 }
 
+PID=""
+trap 'if [[ -n $PID ]]; then kill "$PID" 2>/dev/null || true; fi' EXIT  # never leave a server behind
 rm -rf "$WORK"; mkdir -p "$WORK"
 COPY=$(mktemp -d /dev/shm/consolebook-drill-copy.XXXXXX)
 echo "copy directory: $COPY (filesystem $(stat -f -c %T "$COPY")); data on $(stat -f -c %T "$WORK")"
@@ -73,7 +86,8 @@ stop $PID
 grep -E 'backup|cop(y|ied)' "$WORK/hostB-1.log" || true
 ls -l --time-style=+%H:%M:%S "$COPY"
 
-NEWEST=$(ls "$COPY"/consolebook-*.db | grep -v premigration | sort | tail -1)
+# Scheduled backups only (consolebook-<stamp>.db), newest last by name.
+NEWEST=$(printf '%s\n' "$COPY"/consolebook-2*.db | sort | tail -1)
 step "host B: restore the newest file from the copy directory, as the guide says: $(basename "$NEWEST")"
 "$BIN_B" restore "$NEWEST"
 
@@ -81,7 +95,7 @@ step "host B: start and check"
 "$BIN_B" serve --bind 127.0.0.1:$PORT_B --backup-copy-dir "$COPY" >"$WORK/hostB-2.log" 2>&1 &
 PID=$!
 health $PORT_B; echo
-doctor "$BIN_B"
+if doctor "$BIN_B"; then DOCTOR_OK=1; else DOCTOR_OK=0; fi
 if python3 -I "$HERE/seed_collect.py" collect "http://127.0.0.1:$PORT_B" "$WORK/after-newest"; then
   RESTORED_OK=1
 else
@@ -91,13 +105,13 @@ fi
 stop $PID
 
 if [[ $RESTORED_OK == 0 ]]; then
-  PRE=$(ls "$COPY"/consolebook-*.db | grep -v premigration | sort | awk '{l[NR]=$0} END{print l[NR-1]}')
+  PRE=$(printf '%s\n' "$COPY"/consolebook-2*.db | sort | awk '{l[NR]=$0} END{print l[NR-1]}')
   step "host B: restore the newest copy from before the loss instead: $(basename "$PRE")"
   "$BIN_B" restore "$PRE"
   "$BIN_B" serve --bind 127.0.0.1:$PORT_B --backup-copy-dir "$COPY" >"$WORK/hostB-3.log" 2>&1 &
   PID=$!
   health $PORT_B; echo
-  doctor "$BIN_B"
+  doctor "$BIN_B" || true  # diagnosis only: this run has already failed
   python3 -I "$HERE/seed_collect.py" collect "http://127.0.0.1:$PORT_B" "$WORK/after"
   stop $PID
 else
@@ -128,4 +142,12 @@ for side in before after; do
     "$BIN_B" export verify "$zip" | tail -1
   done
 done
-step "done"
+if [[ $RESTORED_OK == 0 ]]; then
+  step "DRILL FAILED: restoring the newest copy, as the install guide says, did not bring the records back"
+  exit 1
+fi
+if [[ $DOCTOR_OK == 0 ]]; then
+  step "DRILL FAILED: doctor did not report every line ok after the restore"
+  exit 1
+fi
+step "DRILL PASSED"
