@@ -258,7 +258,12 @@ fn check_backups(data_dir: &DataDir, findings: &mut Vec<Finding>) {
         ));
         return;
     }
-    let latest = snapshots.last().expect("non-empty");
+    // Name the newest backup of this installation, not a database a restore
+    // set aside, which the copy line does not count either (#115).
+    let own = crate::backup::own_backups_in(&data_dir.backups()).unwrap_or_default();
+    let latest = own
+        .last()
+        .unwrap_or_else(|| snapshots.last().expect("non-empty"));
     let latest_name = latest
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())

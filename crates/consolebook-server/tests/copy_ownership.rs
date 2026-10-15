@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use consolebook_server::backup_copy::{self, CopyStatus};
 use consolebook_server::data_dir::DataDir;
-use consolebook_server::{backup, restore, storage};
+use consolebook_server::{backup, doctor, restore, storage};
 
 /// A migrated installation in `root`, with one validated backup.
 async fn installation(root: &Path) -> (DataDir, String, PathBuf) {
@@ -140,6 +140,16 @@ async fn a_replacement_server_never_copies_over_the_installation_it_replaces() {
             CopyStatus::Current { .. }
         ),
         "the copy directory holds the newest backup"
+    );
+    // doctor names the same newest backup, not the database set aside.
+    let findings = doctor::run(&replacement, Some(&share)).await;
+    let backups = findings
+        .iter()
+        .find(|finding| finding.check == "backups")
+        .expect("doctor reports backups");
+    assert!(
+        backups.detail.ends_with(&name(&restored_backup)),
+        "{backups:?}"
     );
 }
 
