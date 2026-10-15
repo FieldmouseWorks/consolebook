@@ -143,7 +143,10 @@ invented example, and shows backup health. Or work through the list by hand:
 Run the same install command again. It replaces the program and the service
 definition, keeps `/var/lib/consolebook` and your settings, restarts the
 service, and prints the address. The database is upgraded on start, and
-startup refuses to run against data it cannot verify.
+startup refuses to run against data it cannot verify. `consolebook doctor`
+reports, without changing anything, each recorded migration the service
+would refuse: one this version does not know, one changed since it was
+applied (a different checksum), or one recorded as unsuccessful.
 
 When a new version changes the database, it first takes a validated backup
 of it as it was, `backups/consolebook-premigration-<stamp>.db`, and changes

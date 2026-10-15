@@ -166,9 +166,63 @@ async fn doctor_reads_stopped_wal_installation_without_changing_database_bytes()
     }
 }
 
+const CHANGE_NEWEST_CHECKSUM: &str =
+    "UPDATE _sqlx_migrations SET checksum = zeroblob(length(checksum))
+     WHERE version = (SELECT MAX(version) FROM _sqlx_migrations)";
+
+fn newest_migration() -> i64 {
+    storage::MIGRATOR
+        .iter()
+        .map(|migration| migration.version)
+        .max()
+        .expect("migrations")
+}
+
+/// A live writer holds the changed checksum only in its WAL, so the finding
+/// proves `doctor` read the live history, and both files stay byte-identical.
+#[tokio::test]
+async fn doctor_reports_a_changed_migration_checksum_in_live_wal_without_changing_bytes() {
+    let (_tmp, data) = installation();
+    let writer = storage::open(&data.database()).await.expect("initialize");
+    let mut connection = writer.acquire().await.expect("writer connection");
+    sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+        .execute(&mut *connection)
+        .await
+        .expect("checkpoint fixture");
+    let changed = sqlx::query(CHANGE_NEWEST_CHECKSUM)
+        .execute(&mut *connection)
+        .await
+        .expect("alter one checksum in WAL")
+        .rows_affected();
+    assert_eq!(changed, 1);
+    let wal_path = data.root().join("consolebook.db-wal");
+    let before = std::fs::read(data.database()).expect("before");
+    let wal_before = std::fs::read(&wal_path).expect("WAL before");
+    assert!(wal_before.len() > 32, "fixture needs committed WAL frames");
+
+    let findings = doctor::run(&data, &doctor::Options::default()).await;
+    let failures: Vec<_> = findings
+        .iter()
+        .filter(|f| f.verdict == doctor::Verdict::Fail)
+        .collect();
+    assert_eq!(failures.len(), 1, "{findings:?}");
+    assert_eq!(failures[0].check, "migrations");
+    let named = format!(
+        "migration {} was applied by a different build",
+        newest_migration()
+    );
+    assert!(failures[0].detail.contains(&named), "{findings:?}");
+    assert_eq!(before, std::fs::read(data.database()).expect("after"));
+    assert_eq!(wal_before, std::fs::read(wal_path).expect("WAL after"));
+    drop(connection);
+    writer.close().await;
+}
+
 #[cfg(unix)]
 mod permissions {
-    use super::{initialize_stopped, installation, storage};
+    use super::{
+        CHANGE_NEWEST_CHECKSUM, initialize_stopped, installation, newest_migration, storage,
+    };
     use std::os::unix::fs::PermissionsExt;
 
     fn run_doctor(data: &consolebook_server::data_dir::DataDir) -> std::process::Output {
@@ -232,6 +286,56 @@ mod permissions {
         assert_eq!(before, std::fs::read(data.database()).expect("after"));
         assert!(!data.root().join("consolebook.db-wal").exists());
         assert!(!data.root().join("consolebook.db-shm").exists());
+    }
+
+    /// With live sidecars in a read-only directory, `doctor` still reads the
+    /// migration history and reports a changed checksum, exiting non-zero.
+    /// File modes block writes here, so this is not a write control; the
+    /// live-WAL test above is.
+    #[tokio::test]
+    async fn a_changed_migration_checksum_is_diagnosed_in_a_read_only_directory() {
+        let (_tmp, data) = installation();
+        let writer = storage::open(&data.database()).await.expect("initialize");
+        sqlx::query(CHANGE_NEWEST_CHECKSUM)
+            .execute(&writer)
+            .await
+            .expect("alter one checksum");
+        let permissions = ReadOnlyDirectory::new(data.root());
+        assert!(
+            std::fs::File::create(data.root().join("write-probe")).is_err(),
+            "run permission tests as an unprivileged user"
+        );
+        let paths = [
+            data.database(),
+            data.root().join("consolebook.db-wal"),
+            data.root().join("consolebook.db-shm"),
+        ];
+        let before: Vec<_> = paths
+            .iter()
+            .map(|p| std::fs::read(p).expect("before"))
+            .collect();
+        let output = run_doctor(&data);
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let named = format!(
+            "migration {} was applied by a different build",
+            newest_migration()
+        );
+        assert!(
+            stdout
+                .lines()
+                .any(|line| line.starts_with("FAIL") && line.contains(&named)),
+            "{stdout}"
+        );
+        for (path, bytes) in paths.iter().zip(before) {
+            assert!(
+                bytes == std::fs::read(path).expect("after"),
+                "changed {}",
+                path.display()
+            );
+        }
+        drop(permissions);
+        writer.close().await;
     }
 
     #[tokio::test]

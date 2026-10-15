@@ -110,8 +110,11 @@ authentication, and [ADR 0005](docs/decisions/0005-embedded-web-interface.md)
 for the embedded interface.
 
 `doctor` opens the database read-only and reports journal mismatches without
-repairing them. SQLite may create WAL sidecars or update shared-memory
-coordination; read-only storage without usable sidecars can prevent diagnosis.
+repairing them. It also reports every recorded migration that `serve` would
+refuse to start on: a version this build does not know, a changed checksum,
+or a migration recorded as unsuccessful. SQLite may create WAL sidecars or
+update shared-memory coordination; read-only storage without usable sidecars
+can prevent diagnosis.
 Its connection-local PRAGMA checks describe the diagnostic connection.
 See [ADR 0016](docs/decisions/0016-read-only-diagnostics.md) for the precise contract.
 
