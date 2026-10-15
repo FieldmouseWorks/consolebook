@@ -52,10 +52,30 @@ impl Finding {
     }
 }
 
+/// How the service is configured, for the checks that depend on it.
+/// `doctor` reads no configuration files; the caller passes what the
+/// service uses.
+#[derive(Debug, Clone, Copy)]
+pub struct Options<'a> {
+    /// The configured off-server copy directory, if any (ADR 0024).
+    pub backup_copy_dir: Option<&'a Path>,
+    /// Hours between the service's automatic backups.
+    pub backup_interval_hours: u64,
+}
+
+impl Default for Options<'_> {
+    fn default() -> Self {
+        Self {
+            backup_copy_dir: None,
+            backup_interval_hours: crate::scheduler::DEFAULT_INTERVAL_HOURS,
+        }
+    }
+}
+
 /// Runs every diagnostic and returns the findings. The caller decides how to
-/// render them and what exit code the process deserves. `backup_copy_dir` is
-/// the configured off-server copy directory, if any (ADR 0024).
-pub async fn run(data_dir: &DataDir, backup_copy_dir: Option<&Path>) -> Vec<Finding> {
+/// render them and what exit code the process deserves.
+pub async fn run(data_dir: &DataDir, options: &Options<'_>) -> Vec<Finding> {
+    let backup_copy_dir = options.backup_copy_dir;
     let mut findings = Vec::new();
 
     check_layout(data_dir, &mut findings);
@@ -90,7 +110,7 @@ pub async fn run(data_dir: &DataDir, backup_copy_dir: Option<&Path>) -> Vec<Find
         }
     }
 
-    check_backups(data_dir, &mut findings);
+    check_backups(data_dir, options.backup_interval_hours, &mut findings);
     check_backup_copy(data_dir, backup_copy_dir, &mut findings);
     findings
 }
@@ -240,7 +260,7 @@ async fn check_initialization(pool: &SqlitePool, findings: &mut Vec<Finding>) {
     }
 }
 
-fn check_backups(data_dir: &DataDir, findings: &mut Vec<Finding>) {
+fn check_backups(data_dir: &DataDir, interval_hours: u64, findings: &mut Vec<Finding>) {
     if !data_dir.backups().is_dir() {
         return; // Layout check already reported the missing directory.
     }
@@ -277,16 +297,15 @@ fn check_backups(data_dir: &DataDir, findings: &mut Vec<Finding>) {
         .ok()
         .flatten()
         .map(|mtime| time::OffsetDateTime::now_utc().unix_timestamp() - mtime);
-    let stale_after = i64::try_from(crate::scheduler::DEFAULT_INTERVAL_HOURS * 3600)
-        .expect("interval fits in i64");
+    let stale_after = i64::try_from(interval_hours.saturating_mul(3600)).unwrap_or(i64::MAX);
     match age {
         Some(age) if age > stale_after => findings.push(Finding::warn(
             "backups",
             format!(
-                "{} snapshot(s), newest is {} hours old (older than the default {}-hour interval)",
+                "{} snapshot(s), newest is {} hours old (older than the {interval_hours}-hour \
+                 backup interval; if the service uses another, pass --backup-interval-hours)",
                 snapshots.len(),
                 age / 3600,
-                crate::scheduler::DEFAULT_INTERVAL_HOURS,
             ),
         )),
         _ => findings.push(Finding::ok(

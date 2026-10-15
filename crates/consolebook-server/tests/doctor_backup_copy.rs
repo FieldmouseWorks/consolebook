@@ -44,7 +44,11 @@ impl Installation {
     }
 
     async fn copy_finding(&self, copy_dir: Option<&Path>) -> Finding {
-        doctor::run(&self.data_dir, copy_dir)
+        let options = doctor::Options {
+            backup_copy_dir: copy_dir,
+            ..doctor::Options::default()
+        };
+        doctor::run(&self.data_dir, &options)
             .await
             .into_iter()
             .find(|finding| finding.check == "backup copy")
@@ -146,7 +150,14 @@ async fn a_copy_directory_holding_the_newest_snapshot_is_current() {
     assert_eq!(finding.verdict, Verdict::Ok, "{finding:?}");
     assert!(finding.detail.starts_with("current:"), "{finding:?}");
     assert!(!doctor::has_failure(
-        &doctor::run(&fx.data_dir, Some(&share)).await
+        &doctor::run(
+            &fx.data_dir,
+            &doctor::Options {
+                backup_copy_dir: Some(&share),
+                ..doctor::Options::default()
+            }
+        )
+        .await
     ));
     assert_eq!(
         listing(&share),

@@ -146,7 +146,7 @@ async fn doctor_passes_on_healthy_installation() {
     let pool = storage::open(&data_dir.database()).await.expect("open");
     pool.close().await;
 
-    let findings = doctor::run(&data_dir, None).await;
+    let findings = doctor::run(&data_dir, &doctor::Options::default()).await;
     assert!(
         !doctor::has_failure(&findings),
         "unexpected failures: {findings:?}"
@@ -156,13 +156,13 @@ async fn doctor_passes_on_healthy_installation() {
 #[tokio::test]
 async fn doctor_fails_on_uninitialized_installation() {
     let (_tmp, data_dir) = temp_data_dir();
-    let findings = doctor::run(&data_dir, None).await;
+    let findings = doctor::run(&data_dir, &doctor::Options::default()).await;
     assert!(doctor::has_failure(&findings));
 }
 
 #[tokio::test]
 async fn doctor_does_not_create_a_database() {
     let (_tmp, data_dir) = temp_data_dir();
-    let _ = doctor::run(&data_dir, None).await;
+    let _ = doctor::run(&data_dir, &doctor::Options::default()).await;
     assert!(!data_dir.database().exists());
 }
