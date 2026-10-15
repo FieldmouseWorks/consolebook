@@ -28,6 +28,9 @@ not a production-readiness statement.
 - [ADR 0027](docs/decisions/0027-backup-copy-encryption.md): Consolebook does
   not encrypt backup copies; the install guide states what the share must
   provide.
+- A [restore drill](docs/restore-drill.md) from a lost server to verified
+  records, with a scripted version (`scripts/restore-drill/`) and a recorded
+  run from the v0.1.0 release.
 
 - [Operating a pilot installation](docs/operations.md): what to monitor and
   how, the logs and their retention, reporting a problem, and what support a
