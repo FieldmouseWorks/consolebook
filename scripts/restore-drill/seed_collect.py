@@ -231,6 +231,12 @@ def collect(base: str, out: Path) -> None:
         export = declared(path)
         if export["scope"] != {"kind": "record", "record_id": record_id}:
             raise SystemExit(f"record {record_id}'s export declares {export['scope']}")
+        # The export carries the record's current version, as the API reports it.
+        meta = version["meta"]
+        newest = max(export["units"], key=lambda unit: unit["version_number"])
+        for field in ("version_number", "content_hash", "chain_hash"):
+            if newest[field] != meta[field]:
+                raise SystemExit(f"record {record_id}'s export has {field} {newest[field]}, the record {meta[field]}")
         manifest["records"].append(
             {
                 "record_id": record_id,
