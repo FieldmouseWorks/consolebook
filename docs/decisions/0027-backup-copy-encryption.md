@@ -24,8 +24,9 @@ Losing the key makes every copy unrecoverable. For a system whose purpose is
 defensible records, that is worse than the exposure it prevents. Exposure
 can also be prevented below Consolebook. Agencies that keep
 criminal-justice-adjacent data generally already run encrypted volumes and
-access-controlled shares (SMB 3 encryption, an encrypted NAS volume, LUKS or
-BitLocker on a second disk), with key custody they already manage.
+access-controlled shares (an encrypted NAS volume, BitLocker on the file
+server, LUKS on a second disk; SMB 3 or Kerberos NFS encryption for the
+network path), with key custody they already manage.
 
 ## Decision
 
@@ -34,7 +35,8 @@ BitLocker on a second disk), with key custody they already manage.
   `doctor` and `/api/backups/status` can check them.
 - **The share must provide confidentiality.** The install guide states the
   requirements:
-  - storage encrypted at rest;
+  - storage encrypted at rest (a storage-layer control: the volume or
+    dataset, not the network protocol, which protects only the path);
   - write access limited to the `consolebook` service account;
   - read access limited to the people who may restore.
   It also says that a copy holds every record.

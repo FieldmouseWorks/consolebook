@@ -212,10 +212,14 @@ and reports the copy location as unreachable until the share is back.
 Each copy holds every record. Consolebook does not encrypt copies (ADR 0027),
 so the share must:
 
-- be encrypted at rest (for example SMB 3 encryption, an encrypted NAS volume,
-  or LUKS or BitLocker on a second disk);
+- be stored on encrypted storage: an encrypted NAS volume or dataset, a
+  BitLocker volume on the file server, or LUKS on a second disk;
 - be writable only by the `consolebook` account;
 - be readable only by the people who may restore.
+
+Encryption at rest protects the files where they are stored. On a network
+share, also encrypt the path to it (SMB 3 encryption, or NFS with Kerberos
+`krb5p`), since a copy crosses the network every time it is written.
 
 ```sh
 sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook consolebook backup    # take one now
