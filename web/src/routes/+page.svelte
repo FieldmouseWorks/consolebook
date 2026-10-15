@@ -12,6 +12,7 @@
 		getNotices,
 		getSetupProgress,
 		getBackupStatus,
+		completeInstallationExportPath,
 		installationExportPath,
 		issueResetCode,
 		markNoticeRead,
@@ -304,9 +305,10 @@
 		}
 	}
 
-	// The whole installation leaves as one archive: every finalized
-	// version as its stored bytes, verifiable from the archive alone
-	// (ADR 0014). This is the explicit export_records authority.
+	// Every finalized version leaves as one records-only archive of its
+	// stored bytes, verifiable from the archive alone (ADR 0014). The
+	// complete installation export is below. Both are the explicit
+	// export_records authority.
 	let exportError = $state('');
 	let exported = $state('');
 	async function exportInstallation() {
@@ -317,6 +319,26 @@
 			exported = await downloadExport(installationExportPath());
 		} catch (err) {
 			exportError =
+				err instanceof ApiError ? err.message : 'the server could not be reached';
+		} finally {
+			busy = false;
+		}
+	}
+
+	// Everything the installation holds except credentials, as one archive
+	// that verifies from the file alone (ADR 0028). Offered even before any
+	// record is finalized: people, programs, and the audit trail still leave
+	// with it. Its own messages, so neither export overwrites the other's.
+	let wholeExportError = $state('');
+	let wholeExported = $state('');
+	async function exportWholeInstallation() {
+		wholeExportError = '';
+		wholeExported = '';
+		busy = true;
+		try {
+			wholeExported = await downloadExport(completeInstallationExportPath());
+		} catch (err) {
+			wholeExportError =
 				err instanceof ApiError ? err.message : 'the server could not be reached';
 		} finally {
 			busy = false;
@@ -618,11 +640,12 @@
 
 {#if canExport}
 	<section class="card">
-		<h2>Record exports</h2>
+		<h2>Installation exports</h2>
+		<h3>Finalized records</h3>
 		{#if summary === null}
 			<p class="quiet">Checking finalized records…</p>
 		{:else if summary.version_count === 0}
-			<p class="quiet">No finalized records yet; there is nothing to export.</p>
+			<p class="quiet">No finalized records yet; there is no record export to make.</p>
 		{:else}
 			<p>
 				This installation holds {summary.version_count} finalized
@@ -641,6 +664,26 @@
 		{/if}
 		{#if exportError}
 			<p class="error" role="alert">{exportError}</p>
+		{/if}
+		<h3>The whole installation</h3>
+		<p>
+			The installation export carries everything this installation holds except
+			credentials: records, people, programs, enrollments, sessions, drafts and
+			their reviews, retention, notices, and the audit trail.
+			<code>consolebook-server export verify</code> checks it from the file alone.
+		</p>
+		<p>
+			It holds every person's data and is not encrypted. Store it as the
+			installation's own data.
+		</p>
+		<button type="button" class="secondary" disabled={busy} onclick={exportWholeInstallation}>
+			Export the whole installation
+		</button>
+		{#if wholeExported}
+			<p class="quiet" role="status">Downloaded {wholeExported}.</p>
+		{/if}
+		{#if wholeExportError}
+			<p class="error" role="alert">{wholeExportError}</p>
 		{/if}
 	</section>
 {/if}
