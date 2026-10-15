@@ -34,8 +34,12 @@ doctor() {
   echo "$out"; echo "DRILL FAILED: doctor reports a line that is not ok"; return 1
 }
 
-PID=""
-trap 'if [[ -n $PID ]]; then kill "$PID" 2>/dev/null || true; fi' EXIT  # never leave a server behind
+PID="" COPY=""
+cleanup() {  # never leave a server or the tmpfs copy directory behind
+  if [[ -n $PID ]]; then kill "$PID" 2>/dev/null || true; fi
+  if [[ -n $COPY ]]; then rm -rf "$COPY"; fi
+}
+trap cleanup EXIT
 rm -rf "$WORK"; mkdir -p "$WORK"
 COPY=$(mktemp -d /dev/shm/consolebook-drill-copy.XXXXXX)
 echo "copy directory: $COPY (filesystem $(stat -f -c %T "$COPY")); data on $(stat -f -c %T "$WORK")"
