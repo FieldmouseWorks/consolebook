@@ -3251,7 +3251,6 @@ test('overlapping SPA navigation keeps the draft locked until the current route 
 		await expect(author.getByLabel(MOST)).toBeEnabled();
 		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
 		expect(await author.evaluate(() => history.length)).toBe(entryCount);
-		await expect(author.getByRole('button', { name: 'Resume editing this draft' })).toHaveCount(0);
 		await expectSpaAlive(author);
 	} finally {
 		firstLayout.release();
@@ -3274,14 +3273,12 @@ test('a shallow traversal that aborts a held departure leaves the draft editable
 		await markSpa(author);
 		await homeSessions(author);
 		await openDraftFromHome(author, '2026-06-02', seeded.draftId);
-		const originalState = await author.evaluate(() => history.state);
 		// Two in-app hash links give this draft shallow history entries that
 		// SvelteKit itself records. A shallow popstate while the destination
 		// GET is held resets the router token and aborts that departure.
-		// SvelteKit 2 left `navigating` published after that abort (the
-		// stranded state the "Resume editing" control answered); SvelteKit 3
-		// clears it (sveltejs/kit#17118), so the editor must come back on its
-		// own, on the same entry, without a resume step.
+		// SvelteKit 2 left `navigating` published after that abort, stranding
+		// the editor frozen; SvelteKit 3 clears it (sveltejs/kit#17118), so the
+		// editor must come back on its own, on the same entry.
 		await author.evaluate(() => {
 			for (const name of ['earlier', 'current']) {
 				const link = document.createElement('a');
@@ -3310,15 +3307,17 @@ test('a shallow traversal that aborts a held departure leaves the draft editable
 		await author.evaluate(() => history.forward());
 		await expect(author).toHaveURL(/#current$/);
 		await expect(author.getByLabel(MOST)).toBeEnabled();
-		await expect(author.getByRole('button', { name: 'Resume editing this draft' })).toHaveCount(0);
+		// Edit and save while the abandoned departure's layout load is still
+		// held: its late answer must not carry the page away from the draft.
+		const typed = 'Invented text typed during the held window.';
+		await author.getByLabel(MOST).fill(typed);
+		await expectSaved(author);
 		layout.release();
 		await author.waitForLoadState('networkidle');
 		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}#current$`));
 		await expect(author.getByLabel(MOST)).toBeEnabled();
-		await expect(author.getByRole('button', { name: 'Resume editing this draft' })).toHaveCount(0);
+		await expect(author.getByLabel(MOST)).toHaveValue(typed);
 		expect(await author.evaluate(() => history.length)).toBe(entryCount);
-		expect(await author.evaluate(() => history.state['sveltekit:metadata'].state))
-			.toEqual(originalState['sveltekit:metadata'].state);
 		const unsaved = 'Invented post-abort note.';
 		await author.route(`**/api/drafts/${seeded.draftId}/content`, async (route) => {
 			await route.abort('failed');

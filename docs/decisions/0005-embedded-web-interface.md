@@ -2,6 +2,10 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-28
+- **Amended:** 2026-10-15 by [#54](https://github.com/FieldmouseWorks/consolebook/issues/54):
+  the toolchain is now SvelteKit 3 on Vite 8, with `#lib` subpath imports
+  and the adapter configured in `web/vite.config.ts`; the decision is
+  otherwise unchanged.
 
 ## Context
 
