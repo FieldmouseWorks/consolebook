@@ -456,7 +456,7 @@ fn entries(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
         let mut file = archive.by_index(index).expect("entry");
         let mut content = Vec::new();
         file.read_to_end(&mut content).expect("read");
-        out.push((file.name().to_owned(), content));
+        out.push((file.name().expect("entry name").into_owned(), content));
     }
     out
 }
@@ -1070,16 +1070,16 @@ async fn packets_follow_the_read_rules_and_leave_with_an_empty_history() {
     let bytes = pack(&fx, riley, empty).await;
     let report = export_verify::verify_archive(&bytes);
     assert!(report.verified(), "{report:?}");
-    assert!(report.units.is_empty());
+    assert!(report.units.is_empty(), "{:?}", report.units);
     assert_eq!(report.documents.len(), 4);
     let listed = entries(&bytes);
     let acks: Vec<AcknowledgmentDoc> =
         serde_json::from_slice(entry(&listed, "packet/acknowledgments.json")).expect("acks");
-    assert!(acks.is_empty());
+    assert!(acks.is_empty(), "{acks:?}");
     let enrollment: EnrollmentDocument =
         serde_json::from_slice(entry(&listed, "packet/enrollment.json")).expect("enrollment");
     assert_eq!(enrollment.enrollment_id, empty);
-    assert!(enrollment.events.is_empty());
+    assert!(enrollment.events.is_empty(), "{:?}", enrollment.events);
 
     // The trainee's own list, for the My records page.
     let mine = trainee_packet::own_enrollments(&fx.pool, s.taylor_id)

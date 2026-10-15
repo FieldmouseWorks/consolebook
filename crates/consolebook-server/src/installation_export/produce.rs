@@ -208,8 +208,16 @@ fn manifest(
 }
 
 /// `"name"`, quoted as an SQL identifier. Names come from the
-/// specification, never from input.
+/// specification, never from input; a name holding `"` or NUL could end
+/// the quoting early, so it panics rather than reaching SQL. A panic, not
+/// an error: such a name is a defect in the static specification, never
+/// a runtime condition, and the installation-export tests read every
+/// specified table and column through here.
 fn quoted(name: &str) -> String {
+    assert!(
+        !name.contains(['"', '\0']),
+        "SQL identifier {name:?} must not contain a double quote or NUL"
+    );
     format!("\"{name}\"")
 }
 
@@ -231,7 +239,9 @@ async fn read_document(
         quoted(table.name),
         key.join(", ")
     );
-    let mut rows = sqlx::query(&sql).fetch(&mut *conn);
+    // Audited: every identifier is a `&'static str` from the specification
+    // (`spec::TABLES`), quoted; no value from input reaches this text.
+    let mut rows = sqlx::query(sqlx::AssertSqlSafe(sql)).fetch(&mut *conn);
     let mut out = Vec::new();
     while let Some(row) = rows
         .try_next()
@@ -308,4 +318,26 @@ fn map_value(column: &Column, row: &SqliteRow, index: usize) -> Result<Value> {
         ColumnType::Text => row.try_get::<Option<String>, _>(index)?.map(Value::String),
     };
     Ok(value.unwrap_or(Value::Null))
+}
+
+#[cfg(test)]
+mod quoting_tests {
+    use super::quoted;
+
+    #[test]
+    fn plain_identifiers_are_quoted() {
+        assert_eq!(quoted("audit_event"), "\"audit_event\"");
+    }
+
+    #[test]
+    #[should_panic(expected = "must not contain a double quote or NUL")]
+    fn an_identifier_with_a_quote_is_refused() {
+        let _ = quoted("x\" ; DROP TABLE user; --");
+    }
+
+    #[test]
+    #[should_panic(expected = "must not contain a double quote or NUL")]
+    fn an_identifier_with_nul_is_refused() {
+        let _ = quoted("x\0y");
+    }
 }

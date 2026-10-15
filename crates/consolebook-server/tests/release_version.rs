@@ -54,6 +54,6 @@ fn changelog_has_a_section_for_the_current_version() {
 
 #[test]
 fn build_identity_names_version_and_commit() {
-    assert!(!BUILD_COMMIT.is_empty());
+    assert_ne!(BUILD_COMMIT, "");
     assert_eq!(BUILD_IDENTITY, format!("{VERSION} ({BUILD_COMMIT})"));
 }

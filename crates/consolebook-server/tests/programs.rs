@@ -362,13 +362,15 @@ const FROZEN_UPDATES: [&str; 11] = [
     "UPDATE standards_citation SET note = 'edited' WHERE program_version_id = ?1",
 ];
 
-async fn expect_frozen(pool: &sqlx::SqlitePool, sql: &str, binds: &[i64]) {
+async fn expect_frozen(pool: &sqlx::SqlitePool, sql: impl sqlx::SqlSafeStr, binds: &[i64]) {
+    let sql = sql.into_sql_str();
+    let shown = sql.as_str().to_owned();
     let mut query = sqlx::query(sql);
     for bind in binds {
         query = query.bind(*bind);
     }
     let result = query.execute(pool).await;
-    let err = result.expect_err(&format!("must be rejected on a published version: {sql}"));
+    let err = result.expect_err(&format!("must be rejected on a published version: {shown}"));
     let message = err.to_string();
     assert!(
         message.contains("immutable"),
@@ -376,7 +378,7 @@ async fn expect_frozen(pool: &sqlx::SqlitePool, sql: &str, binds: &[i64]) {
     );
 }
 
-async fn scalar(pool: &sqlx::SqlitePool, sql: &str, bind: i64) -> i64 {
+async fn scalar(pool: &sqlx::SqlitePool, sql: impl sqlx::SqlSafeStr, bind: i64) -> i64 {
     sqlx::query_scalar(sql)
         .bind(bind)
         .fetch_one(pool)
@@ -520,14 +522,16 @@ async fn published_versions_are_immutable_at_the_database() {
         expect_frozen(&fx.pool, sql, &[version_id]).await;
     }
     for table in OWNED_TABLES {
-        let sql = format!("DELETE FROM {table} WHERE program_version_id = ?1");
-        expect_frozen(&fx.pool, &sql, &[version_id]).await;
+        // Audited: `table` comes from the static `OWNED_TABLES` list.
+        let sql = sqlx::AssertSqlSafe(format!("DELETE FROM {table} WHERE program_version_id = ?1"));
+        expect_frozen(&fx.pool, sql, &[version_id]).await;
     }
 
     // Nothing new can be inserted into a published version, even rows
     // that would satisfy every foreign key.
     for (sql, binds) in frozen_inserts(&fx.pool, version_id).await {
-        expect_frozen(&fx.pool, &sql, &binds).await;
+        // Audited: built by `frozen_inserts` from static table names.
+        expect_frozen(&fx.pool, sqlx::AssertSqlSafe(sql), &binds).await;
     }
 
     // The content is exactly what was published.
@@ -704,9 +708,12 @@ async fn discarding_a_draft_removes_it_entirely() {
         "discarded draft must be gone"
     );
     for table in OWNED_TABLES {
-        let sql = format!("SELECT COUNT(*) FROM {table} WHERE program_version_id = ?1");
+        // Audited: `table` comes from the static `OWNED_TABLES` list.
+        let sql = sqlx::AssertSqlSafe(format!(
+            "SELECT COUNT(*) FROM {table} WHERE program_version_id = ?1"
+        ));
         assert_eq!(
-            scalar(&fx.pool, &sql, version_id).await,
+            scalar(&fx.pool, sql, version_id).await,
             0,
             "no rows may remain in {table}"
         );

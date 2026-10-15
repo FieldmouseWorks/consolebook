@@ -141,7 +141,9 @@ async fn after(edits: &[(&str, &str, &str)]) -> Vec<CoverageFinding> {
             .fetch_one(&mut *conn)
             .await
             .expect("table sql");
-        sqlx::query(&format!("DROP TABLE \"{table}\""))
+        // Audited: `table`, `from`, and `to` are this control's literals,
+        // and `sql` is the schema's own text read back from sqlite_master.
+        sqlx::query(sqlx::AssertSqlSafe(format!("DROP TABLE \"{table}\"")))
             .execute(&mut *conn)
             .await
             .expect("drop");
@@ -149,7 +151,7 @@ async fn after(edits: &[(&str, &str, &str)]) -> Vec<CoverageFinding> {
             continue;
         }
         assert!(sql.contains(from), "the control edits real SQL: {from}");
-        sqlx::query(&sql.replacen(from, to, 1))
+        sqlx::query(sqlx::AssertSqlSafe(sql.replacen(from, to, 1)))
             .execute(&mut *conn)
             .await
             .expect("recreate");

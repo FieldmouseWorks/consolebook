@@ -114,7 +114,8 @@ async fn an_unreachable_copy_directory_is_reported_and_never_created() {
     let finding = fx.copy_finding(Some(&local)).await;
     assert!(finding.detail.starts_with("unreachable:"), "{finding:?}");
     assert!(finding.detail.contains("same filesystem"), "{finding:?}");
-    assert!(listing(&local).is_empty());
+    let copies = listing(&local);
+    assert!(copies.is_empty(), "{copies:?}");
 }
 
 #[tokio::test]

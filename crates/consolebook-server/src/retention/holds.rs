@@ -153,7 +153,13 @@ fn hold_from_row(r: &sqlx::sqlite::SqliteRow) -> Result<Hold> {
     })
 }
 
-const HOLD_QUERY: &str = "SELECT h.*, r.released_by, r.released_at, r.reason AS release_reason, r.replacement_id FROM record_hold h LEFT JOIN hold_release r ON r.hold_id = h.id";
+/// A macro, not a `const`, so each query is one `concat!` literal that
+/// `SQLx` accepts as a `&'static str` without a runtime-built string.
+macro_rules! hold_query {
+    () => {
+        "SELECT h.*, r.released_by, r.released_at, r.reason AS release_reason, r.replacement_id FROM record_hold h LEFT JOIN hold_release r ON r.hold_id = h.id"
+    };
+}
 
 pub async fn list_holds(
     pool: &SqlitePool,
@@ -163,7 +169,7 @@ pub async fn list_holds(
         Ok(tx) => tx,
         Err(r) => return Ok(Err(r)),
     };
-    let rows = sqlx::query(&format!("{HOLD_QUERY} ORDER BY h.id DESC"))
+    let rows = sqlx::query(concat!(hold_query!(), " ORDER BY h.id DESC"))
         .fetch_all(&mut *tx)
         .await?;
     let holds = rows.iter().map(hold_from_row).collect::<Result<Vec<_>>>()?;
@@ -190,7 +196,7 @@ pub async fn active_holds_for_record(
     let Some(enrollment_id) = enrollment_id else {
         return storage::refuse(tx, RetentionRefusal::NoSuchRecord).await;
     };
-    let rows = sqlx::query(&format!("{HOLD_QUERY} WHERE r.hold_id IS NULL AND ((h.enrollment_id IS NULL AND h.evaluation_record_id IS NULL) OR h.enrollment_id = ?1 OR h.evaluation_record_id = ?2) ORDER BY h.id"))
+    let rows = sqlx::query(concat!(hold_query!(), " WHERE r.hold_id IS NULL AND ((h.enrollment_id IS NULL AND h.evaluation_record_id IS NULL) OR h.enrollment_id = ?1 OR h.evaluation_record_id = ?2) ORDER BY h.id"))
         .bind(enrollment_id).bind(record_id).fetch_all(&mut *tx).await?;
     let holds = rows.iter().map(hold_from_row).collect::<Result<Vec<_>>>()?;
     tx.commit().await?;

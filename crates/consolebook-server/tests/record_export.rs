@@ -390,7 +390,7 @@ fn entries(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
         let mut file = archive.by_index(index).expect("entry");
         let mut content = Vec::new();
         file.read_to_end(&mut content).expect("read");
-        out.push((file.name().to_owned(), content));
+        out.push((file.name().expect("entry name").into_owned(), content));
     }
     out
 }
@@ -898,7 +898,7 @@ async fn verification_names_every_finding() {
         }),
         "{report:?}"
     );
-    assert!(report.units.is_empty());
+    assert!(report.units.is_empty(), "{:?}", report.units);
 
     // Units out of order, with paths that do not derive from identity.
     let reordered = repack(&with_entry(&listed, ARCHIVE_MANIFEST_PATH, |bytes| {

@@ -11,6 +11,23 @@ use std::io::{Cursor, Read};
 /// An archive read from bytes held in memory.
 pub(crate) type Archive<'a> = zip::ZipArchive<Cursor<&'a [u8]>>;
 
+/// One central directory header's fixed fields (APPNOTE 4.3.12), as
+/// written: what the container rules in `docs/formats/record-export.md`
+/// constrain beyond the name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CentralEntry {
+    pub name: String,
+    pub version_made_by: u16,
+    pub flags: u16,
+    pub method: u16,
+    pub dos_time: u16,
+    pub dos_date: u16,
+    pub external_attributes: u32,
+    pub extra_len: u16,
+    pub comment_len: u16,
+    pub local_header_offset: u32,
+}
+
 /// Every entry name in the central directory, duplicates included, in
 /// directory order. The `zip` reader indexes entries by name and keeps
 /// one per name, so a name written twice — which extraction tools
@@ -20,6 +37,17 @@ pub(crate) type Archive<'a> = zip::ZipArchive<Cursor<&'a [u8]>>;
 /// record when the classic fields overflow, then the fixed 46-byte
 /// central headers with their variable name, extra, and comment parts.
 pub(crate) fn central_directory_names(bytes: &[u8]) -> std::result::Result<Vec<String>, String> {
+    Ok(central_directory_entries(bytes)?
+        .into_iter()
+        .map(|entry| entry.name)
+        .collect())
+}
+
+/// Every central directory header, duplicates included, in directory
+/// order; the walk [`central_directory_names`] describes.
+pub(crate) fn central_directory_entries(
+    bytes: &[u8],
+) -> std::result::Result<Vec<CentralEntry>, String> {
     const EOCD: [u8; 4] = [0x50, 0x4b, 0x05, 0x06];
     const ZIP64_LOCATOR: [u8; 4] = [0x50, 0x4b, 0x06, 0x07];
     const ZIP64_EOCD: [u8; 4] = [0x50, 0x4b, 0x06, 0x06];
@@ -45,21 +73,32 @@ pub(crate) fn central_directory_names(bytes: &[u8]) -> std::result::Result<Vec<S
         start = le_u64(bytes, zip64 + 48)?;
     }
     let mut at = usize::try_from(start).map_err(|_| "central directory offset out of range")?;
-    let mut names = Vec::new();
+    let mut entries = Vec::new();
     for _ in 0..count {
         if bytes.get(at..at + 4) != Some(&CENTRAL_HEADER[..]) {
             return Err(format!("no central directory header at offset {at}"));
         }
         let name_len = usize::from(le_u16(bytes, at + 28)?);
-        let extra_len = usize::from(le_u16(bytes, at + 30)?);
-        let comment_len = usize::from(le_u16(bytes, at + 32)?);
+        let extra_len = le_u16(bytes, at + 30)?;
+        let comment_len = le_u16(bytes, at + 32)?;
         let name = bytes
             .get(at + 46..at + 46 + name_len)
             .ok_or("truncated central directory header")?;
-        names.push(String::from_utf8_lossy(name).into_owned());
-        at += 46 + name_len + extra_len + comment_len;
+        entries.push(CentralEntry {
+            name: String::from_utf8_lossy(name).into_owned(),
+            version_made_by: le_u16(bytes, at + 4)?,
+            flags: le_u16(bytes, at + 8)?,
+            method: le_u16(bytes, at + 10)?,
+            dos_time: le_u16(bytes, at + 12)?,
+            dos_date: le_u16(bytes, at + 14)?,
+            external_attributes: le_u32(bytes, at + 38)?,
+            extra_len,
+            comment_len,
+            local_header_offset: le_u32(bytes, at + 42)?,
+        });
+        at += 46 + name_len + usize::from(extra_len) + usize::from(comment_len);
     }
-    Ok(names)
+    Ok(entries)
 }
 
 fn le_u16(bytes: &[u8], at: usize) -> std::result::Result<u16, String> {
@@ -100,3 +139,6 @@ pub(crate) fn read_entry(
         Err(err) => Err(err.to_string()),
     }
 }
+
+#[cfg(test)]
+mod writer_pin;

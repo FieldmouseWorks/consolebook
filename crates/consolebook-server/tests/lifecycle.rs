@@ -501,7 +501,7 @@ async fn assignments_scope_reads_notify_and_end() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(body["assignments"].as_array().expect("array").is_empty());
+    assert_eq!(body["assignments"], serde_json::json!([]));
     let (status, _) = request(
         fx.app(),
         "GET",

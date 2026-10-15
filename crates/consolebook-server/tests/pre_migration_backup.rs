@@ -3,7 +3,6 @@
 //! An "older installation" here is a database migrated by every migration
 //! except this build's newest, which is what an earlier release leaves.
 
-use std::borrow::Cow;
 use std::path::Path;
 
 use sqlx::SqlitePool;
@@ -29,14 +28,7 @@ async fn older_installation(data_dir: &DataDir) {
 /// A database migrated by only the first `count` migrations.
 async fn installation_at(data_dir: &DataDir, count: usize) {
     let all = &MIGRATOR.migrations;
-    // The fields are semver-exempt in sqlx; a test that stops compiling on
-    // an upgrade is the right signal to rebuild this fixture.
-    let previous = Migrator {
-        migrations: Cow::Owned(all[..count].to_vec()),
-        ignore_missing: false,
-        locking: true,
-        no_tx: false,
-    };
+    let previous = Migrator::with_migrations(all[..count].to_vec());
     let pool = connect(&data_dir.database()).await;
     previous.run(&pool).await.expect("older migrations");
     pool.close().await;

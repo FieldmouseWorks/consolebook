@@ -460,7 +460,21 @@ pub fn verify_archive(bytes: &[u8]) -> ArchiveReport {
             return report;
         }
     };
-    let names: Vec<String> = archive.file_names().map(str::to_owned).collect();
+    let names: Vec<String> = match archive
+        .file_names()
+        .map(|name| name.map(std::borrow::Cow::into_owned))
+        .collect()
+    {
+        Ok(names) => names,
+        // Fail closed if a name cannot be decoded; unreachable with zip 9.0.3
+        // (UTF-8 first, then CP437, which maps every byte), kept for upgrades.
+        Err(err) => {
+            report.findings.push(Finding::NotAnArchive {
+                detail: err.to_string(),
+            });
+            return report;
+        }
+    };
     report.findings.extend(duplicate_entry_findings(bytes));
     let manifest_bytes = match read_entry(&mut archive, ARCHIVE_MANIFEST_PATH) {
         Ok(Some(bytes)) => bytes,
