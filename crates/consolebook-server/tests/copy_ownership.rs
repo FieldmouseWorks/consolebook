@@ -258,3 +258,37 @@ async fn a_copy_directory_holding_only_a_pre_restore_copy_is_still_owned() {
     assert!(format!("{err:#}").contains(&lost_id), "{err:#}");
     assert_eq!(listing(&share), before);
 }
+
+#[tokio::test]
+async fn a_fresh_pre_restore_snapshot_does_not_make_old_backups_look_current() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let (data_dir, _, snapshot) = installation(&tmp.path().join("data")).await;
+    let set_aside = data_dir
+        .backups()
+        .join("consolebook-prerestore-29991231T235959Z.db");
+    std::fs::copy(&snapshot, &set_aside).expect("set aside");
+    // The installation's own backup is two days old; the set-aside
+    // database was written just now, as a restore whose backup failed
+    // would leave it.
+    let two_days_ago = std::time::SystemTime::now() - std::time::Duration::from_hours(48);
+    std::fs::File::options()
+        .write(true)
+        .open(&snapshot)
+        .and_then(|file| file.set_modified(two_days_ago))
+        .expect("age the backup");
+
+    let latest = backup::latest_snapshot_mtime(&data_dir)
+        .expect("mtime")
+        .expect("a backup");
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    assert!(
+        consolebook_server::scheduler::backup_due(Some(latest), now, 24 * 3600),
+        "the set-aside database postponed the next backup"
+    );
+    let findings = doctor::run(&data_dir, None).await;
+    let backups = findings
+        .iter()
+        .find(|finding| finding.check == "backups")
+        .expect("doctor reports backups");
+    assert_eq!(backups.verdict, doctor::Verdict::Warn, "{backups:?}");
+}
