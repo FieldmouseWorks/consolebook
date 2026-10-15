@@ -121,6 +121,7 @@ fn run_serve(data: &DataDir) -> Served {
             }
             Err(RecvTimeoutError::Timeout) => {
                 child.kill().expect("stop serve");
+                child.wait().expect("reap serve");
                 panic!("serve neither refused nor started listening within a minute: {log}");
             }
         }
@@ -228,7 +229,11 @@ async fn a_failed_migration_fails_doctor_and_the_service_refuses_it() {
     .await;
 
     // Reported once, as failed, and not also as pending.
-    assert_fails_naming(&migration_findings(&data).await, version, "did not finish");
+    assert_fails_naming(
+        &migration_findings(&data).await,
+        version,
+        "recorded as unsuccessful",
+    );
     assert_doctor_exits_failing(&data, version);
 
     assert_serve_refuses(&data, &format!("migration {version} is partially applied"));
@@ -282,20 +287,101 @@ async fn every_refusing_condition_is_reported_not_only_the_first() {
     assert!(names_migration(&findings[1].detail, newest), "{findings:?}");
 }
 
-#[tokio::test]
-async fn a_pending_migration_is_still_reported_as_pending() {
-    let (_tmp, data) = installation().await;
-    let version = newest_version();
-    alter_history(
-        &data,
-        "DELETE FROM _sqlx_migrations WHERE version = ?1",
-        version,
+/// A database the previous release left, one migration behind, as found
+/// between installing a new version and restarting the service.
+async fn installation_one_behind() -> (tempfile::TempDir, DataDir) {
+    let tmp = tempfile::tempdir().expect("scratch directory");
+    let data = DataDir::new(tmp.path().join("data"));
+    data.ensure_layout().expect("layout");
+    let all = &MIGRATOR.migrations;
+    let previous = sqlx::migrate::Migrator::with_migrations(all[..all.len() - 1].to_vec());
+    let pool = sqlx::SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(data.database())
+            .create_if_missing(true)
+            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal),
     )
-    .await;
+    .await
+    .expect("fixture connection");
+    previous.run(&pool).await.expect("older migrations");
+    sqlx::query("INSERT INTO instance (id, installation_id, created_at_utc) VALUES (1, 'invented-older-id', '2026-10-01T00:00:00Z')")
+        .execute(&pool)
+        .await
+        .expect("fixture identity");
+    pool.close().await;
+    (tmp, data)
+}
+
+#[tokio::test]
+async fn a_pending_migration_warns_and_the_service_applies_it() {
+    let (_tmp, data) = installation_one_behind().await;
+    let version = newest_version();
 
     let findings = migration_findings(&data).await;
     assert_eq!(findings.len(), 1, "{findings:?}");
-    assert_eq!(findings[0].detail, format!("pending: {version}"));
+    assert_eq!(findings[0].verdict, Verdict::Warn, "{findings:?}");
+    assert_eq!(
+        findings[0].detail,
+        format!(
+            "1 migration(s) pending ({version}); the service applies them on its next start, after taking a validated backup"
+        )
+    );
+    // A warning does not fail `doctor`, just as the service starts.
+    let output = run_doctor(&data);
+    assert!(output.status.success(), "{output:?}");
+
+    let served = run_serve(&data);
+    assert!(
+        matches!(served, Served::Listening),
+        "serve must apply a pending migration and start: {served:?}"
+    );
+    // The backup the warning promises.
+    let premigration = std::fs::read_dir(data.backups())
+        .expect("backups")
+        .filter_map(Result::ok)
+        .any(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("consolebook-premigration-")
+        });
+    assert!(premigration, "serve took no pre-migration backup");
+    let after = migration_findings(&data).await;
+    assert_eq!(after.len(), 1, "{after:?}");
+    assert_eq!(after[0].verdict, Verdict::Ok, "{after:?}");
+}
+
+#[tokio::test]
+async fn a_database_without_migration_history_warns_and_the_service_creates_it() {
+    let tmp = tempfile::tempdir().expect("scratch directory");
+    let data = DataDir::new(tmp.path().join("data"));
+    data.ensure_layout().expect("layout");
+    // An empty WAL database: no tables at all.
+    let pool = sqlx::SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(data.database())
+            .create_if_missing(true)
+            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal),
+    )
+    .await
+    .expect("empty database");
+    pool.close().await;
+
+    let findings = migration_findings(&data).await;
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0].verdict, Verdict::Warn, "{findings:?}");
+    assert!(
+        findings[0].detail.contains("no migration history yet"),
+        "{findings:?}"
+    );
+
+    let served = run_serve(&data);
+    assert!(
+        matches!(served, Served::Listening),
+        "serve must create the history and start: {served:?}"
+    );
+    let after = migration_findings(&data).await;
+    assert_eq!(after[0].verdict, Verdict::Ok, "{after:?}");
 }
 
 /// `storage::migration_history` mirrors what `SQLx`'s migrator refuses under

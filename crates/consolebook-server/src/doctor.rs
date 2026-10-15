@@ -167,8 +167,12 @@ async fn check_invariants(pool: &SqlitePool, findings: &mut Vec<Finding>) {
 
 /// Reports each recorded migration `serve` would refuse to start on, using
 /// the same judgment as startup's own check ([`storage::migration_history`]).
+/// What the service does by itself on its next start (create the history,
+/// apply pending migrations) is a warning, never a failure: `doctor` fails
+/// only where `serve` would refuse.
 async fn check_migrations(pool: &SqlitePool, findings: &mut Vec<Finding>) {
     const CHECK: &str = "migrations";
+    const NO_HISTORY: &str = "no migration history yet; the service creates it and applies every migration on its first start";
     let history = match storage::migration_history(pool).await {
         Err(err) => {
             findings.push(Finding::fail(
@@ -178,30 +182,38 @@ async fn check_migrations(pool: &SqlitePool, findings: &mut Vec<Finding>) {
             return;
         }
         Ok(None) => {
-            findings.push(Finding::fail(
-                CHECK,
-                "cannot read migration history: the database has no _sqlx_migrations table",
-            ));
+            findings.push(Finding::warn(CHECK, NO_HISTORY));
             return;
         }
         Ok(Some(history)) => history,
     };
-    for refusal in &history.refusals {
-        findings.push(Finding::fail(CHECK, refusal.to_string()));
+    if !history.refusals.is_empty() {
+        // The service will not start, so nothing pending would be applied.
+        for refusal in &history.refusals {
+            findings.push(Finding::fail(CHECK, refusal.to_string()));
+        }
+        return;
     }
-    if !history.unapplied.is_empty() {
-        let pending: Vec<String> = history.unapplied.iter().map(ToString::to_string).collect();
-        findings.push(Finding::fail(
-            CHECK,
-            format!("pending: {}", pending.join(", ")),
-        ));
+    if history.recorded == 0 {
+        findings.push(Finding::warn(CHECK, NO_HISTORY));
+        return;
     }
-    if history.refusals.is_empty() && history.unapplied.is_empty() {
+    if history.unapplied.is_empty() {
         findings.push(Finding::ok(
             CHECK,
             format!("{} applied, up to date", history.recorded),
         ));
+        return;
     }
+    let pending: Vec<String> = history.unapplied.iter().map(ToString::to_string).collect();
+    findings.push(Finding::warn(
+        CHECK,
+        format!(
+            "{} migration(s) pending ({}); the service applies them on its next start, after taking a validated backup",
+            pending.len(),
+            pending.join(", ")
+        ),
+    ));
 }
 
 async fn check_integrity(pool: &SqlitePool, findings: &mut Vec<Finding>) {

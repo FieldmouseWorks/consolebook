@@ -43,7 +43,8 @@ not a production-readiness statement.
 ### Fixed
 
 - `doctor` reports a migration history `serve` would refuse (a changed
-  checksum or a failed migration), instead of `ok`
+  checksum or a failed migration), instead of `ok`. Pending migrations,
+  which the service applies on its next start, now warn instead of failing
   ([#138](https://github.com/FieldmouseWorks/consolebook/issues/138)).
 
 ## [0.2.0] - 2026-10-15

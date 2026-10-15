@@ -158,7 +158,8 @@ pub async fn newer_migrations(pool: &SqlitePool) -> Result<Vec<i64>> {
 pub enum RefusedHistory {
     /// A newer release applied a migration this build does not embed.
     Newer(i64),
-    /// The migration started but is recorded as not successful.
+    /// The row is recorded as not successful. `SQLx` 0.9 records only
+    /// successes, so this comes from a hand edit or another tool.
     Unfinished(i64),
     /// The stored checksum differs from this build's migration.
     Changed(i64),
@@ -173,11 +174,11 @@ impl std::fmt::Display for RefusedHistory {
             ),
             Self::Unfinished(version) => write!(
                 f,
-                "migration {version} did not finish (it is recorded as failed), and the service refuses to start on it; restore the snapshot taken before the upgrade (docs/install.md, \"Upgrading\")"
+                "migration {version} is recorded as unsuccessful, and the service refuses to start on it; restore the snapshot taken before the upgrade (docs/install.md, \"Upgrading\")"
             ),
             Self::Changed(version) => write!(
                 f,
-                "migration {version} was applied by a different build's version of it (its recorded checksum differs from this build's), and the service refuses to start on it; restore a backup made by this build, or run the build that applied it"
+                "migration {version} was applied by a different build's version of it (its recorded checksum differs from this build's), and the service refuses to start on it; restore the snapshot taken before the upgrade, or a backup taken while this version was running the service, or run the build that applied it (docs/install.md, \"Upgrading\")"
             ),
         }
     }
@@ -220,8 +221,11 @@ struct RecordedMigration {
     success: bool,
 }
 
-/// Each row's refusal, in the order `SQLx` checks: unsuccessful rows, then
-/// versions this build does not embed, then checksums of up migrations.
+/// Every row startup would refuse, in version order. Each row gets the
+/// refusal `SQLx` would give it (unsuccessful first, then a version this
+/// build does not embed, then an up migration's checksum). Startup stops
+/// at its first refusal, the lowest unsuccessful row before any unknown
+/// version before any changed checksum; `doctor` reports them all.
 fn refusals(recorded: &[RecordedMigration]) -> Vec<RefusedHistory> {
     recorded
         .iter()

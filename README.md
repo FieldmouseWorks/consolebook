@@ -112,8 +112,9 @@ for the embedded interface.
 `doctor` opens the database read-only and reports journal mismatches without
 repairing them. It also reports every recorded migration that `serve` would
 refuse to start on: a version this build does not know, a changed checksum,
-or a migration recorded as failed. SQLite may create WAL sidecars or update shared-memory
-coordination; read-only storage without usable sidecars can prevent diagnosis.
+or a migration recorded as unsuccessful. SQLite may create WAL sidecars or
+update shared-memory coordination; read-only storage without usable sidecars
+can prevent diagnosis.
 Its connection-local PRAGMA checks describe the diagnostic connection.
 See [ADR 0016](docs/decisions/0016-read-only-diagnostics.md) for the precise contract.
 

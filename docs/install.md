@@ -146,7 +146,7 @@ service, and prints the address. The database is upgraded on start, and
 startup refuses to run against data it cannot verify. `consolebook doctor`
 reports, without changing anything, each recorded migration the service
 would refuse: one this version does not know, one changed since it was
-applied (a different checksum), or one recorded as failed.
+applied (a different checksum), or one recorded as unsuccessful.
 
 When a new version changes the database, it first takes a validated backup
 of it as it was, `backups/consolebook-premigration-<stamp>.db`, and changes

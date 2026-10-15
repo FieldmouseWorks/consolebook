@@ -288,10 +288,12 @@ mod permissions {
         assert!(!data.root().join("consolebook.db-shm").exists());
     }
 
-    /// The database and both sidecars stay byte-identical while `doctor`
-    /// reports a changed migration checksum and exits non-zero.
+    /// With live sidecars in a read-only directory, `doctor` still reads the
+    /// migration history and reports a changed checksum, exiting non-zero.
+    /// File modes block writes here, so this is not a write control; the
+    /// live-WAL test above is.
     #[tokio::test]
-    async fn a_changed_migration_checksum_fails_without_changing_database_or_sidecars() {
+    async fn a_changed_migration_checksum_is_diagnosed_in_a_read_only_directory() {
         let (_tmp, data) = installation();
         let writer = storage::open(&data.database()).await.expect("initialize");
         sqlx::query(CHANGE_NEWEST_CHECKSUM)
