@@ -84,7 +84,7 @@ async fn reset_code_is_consumed_once_and_revokes_sessions() {
     .await
     .expect("call")
     .expect("issued");
-    let token = sessions::create(&fx.pool, TRAINEE)
+    let token = sessions::create(&fx.pool, TRAINEE, sessions::CookieTransport::Plain)
         .await
         .expect("session")
         .0;

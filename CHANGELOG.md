@@ -18,6 +18,11 @@ not a production-readiness statement.
   release.
 - A version that finds a database upgraded by a newer release refuses it in
   plain words and names the way back.
+- `--public-url` / `CONSOLEBOOK_PUBLIC_URL` (installer: `--public-url`): the
+  address people use. An `https://` address marks sign-in cookies `Secure`,
+  and the sign-in page points browsers that arrived by another address to it
+  (ADR 0025). The install guide gives a tested Caddy configuration for HTTPS.
+  Turning it on signs out sessions whose cookies were not `Secure`.
 - `doctor --backup-copy-dir` reports whether off-server backup copies are
   current, behind, unreachable, or not configured, without writing anything.
 - [ADR 0027](docs/decisions/0027-backup-copy-encryption.md): Consolebook does
