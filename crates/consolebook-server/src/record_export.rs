@@ -310,7 +310,7 @@ pub async fn export_to<W: Write + Seek, F: FnOnce(ArchiveProduced)>(
 
 /// The error an abandoned request ends with: a departed client, which the
 /// delivery recognizes and neither logs nor signals.
-fn client_left() -> anyhow::Error {
+pub(crate) fn client_left() -> anyhow::Error {
     anyhow::Error::from(std::io::Error::new(
         std::io::ErrorKind::BrokenPipe,
         "the client left before the export started",

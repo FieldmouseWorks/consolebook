@@ -10,47 +10,28 @@ use serde::Serialize;
 use sqlx::{Executor, Row, Sqlite, SqlitePool};
 use time::OffsetDateTime;
 
+use crate::closed_vocabulary::closed_vocabulary;
+
 use crate::capabilities::Capability;
 
-/// Notice vocabulary. Training-workflow kinds join with their milestones.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NoticeKind {
-    BackupFailed,
-    /// A validated backup could not be copied off the server (ADR 0024).
-    BackupCopyFailed,
-    AssignmentCreated,
-    DraftOwnershipReceived,
-    DraftSubmittedForReview,
-    DraftApproved,
-    DraftChangesRequested,
-    DraftReturned,
-    DraftFinalized,
-    RecordAwaitsAcknowledgment,
-    AcknowledgmentResponse,
-    AcknowledgmentRefused,
-    AcknowledgmentAttested,
-    AmendmentOpened,
-}
-
-impl NoticeKind {
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::BackupFailed => "backup_failed",
-            Self::BackupCopyFailed => "backup_copy_failed",
-            Self::AssignmentCreated => "assignment_created",
-            Self::DraftOwnershipReceived => "draft_ownership_received",
-            Self::DraftSubmittedForReview => "draft_submitted_for_review",
-            Self::DraftApproved => "draft_approved",
-            Self::DraftChangesRequested => "draft_changes_requested",
-            Self::DraftReturned => "draft_returned",
-            Self::DraftFinalized => "draft_finalized",
-            Self::RecordAwaitsAcknowledgment => "record_awaits_acknowledgment",
-            Self::AcknowledgmentResponse => "acknowledgment_response",
-            Self::AcknowledgmentRefused => "acknowledgment_refused",
-            Self::AcknowledgmentAttested => "acknowledgment_attested",
-            Self::AmendmentOpened => "amendment_opened",
-        }
+closed_vocabulary! {
+    /// Notice vocabulary. Training-workflow kinds join with their milestones.
+    pub enum NoticeKind {
+        BackupFailed => "backup_failed",
+        /// A validated backup could not be copied off the server (ADR 0024).
+        BackupCopyFailed => "backup_copy_failed",
+        AssignmentCreated => "assignment_created",
+        DraftOwnershipReceived => "draft_ownership_received",
+        DraftSubmittedForReview => "draft_submitted_for_review",
+        DraftApproved => "draft_approved",
+        DraftChangesRequested => "draft_changes_requested",
+        DraftReturned => "draft_returned",
+        DraftFinalized => "draft_finalized",
+        RecordAwaitsAcknowledgment => "record_awaits_acknowledgment",
+        AcknowledgmentResponse => "acknowledgment_response",
+        AcknowledgmentRefused => "acknowledgment_refused",
+        AcknowledgmentAttested => "acknowledgment_attested",
+        AmendmentOpened => "amendment_opened",
     }
 }
 
@@ -165,4 +146,23 @@ pub async fn mark_read(pool: &SqlitePool, user_id: i64, notice_id: i64) -> Resul
     .await
     .context("marking notice read")?;
     Ok(result.rows_affected() == 1)
+}
+
+#[cfg(test)]
+mod vocabulary_tests {
+    use super::*;
+
+    /// The closed vocabulary names every value once, and parsing a stored
+    /// name gives back the value that wrote it.
+    #[test]
+    fn the_vocabulary_is_closed_and_round_trips() {
+        let mut names: Vec<&str> = NoticeKind::ALL.iter().map(|value| value.as_str()).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), NoticeKind::ALL.len());
+        for value in NoticeKind::ALL.iter().copied() {
+            assert_eq!(NoticeKind::parse(value.as_str()), Some(value));
+        }
+        assert_eq!(NoticeKind::parse("invented_unknown_value"), None);
+    }
 }

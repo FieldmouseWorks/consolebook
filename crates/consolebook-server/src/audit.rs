@@ -8,105 +8,57 @@ use anyhow::{Context, Result};
 use sqlx::{Executor, Sqlite};
 use time::OffsetDateTime;
 
-/// The authentication- and configuration-era event vocabulary. Later
-/// milestones extend this with record-lifecycle kinds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EventKind {
-    RetentionAuthorityGranted,
-    RetentionAuthorityRevoked,
-    RetentionPolicyCreated,
-    RecordHoldCreated,
-    RecordHoldReplaced,
-    RecordHoldReleased,
-    SetupCompleted,
-    LoginSucceeded,
-    LoginFailed,
-    Logout,
-    ResetCodeIssued,
-    ResetCodeUsed,
-    RecoveryCodeIssued,
-    BackupCompleted,
-    RestoreCompleted,
-    ProgramCreated,
-    ProgramVersionCreated,
-    ProgramVersionPublished,
-    ProgramVersionImported,
-    ProgramVersionDiscarded,
-    UserCreated,
-    EnrollmentCreated,
-    EnrollmentWithdrawn,
-    EnrollmentCompleted,
-    EnrollmentReinstated,
-    EnrollmentVersionChanged,
-    PhaseEventRecorded,
-    AssignmentCreated,
-    AssignmentEnded,
-    SessionCreated,
-    SessionUpdated,
-    SessionClosed,
-    SessionTrainerAdded,
-    SessionTrainerRemoved,
-    DraftCreated,
-    DraftOwnershipTransferred,
-    DraftSubmitted,
-    DraftReviewDecided,
-    DraftFinalized,
-    AcknowledgmentRecorded,
-    AmendmentOpened,
-    TaskSignoffRecorded,
-    RecordExported,
-    TraineePacketExported,
-}
+use crate::closed_vocabulary::closed_vocabulary;
 
-impl EventKind {
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::RetentionAuthorityGranted => "retention_authority_granted",
-            Self::RetentionAuthorityRevoked => "retention_authority_revoked",
-            Self::RetentionPolicyCreated => "retention_policy_created",
-            Self::RecordHoldCreated => "record_hold_created",
-            Self::RecordHoldReplaced => "record_hold_replaced",
-            Self::RecordHoldReleased => "record_hold_released",
-            Self::SetupCompleted => "setup_completed",
-            Self::LoginSucceeded => "login_succeeded",
-            Self::LoginFailed => "login_failed",
-            Self::Logout => "logout",
-            Self::ResetCodeIssued => "reset_code_issued",
-            Self::ResetCodeUsed => "reset_code_used",
-            Self::RecoveryCodeIssued => "recovery_code_issued",
-            Self::BackupCompleted => "backup_completed",
-            Self::RestoreCompleted => "restore_completed",
-            Self::ProgramCreated => "program_created",
-            Self::ProgramVersionCreated => "program_version_created",
-            Self::ProgramVersionPublished => "program_version_published",
-            Self::ProgramVersionImported => "program_version_imported",
-            Self::ProgramVersionDiscarded => "program_version_discarded",
-            Self::UserCreated => "user_created",
-            Self::EnrollmentCreated => "enrollment_created",
-            Self::EnrollmentWithdrawn => "enrollment_withdrawn",
-            Self::EnrollmentCompleted => "enrollment_completed",
-            Self::EnrollmentReinstated => "enrollment_reinstated",
-            Self::EnrollmentVersionChanged => "enrollment_version_changed",
-            Self::PhaseEventRecorded => "phase_event_recorded",
-            Self::AssignmentCreated => "assignment_created",
-            Self::AssignmentEnded => "assignment_ended",
-            Self::SessionCreated => "session_created",
-            Self::SessionUpdated => "session_updated",
-            Self::SessionClosed => "session_closed",
-            Self::SessionTrainerAdded => "session_trainer_added",
-            Self::SessionTrainerRemoved => "session_trainer_removed",
-            Self::DraftCreated => "draft_created",
-            Self::DraftOwnershipTransferred => "draft_ownership_transferred",
-            Self::DraftSubmitted => "draft_submitted",
-            Self::DraftReviewDecided => "draft_review_decided",
-            Self::DraftFinalized => "draft_finalized",
-            Self::AcknowledgmentRecorded => "acknowledgment_recorded",
-            Self::AmendmentOpened => "amendment_opened",
-            Self::TaskSignoffRecorded => "task_signoff_recorded",
-            Self::RecordExported => "record_exported",
-            Self::TraineePacketExported => "trainee_packet_exported",
-        }
+closed_vocabulary! {
+    /// The authentication- and configuration-era event vocabulary. Later
+    /// milestones extend this with record-lifecycle kinds.
+    pub enum EventKind {
+        RetentionAuthorityGranted => "retention_authority_granted",
+        RetentionAuthorityRevoked => "retention_authority_revoked",
+        RetentionPolicyCreated => "retention_policy_created",
+        RecordHoldCreated => "record_hold_created",
+        RecordHoldReplaced => "record_hold_replaced",
+        RecordHoldReleased => "record_hold_released",
+        SetupCompleted => "setup_completed",
+        LoginSucceeded => "login_succeeded",
+        LoginFailed => "login_failed",
+        Logout => "logout",
+        ResetCodeIssued => "reset_code_issued",
+        ResetCodeUsed => "reset_code_used",
+        RecoveryCodeIssued => "recovery_code_issued",
+        BackupCompleted => "backup_completed",
+        RestoreCompleted => "restore_completed",
+        ProgramCreated => "program_created",
+        ProgramVersionCreated => "program_version_created",
+        ProgramVersionPublished => "program_version_published",
+        ProgramVersionImported => "program_version_imported",
+        ProgramVersionDiscarded => "program_version_discarded",
+        UserCreated => "user_created",
+        EnrollmentCreated => "enrollment_created",
+        EnrollmentWithdrawn => "enrollment_withdrawn",
+        EnrollmentCompleted => "enrollment_completed",
+        EnrollmentReinstated => "enrollment_reinstated",
+        EnrollmentVersionChanged => "enrollment_version_changed",
+        PhaseEventRecorded => "phase_event_recorded",
+        AssignmentCreated => "assignment_created",
+        AssignmentEnded => "assignment_ended",
+        SessionCreated => "session_created",
+        SessionUpdated => "session_updated",
+        SessionClosed => "session_closed",
+        SessionTrainerAdded => "session_trainer_added",
+        SessionTrainerRemoved => "session_trainer_removed",
+        DraftCreated => "draft_created",
+        DraftOwnershipTransferred => "draft_ownership_transferred",
+        DraftSubmitted => "draft_submitted",
+        DraftReviewDecided => "draft_review_decided",
+        DraftFinalized => "draft_finalized",
+        AcknowledgmentRecorded => "acknowledgment_recorded",
+        AmendmentOpened => "amendment_opened",
+        TaskSignoffRecorded => "task_signoff_recorded",
+        RecordExported => "record_exported",
+        TraineePacketExported => "trainee_packet_exported",
+        InstallationExported => "installation_exported",
     }
 }
 
@@ -126,18 +78,24 @@ pub enum Subject {
 }
 
 impl Subject {
+    /// What kind of row the subject is.
+    #[must_use]
+    pub fn kind(self) -> SubjectKind {
+        match self {
+            Self::RetentionPolicy(_) => SubjectKind::RetentionPolicy,
+            Self::RecordHold(_) => SubjectKind::RecordHold,
+            Self::Program(_) => SubjectKind::Program,
+            Self::ProgramVersion(_) => SubjectKind::ProgramVersion,
+            Self::Enrollment(_) => SubjectKind::Enrollment,
+            Self::Assignment(_) => SubjectKind::Assignment,
+            Self::Session(_) => SubjectKind::Session,
+            Self::Record(_) => SubjectKind::Record,
+        }
+    }
+
     #[must_use]
     pub fn kind_str(self) -> &'static str {
-        match self {
-            Self::RetentionPolicy(_) => "retention_policy",
-            Self::RecordHold(_) => "record_hold",
-            Self::Program(_) => "program",
-            Self::ProgramVersion(_) => "program_version",
-            Self::Enrollment(_) => "enrollment",
-            Self::Assignment(_) => "assignment",
-            Self::Session(_) => "session",
-            Self::Record(_) => "record",
-        }
+        self.kind().as_str()
     }
 
     #[must_use]
@@ -152,6 +110,23 @@ impl Subject {
             | Self::Session(id)
             | Self::Record(id) => id,
         }
+    }
+}
+
+closed_vocabulary! {
+    /// The stored `subject_kind` vocabulary: one kind per [`Subject`]
+    /// variant, closed, and only ever added to.
+    pub enum SubjectKind {
+        RetentionPolicy => "retention_policy",
+        RecordHold => "record_hold",
+        Program => "program",
+        ProgramVersion => "program_version",
+        Enrollment => "enrollment",
+        Assignment => "assignment",
+        /// A training session.
+        Session => "session",
+        /// An evaluation record.
+        Record => "record",
     }
 }
 
@@ -203,4 +178,31 @@ pub async fn record_for_subject<'e>(
     .await
     .context("recording audit event")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Each closed vocabulary names every value once, and parsing a stored
+    /// name gives back the value that wrote it.
+    #[test]
+    fn vocabularies_are_closed_and_round_trip() {
+        let mut names: Vec<&str> = EventKind::ALL.iter().map(|kind| kind.as_str()).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), EventKind::ALL.len());
+        for kind in EventKind::ALL.iter().copied() {
+            assert_eq!(EventKind::parse(kind.as_str()), Some(kind));
+        }
+        let mut names: Vec<&str> = SubjectKind::ALL.iter().map(|kind| kind.as_str()).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), SubjectKind::ALL.len());
+        for kind in SubjectKind::ALL.iter().copied() {
+            assert_eq!(SubjectKind::parse(kind.as_str()), Some(kind));
+        }
+        assert_eq!(EventKind::parse("invented_unknown_kind"), None);
+        assert_eq!(SubjectKind::parse("invented_unknown_kind"), None);
+    }
 }

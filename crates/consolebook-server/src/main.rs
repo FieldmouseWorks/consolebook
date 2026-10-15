@@ -454,8 +454,18 @@ fn run_export_verify(archive: &std::path::Path) -> Result<ExitCode> {
             println!("      {finding}");
         }
     }
+    for table in &report.tables {
+        let mark = if table.verified() { "ok  " } else { "FAIL" };
+        let rows = table
+            .rows
+            .map_or_else(|| "unreadable".to_owned(), |rows| format!("{rows} row(s)"));
+        println!("{mark}  {:<36} {} table, {rows}", table.path, table.table);
+        for finding in &table.findings {
+            println!("      {finding}");
+        }
+    }
     let consistent = report.units.iter().filter(|unit| unit.verified()).count();
-    let documents = if report.documents.is_empty() {
+    let documents = if report.documents.is_empty() && report.tables.is_empty() {
         String::new()
     } else {
         format!(
@@ -464,12 +474,18 @@ fn run_export_verify(archive: &std::path::Path) -> Result<ExitCode> {
                 .documents
                 .iter()
                 .filter(|document| document.verified())
-                .count(),
-            report.documents.len()
+                .count()
+                + report
+                    .tables
+                    .iter()
+                    .filter(|table| table.verified())
+                    .count(),
+            report.documents.len() + report.tables.len()
         )
     };
     let what = match report.kind {
         Some(export_verify::ArchiveKind::TraineePacket) => "packet",
+        Some(export_verify::ArchiveKind::InstallationExport) => "installation export",
         _ => "export",
     };
     if report.verified() {

@@ -1230,6 +1230,15 @@ export function installationExportPath(): string {
 }
 
 /**
+ * Download path for the complete installation export: everything the
+ * installation holds except credentials (docs/formats/installation-export.md;
+ * ADR 0028).
+ */
+export function completeInstallationExportPath(): string {
+	return '/api/exports/installation';
+}
+
+/**
  * Fetches an export archive and hands it to the browser as a download, so
  * a refusal surfaces as an error instead of a saved error document.
  * Returns the server's file name.

@@ -24,7 +24,8 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::export_stream::EntryBuffer;
 use crate::http::{ApiError, AppState, CurrentUser};
-use crate::record_export::{self, ExportRefusal, Scope};
+use crate::installation_export;
+use crate::record_export::{self, ArchiveProduced, ExportRefusal, Scope};
 use crate::trainee_packet::{self, PacketRefusal};
 
 /// How many chunks may wait between the archive's producer and the
@@ -80,6 +81,10 @@ pub(crate) fn routes() -> Router<AppState> {
         )
         .route("/api/enrollments/{id}/export", get(export_enrollment))
         .route("/api/exports/records", get(export_installation))
+        .route(
+            "/api/exports/installation",
+            get(export_installation_complete),
+        )
         .route("/api/exports/summary", get(export_summary))
         .route("/api/enrollments/{id}/packet", get(export_packet))
         .route("/api/my/enrollments", get(my_enrollments))
@@ -144,7 +149,11 @@ fn export_busy() -> ApiError {
 /// a complete export — the bytes of a complete archive are exactly the
 /// bytes the container writer produced, and a truncated stream cannot be
 /// mistaken for them.
-async fn deliver(state: &AppState, actor_user_id: i64, scope: Scope) -> Result<Response, ApiError> {
+async fn deliver(
+    state: &AppState,
+    actor_user_id: i64,
+    archive: Archive,
+) -> Result<Response, ApiError> {
     // Admission comes first: a slot is taken before any work is done, held
     // by the producer for the whole download, and released when it ends,
     // so at most `EXPORT_SLOTS` producers exist and none ever queues.
@@ -183,22 +192,22 @@ async fn deliver(state: &AppState, actor_user_id: i64, scope: Scope) -> Result<R
         // return this code forgot — must not leave the body to end
         // cleanly, which would look like a complete download.
         let mut guard = FailureGuard::new(failure_tx.clone());
-        let produced = runtime.block_on(record_export::export_to(
+        let ready = |produced| {
+            // The scope is authorized, audited, and read: the response may
+            // start, and only a failure before this point can still reach
+            // the client as a typed answer.
+            if let Some(started) = started.take() {
+                drop(started.send(Ok(produced)));
+            }
+            guard.arm();
+        };
+        let produced = runtime.block_on(archive.produce(
             &pool,
             actor_user_id,
-            scope,
             exported_at,
             sink,
             &cancelled,
-            |produced| {
-                // The scope is authorized, audited, and read: the response
-                // may start, and only a failure before this point can still
-                // reach the client as a typed answer.
-                if let Some(started) = started.take() {
-                    drop(started.send(Ok(produced)));
-                }
-                guard.arm();
-            },
+            ready,
         ));
         // The destination's tail is handed on here, on the thread that owns
         // it: the archive is complete only once every byte is out.
@@ -226,7 +235,7 @@ async fn deliver(state: &AppState, actor_user_id: i64, scope: Scope) -> Result<R
                         )
                     });
                 if !client_gone {
-                    tracing::error!(error = %err, "producing a record export failed");
+                    tracing::error!(error = %err, "producing an export failed");
                 }
                 (
                     Err(ExportRefusal::ExportFailed),
@@ -290,6 +299,53 @@ async fn deliver(state: &AppState, actor_user_id: i64, scope: Scope) -> Result<R
                 format!("the export response could not be built: {err}"),
             )
         })
+}
+
+/// Which archive a streamed download produces: a record export of one
+/// scope, or the complete installation export (ADR 0028). Both share the
+/// container writer, the refusals, and this delivery.
+enum Archive {
+    Records(Scope),
+    Installation,
+}
+
+impl Archive {
+    /// Produces the archive into `sink`, as its producer's `export_to`.
+    async fn produce<W: std::io::Write + std::io::Seek, F: FnOnce(ArchiveProduced)>(
+        self,
+        pool: &sqlx::SqlitePool,
+        actor_user_id: i64,
+        exported_at: i64,
+        sink: W,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+        ready: F,
+    ) -> anyhow::Result<(Result<ArchiveProduced, ExportRefusal>, W)> {
+        match self {
+            Self::Records(scope) => {
+                record_export::export_to(
+                    pool,
+                    actor_user_id,
+                    scope,
+                    exported_at,
+                    sink,
+                    cancelled,
+                    ready,
+                )
+                .await
+            }
+            Self::Installation => {
+                installation_export::export_to(
+                    pool,
+                    actor_user_id,
+                    exported_at,
+                    sink,
+                    cancelled,
+                    ready,
+                )
+                .await
+            }
+        }
+    }
 }
 
 /// One message of a streamed export body: bytes, or the failure that ends
@@ -554,10 +610,10 @@ async fn export_version(
     deliver(
         &state,
         current.user.id,
-        Scope::Version {
+        Archive::Records(Scope::Version {
             record_id,
             version_number,
-        },
+        }),
     )
     .await
 }
@@ -567,7 +623,12 @@ async fn export_record(
     current: CurrentUser,
     Path(record_id): Path<i64>,
 ) -> Result<Response, ApiError> {
-    deliver(&state, current.user.id, Scope::Record { record_id }).await
+    deliver(
+        &state,
+        current.user.id,
+        Archive::Records(Scope::Record { record_id }),
+    )
+    .await
 }
 
 async fn export_enrollment(
@@ -575,14 +636,34 @@ async fn export_enrollment(
     current: CurrentUser,
     Path(enrollment_id): Path<i64>,
 ) -> Result<Response, ApiError> {
-    deliver(&state, current.user.id, Scope::Enrollment { enrollment_id }).await
+    deliver(
+        &state,
+        current.user.id,
+        Archive::Records(Scope::Enrollment { enrollment_id }),
+    )
+    .await
 }
 
 async fn export_installation(
     State(state): State<AppState>,
     current: CurrentUser,
 ) -> Result<Response, ApiError> {
-    deliver(&state, current.user.id, Scope::Installation).await
+    deliver(
+        &state,
+        current.user.id,
+        Archive::Records(Scope::Installation),
+    )
+    .await
+}
+
+/// The complete installation export (ADR 0028): every stored table but
+/// credentials, beside every finalized version, for `export_records`
+/// holders.
+async fn export_installation_complete(
+    State(state): State<AppState>,
+    current: CurrentUser,
+) -> Result<Response, ApiError> {
+    deliver(&state, current.user.id, Archive::Installation).await
 }
 
 async fn export_summary(

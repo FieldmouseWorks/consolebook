@@ -154,6 +154,10 @@ A RecordExport is an archive of finalized EvaluationVersions as stored: each ver
 
 A TraineePacket is everything retained about one enrollment as one archive (`docs/formats/trainee-packet.md`, ADR 0015): the record export's units for every retained version of every record, plus typed documents for the enrollment's lifecycle and phase history, every acknowledgment, every amendment, and the full task signoff history, named with hashes by one packet manifest. The trainee may produce their own; so may whoever reads the enrollment's training history and `export_records` holders. It verifies with the same verifier as a record export.
 
+### InstallationExport
+
+An InstallationExport is everything the installation holds except credentials, as one archive (`docs/formats/installation-export.md`, ADR 0028): the record export's units for every finalized version, plus one typed document per stored table with ids kept as references, named with counts and hashes by a manifest whose ledger lists every carried table and every exclusion. Only `export_records` holders may produce it; it verifies with the same verifier as a record export.
+
 ## Retention and disposition
 
 ### RetentionPolicy

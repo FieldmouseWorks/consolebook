@@ -304,7 +304,8 @@ content.
 
 - **Sessions and drafts.** The sessions a record covered are inside
   that record's bytes; sessions and drafts that produced no finalized
-  version are operational data, not records.
+  version are operational data, not records. The installation export
+  (`docs/formats/installation-export.md`) carries them.
 - **Rendered PDFs.** They arrive with #44's slice 4 as a further
   document kind under a new format version.
 - **Exporter identity.** As for the record export, that is the audit

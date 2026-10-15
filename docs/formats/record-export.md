@@ -274,7 +274,9 @@ the installation un-writes.
   exported empty.
 - **Acknowledgments, amendments, and signoff history.** They are
   separate records bound to versions; the trainee packet (#44 decision
-  3) is the artifact that gathers them. An amendment's existence is
+  3) gathers them per enrollment, and the installation export
+  (`docs/formats/installation-export.md`) carries them, and drafts,
+  installation-wide. An amendment's existence is
   visible here only as a successor version's `predecessor_content_hash`.
 - **Exporter identity.** Who exported what is the installation's
   audit trail (`record_exported`), not the artifact's business.

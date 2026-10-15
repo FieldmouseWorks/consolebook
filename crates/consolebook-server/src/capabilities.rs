@@ -8,37 +8,22 @@ use anyhow::{Context, Result};
 use sqlx::{SqliteConnection, SqlitePool};
 use time::OffsetDateTime;
 
-/// Capabilities with behavior today. The wider vocabulary from the domain
-/// model joins as its features are implemented.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Capability {
-    ManageUsers,
-    ManageRetention,
-    ManagePrograms,
-    AssignTraining,
-    ExportRecords,
-    AuthorEvaluation,
-    ReviewEvaluation,
-    ViewAssignedRecords,
-    ViewOwnRecords,
-    AcknowledgeOwnRecord,
-}
+use crate::closed_vocabulary::closed_vocabulary;
 
-impl Capability {
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::ManageRetention => "manage_retention",
-            Self::ManageUsers => "manage_users",
-            Self::ManagePrograms => "manage_programs",
-            Self::AssignTraining => "assign_training",
-            Self::ExportRecords => "export_records",
-            Self::AuthorEvaluation => "author_evaluation",
-            Self::ReviewEvaluation => "review_evaluation",
-            Self::ViewAssignedRecords => "view_assigned_records",
-            Self::ViewOwnRecords => "view_own_records",
-            Self::AcknowledgeOwnRecord => "acknowledge_own_record",
-        }
+closed_vocabulary! {
+    /// Capabilities with behavior today. The wider vocabulary from the domain
+    /// model joins as its features are implemented.
+    pub enum Capability {
+        ManageUsers => "manage_users",
+        ManageRetention => "manage_retention",
+        ManagePrograms => "manage_programs",
+        AssignTraining => "assign_training",
+        ExportRecords => "export_records",
+        AuthorEvaluation => "author_evaluation",
+        ReviewEvaluation => "review_evaluation",
+        ViewAssignedRecords => "view_assigned_records",
+        ViewOwnRecords => "view_own_records",
+        AcknowledgeOwnRecord => "acknowledge_own_record",
     }
 }
 
@@ -155,4 +140,23 @@ pub async fn list_for_user(pool: &SqlitePool, user_id: i64) -> Result<Vec<String
     .fetch_all(pool)
     .await
     .context("listing capabilities")
+}
+
+#[cfg(test)]
+mod vocabulary_tests {
+    use super::*;
+
+    /// The closed vocabulary names every value once, and parsing a stored
+    /// name gives back the value that wrote it.
+    #[test]
+    fn the_vocabulary_is_closed_and_round_trips() {
+        let mut names: Vec<&str> = Capability::ALL.iter().map(|value| value.as_str()).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), Capability::ALL.len());
+        for value in Capability::ALL.iter().copied() {
+            assert_eq!(Capability::parse(value.as_str()), Some(value));
+        }
+        assert_eq!(Capability::parse("invented_unknown_value"), None);
+    }
 }
