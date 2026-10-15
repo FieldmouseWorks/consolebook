@@ -28,6 +28,9 @@ not a production-readiness statement.
 - [ADR 0027](docs/decisions/0027-backup-copy-encryption.md): Consolebook does
   not encrypt backup copies; the install guide states what the share must
   provide.
+- A [restore drill](docs/restore-drill.md) from a lost server to verified
+  records, with a scripted version (`scripts/restore-drill/`) and a recorded
+  run from the v0.1.0 release.
 - [Operating a pilot installation](docs/operations.md): what to monitor and
   how, the logs and their retention, reporting a problem, and what support a
   pre-alpha pilot can expect. The release workflow runs its commands against
@@ -49,6 +52,9 @@ not a production-readiness statement.
   never copied off the server ([#115](https://github.com/FieldmouseWorks/consolebook/issues/115)).
 - Two backups or restores within the same second no longer fail or mislabel
   the set-aside database as damaged; the second waits for a new name.
+- `doctor` judges whether the newest backup is overdue against the service's
+  backup interval (`--backup-interval-hours`, or
+  `CONSOLEBOOK_BACKUP_INTERVAL_HOURS`) instead of always 24 hours ([#117](https://github.com/FieldmouseWorks/consolebook/issues/117)).
 - A phase change that waited behind another write is no longer refused as
   out of order; it is judged at the moment it can commit ([#108](https://github.com/FieldmouseWorks/consolebook/issues/108)).
 - After a restore, the set-aside database no longer counts as the newest

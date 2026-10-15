@@ -256,6 +256,10 @@ If the server's disk is gone, recover on a new machine:
    existing account, and run the `doctor` command above until the backup
    copy is `current`.
 
+Rehearse this before you need it: the [restore drill](restore-drill.md) walks
+through it on test machines and checks that every record came back
+unchanged.
+
 ## Day to day
 
 | Task | Command |

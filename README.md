@@ -65,8 +65,8 @@ trainee timeline from Milestone 4; and Milestone 5's file-verifiable structured
 record exports, complete trainee packets, and retention policies with record
 holds. It installs and upgrades with one command on Linux and copies verified
 backups off the server. Lawful disposition, a complete installation export,
-attachments, Typst PDF rendering, and a clean-room recovery drill remain
-Milestone 5 work. For the live demonstration deployment, see the
+attachments, and Typst PDF rendering remain Milestone 5 work; the
+[restore drill](docs/restore-drill.md) records recovery from a lost server. For the live demonstration deployment, see the
 [preview runbook](docs/preview.md); local builds do not update that service.
 
 ## Repository map

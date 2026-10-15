@@ -23,9 +23,10 @@ runs the full local gate sequence and leaves a receipt.
 
 Material limits: confirmed disposition, tombstones, portable policy-boundary
 evidence, a complete installation export ([#98](https://github.com/FieldmouseWorks/consolebook/issues/98)),
-deterministic PDFs, and clean-room recovery proof ([#97](https://github.com/FieldmouseWorks/consolebook/issues/97))
-remain Milestone 5 work. Pre-alpha status still applies; implemented
-backup/restore tests are not a recovery drill.
+and deterministic PDFs remain Milestone 5 work. A scripted clean-room restore
+drill from the v0.1.0 release is recorded in the
+[restore drill](restore-drill.md) (#97); a drill on real hosts with a network
+share has not been run. Pre-alpha status still applies.
 
 Before any pilot, beyond Milestone 5: a supported HTTPS front end and the
 `Secure` session cookie ([#93](https://github.com/FieldmouseWorks/consolebook/issues/93)),

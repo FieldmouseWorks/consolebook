@@ -180,6 +180,8 @@ jobs:
             consolebook doctor --backup-copy-dir /srv/consolebook-copies | tee ops-doctor.log
           grep -Eq '^(ok|warn) +backups ' ops-doctor.log
           grep -Eq '^warn +backup copy +unreachable:' ops-doctor.log
+          sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook \
+            consolebook doctor --backup-interval-hours 6 | grep -E '^(ok|warn) +backups '
           df -h /var/lib/consolebook
           sudo du -sh /var/lib/consolebook/backups
           sudo journalctl -u consolebook --since today --no-pager | tail -n 5

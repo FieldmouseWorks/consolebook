@@ -142,7 +142,11 @@ async fn a_replacement_server_never_copies_over_the_installation_it_replaces() {
         "the copy directory holds the newest backup"
     );
     // doctor names the same newest backup, not the database set aside.
-    let findings = doctor::run(&replacement, Some(&share)).await;
+    let options = doctor::Options {
+        backup_copy_dir: Some(&share),
+        ..doctor::Options::default()
+    };
+    let findings = doctor::run(&replacement, &options).await;
     let backups = findings
         .iter()
         .find(|finding| finding.check == "backups")
@@ -281,7 +285,7 @@ async fn a_fresh_pre_restore_snapshot_does_not_make_old_backups_look_current() {
         consolebook_server::scheduler::backup_due(Some(latest), now, 24 * 3600),
         "the set-aside database postponed the next backup"
     );
-    let findings = doctor::run(&data_dir, None).await;
+    let findings = doctor::run(&data_dir, &doctor::Options::default()).await;
     let backups = findings
         .iter()
         .find(|finding| finding.check == "backups")
@@ -300,7 +304,7 @@ async fn only_a_set_aside_database_is_no_backup() {
             .join("consolebook-prerestore-20261014T000000Z.db"),
     )
     .expect("only a set-aside database remains");
-    let findings = doctor::run(&data_dir, None).await;
+    let findings = doctor::run(&data_dir, &doctor::Options::default()).await;
     let backups = findings
         .iter()
         .find(|finding| finding.check == "backups")

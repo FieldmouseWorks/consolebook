@@ -129,5 +129,5 @@ Before the first production-capable release, Consolebook still needs:
 - verification tests for retained tombstones and policy-required chain closure;
 - deterministic PDF fixtures within defined tolerances;
 - attachment integrity and export tests; and
-- recorded clean-installation restore drills beyond the automated restore-path
-  tests.
+- clean-installation restore drills on real hosts with a network share,
+  beyond the scripted drill recorded in [restore-drill.md](restore-drill.md).
