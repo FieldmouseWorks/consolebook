@@ -13,11 +13,12 @@ mod program_writes;
 #[path = "write_transactions/training.rs"]
 mod training_writes;
 
+mod support;
+
 const ACTOR: i64 = 1;
 const TRAINEE: i64 = 2;
 const TRAINER: i64 = 3;
 const OTHER_TRAINER: i64 = 4;
-mod support;
 
 struct Fixture {
     tmp: tempfile::TempDir,

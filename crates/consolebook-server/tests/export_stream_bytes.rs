@@ -7,9 +7,9 @@
 //! archives would differ — in the local header, in a data descriptor, or in
 //! the central directory — so the comparison is the contract.
 
-mod support;
 use consolebook_server::export_stream::EntryBuffer;
 use std::io::Write;
+mod support;
 
 fn options() -> zip::write::SimpleFileOptions {
     zip::write::SimpleFileOptions::default()

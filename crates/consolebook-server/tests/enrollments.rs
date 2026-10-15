@@ -272,7 +272,7 @@ async fn a_created_user_signs_in_through_the_reset_flow() {
         "POST",
         "/api/auth/login",
         None,
-        Some(serde_json::json!({"username": "jordan.trainee", "password": String::new()})),
+        Some(serde_json::json!({"username": "jordan.trainee", "password": ""})),
     )
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);

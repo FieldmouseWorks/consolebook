@@ -2,10 +2,11 @@
 //! credentials (#126).
 //!
 //! Every password a test uses comes from here and is generated at run
-//! time, once per test process, from OS randomness. No test file
-//! declares a password literal, so there is nothing for a static
-//! analyzer to report as a hard-coded credential, and
-//! `tests/no_credential_literals.rs` fails the build if one returns.
+//! time, once per test process, from OS randomness, except the
+//! allowlisted compatibility fixture in `upgrade_compat.rs`. Test files
+//! declare no password literal of their own, and
+//! `tests/no_credential_literals.rs` fails `cargo test` on the shapes it
+//! names in its scan contract.
 //!
 //! The sign-in helper never formats a username or password into a
 //! panic or assertion message; it names the request path instead.

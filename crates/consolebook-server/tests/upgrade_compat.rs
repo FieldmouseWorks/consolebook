@@ -130,10 +130,13 @@ async fn a_database_holding_the_released_rows_opens_and_a_modified_one_does_not(
 }
 
 /// A password hashed before the upgrade still signs in; a wrong one
-/// still fails.
+/// still fails, even when only its final character differs.
 #[test]
 fn a_password_hashed_by_the_earlier_build_still_verifies() {
     assert!(secrets::verify_password(PHC_PASSWORD, PHC_FROM_ARGON2_0_5));
+    let (prefix, last) = PHC_PASSWORD.split_at(PHC_PASSWORD.len() - 1);
+    let near_miss = format!("{prefix}{}", if last == "7" { '8' } else { '7' });
+    assert!(!secrets::verify_password(&near_miss, PHC_FROM_ARGON2_0_5));
     assert!(!secrets::verify_password(
         support::wrong_password(),
         PHC_FROM_ARGON2_0_5

@@ -255,7 +255,7 @@ async fn login_rejects_bad_password_and_unknown_user_identically() {
     let fx = Fixture::new().await;
     fx.initialized().await;
 
-    let wrong_password = post_json(
+    let wrong_attempt = post_json(
         fx.app(),
         "/api/auth/login",
         None,
@@ -269,9 +269,9 @@ async fn login_rejects_bad_password_and_unknown_user_identically() {
         json!({ "username": "nobody.here", "password": support::wrong_password() }),
     )
     .await;
-    assert_eq!(wrong_password.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(wrong_attempt.status(), StatusCode::UNAUTHORIZED);
     assert_eq!(unknown_user.status(), StatusCode::UNAUTHORIZED);
-    let a = body_json(wrong_password).await;
+    let a = body_json(wrong_attempt).await;
     let b = body_json(unknown_user).await;
     assert_eq!(a, b, "responses must not reveal whether the account exists");
 }

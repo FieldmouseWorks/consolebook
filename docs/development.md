@@ -37,9 +37,10 @@ tests show what is implemented. [Roadmap](roadmap.md) owns milestone status.
 `crates/consolebook-server/tests/` are named by capability; migration files in
 `crates/consolebook-server/migrations/` own schema, constraints, and triggers.
 Read both when changing a persisted contract. Test credentials come from
-`tests/support/` (`mod support;`), which generates them at run time;
-`tests/no_credential_literals.rs` fails `cargo test` when a test file
-declares its own.
+`tests/support/` (`mod support;`), which generates them at run time, except
+the allowlisted compatibility fixture in `tests/upgrade_compat.rs`;
+`tests/no_credential_literals.rs` fails `cargo test` on the shapes its scan
+contract names.
 
 `scripts/` holds repository guards that the gates run before the build;
 `CONTRIBUTING.md` lists each one in the local command sequence.

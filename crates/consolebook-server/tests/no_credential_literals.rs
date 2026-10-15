@@ -9,40 +9,63 @@
 //! # Scan contract
 //!
 //! **Scope.** Every `.rs` file under `crates/consolebook-server/tests/`,
-//! recursively, including `support/` and this file.
+//! recursively, including `support/` and this file. Symbolic links are not
+//! followed (a linked file or directory is skipped): the tree's own files
+//! are what the gate proves, and a link could loop or leave the tree. A
+//! source that is not UTF-8 fails the scan, naming the file.
 //!
 //! **Literal.** A string literal token: `"…"`, raw `r"…"` / `r#"…"#` (any
 //! number of `#`), and the byte and C forms `b"…"`, `br#"…"#`, `c"…"`,
 //! `cr#"…"#`. Text inside comments is not code and is skipped; character
-//! literals are not string literals. A *literal expression* is a literal
-//! as the first token of an expression, after any leading `&`, so a method
-//! chain on it (`"…".to_owned()`) counts; `String::from(literal)` counts
-//! too.
+//! literals are not string literals. The empty literal `""` is never a
+//! credential and is never flagged. A *literal expression* is a non-empty
+//! literal as the first token of an expression, after any leading `&`, so
+//! a method chain on it (`"…".to_owned()`) counts; `String::from(literal)`
+//! counts too.
 //!
-//! **Sensitive name.** An identifier or JSON key that contains `password`,
+//! **Sensitive name.** An identifier or key that contains `password`,
 //! `passphrase`, or `secret`, ignoring case (`PASSWORD`, `new_password`,
 //! `PHC_PASSWORD`, `current_password`, `client_secret`, …).
 //!
 //! **Flagged shapes.**
 //! 1. *Binding*: `const`, `static`, or `let` (optionally `mut`) of a
-//!    sensitive name whose initializer is a literal expression.
-//! 2. *Field*: `sensitive_name: literal` (a struct-literal field).
+//!    sensitive name whose initializer, up to its `;`, holds any non-empty
+//!    literal: arrays, `vec![…]`, `Some(…)`, parentheses, `match` and `if`
+//!    arms, closures, `Into::into(…)`, `format!`, and `concat!` included.
+//! 2. *Field*: `sensitive_name: literal expression` (a struct field).
 //! 3. *JSON key*: a sensitive key literal followed by `:` and a literal
 //!    expression — the `json!` shape, matched wherever it appears.
-//! 4. *Embedded JSON*: a literal whose text holds a sensitive JSON key
-//!    with a string value (`"password":"…"`, escaped or raw). A value that
-//!    begins with `{` is a format interpolation, not a credential.
-//! 5. *Call*: a literal expression passed
-//!    - as any argument to a function or method whose name is sensitive
+//! 4. *Key pair*: a key literal right after `(` that ends in a sensitive
+//!    word, followed by `,` and a literal expression — form tuples
+//!    `("password", "…")` and `map.insert("password", "…")`. Pairs are
+//!    common data, so the key must open the pair and end in the word:
+//!    `("user.password_hash", "credential")` names a column, and a list
+//!    of words `["password", "secret"]` is not a pair.
+//! 5. *Embedded JSON*: a literal whose text holds a sensitive JSON key
+//!    with a non-empty string value (`"password":"…"`, escaped once or
+//!    raw). A value that begins with `{` is a format interpolation; an
+//!    empty value, or one the literal ends before, is an absence check.
+//! 6. *Call*: a literal expression passed to a function, method, or macro
+//!    (`name(…)`, `name!(…)`, `name::<T>(…)`)
+//!    - as any argument when the callee's name is sensitive
 //!      (`hash_password`, `verify_password`, `check_password_policy`);
 //!    - as the last of two or more arguments to `initialize` or
 //!      `use_reset_code`, whose last parameter is the password;
-//!    - as the last argument to a function or method whose name contains
-//!      `login` or `sign_in`, when another argument is a literal too. A
-//!      sign-in helper's last parameter is its password when it takes
-//!      one and its username when it does not (`live_login(&addr,
-//!      "avery.admin")`), so a lone literal is a username; a username and
-//!      a password both written in are two.
+//!    - as the last argument when the callee's name contains `login`,
+//!      `log_in`, `sign_in`, `signin`, or `authenticate` (ignoring case)
+//!      and another argument is a literal too. A sign-in helper's last
+//!      parameter is its password when it takes one and its username when
+//!      it does not (`live_login(&addr, "avery.admin")`), so a lone
+//!      literal is a username; a username and a password both written in
+//!      are two.
+//!
+//! **Fails closed.** These rules read names, not meaning, so some
+//! non-credentials are flagged: `let password_error = "…"`, `let
+//! secret_kind = "…"`, a `PASSWORD_HASH_COLUMN` constant, a
+//! placeholder such as `"password": "<redacted>"`, `initialize("agency",
+//! "tz")`, and `get_login_page(…, "/login", "text/html")`. Rename the
+//! binding, field, or helper so it does not read as a credential. Do not
+//! split or assemble strings to slip past the scan.
 //!
 //! **Allowlist.** Exact path, shape, and subject; each entry must still
 //! match, so a stale entry fails too. Today there is one:
@@ -55,13 +78,38 @@
 //! (`installation_export/properties.rs`) reads stored credential columns as
 //! its positive control. It declares no literal, so it needs no entry.
 //!
-//! **Not caught, by design.** A credential reaching a sink only through a
-//! non-sensitive name (`let x = "…"; hash_password(x)`); a literal at a
-//! non-final position of a sign-in or reset helper, or a sign-in helper's
-//! literal password beside a username variable; a credential built
-//! by `format!`, `concat!`, or arithmetic; literals in non-Rust fixtures
-//! (`tests/fixtures/`); and anything outside `tests/`. Review covers
-//! those; this guard stops the shape that recurred.
+//! **Not caught, by design.** Each item has a case in
+//! `no_credential_literals/cases.txt` that must stay unflagged, and every
+//! `missed` case there names an item here, so this list and the code
+//! cannot drift apart. Review covers these.
+//! - *non-sensitive names*: `let pwd = "…"`, `const ADMIN_PW`, `let creds =
+//!   ("a", "…")`; the scan reads names, and these do not say what they hold.
+//! - *destructuring*: `let (u, password) = (…)`; the binding rule reads a
+//!   single name, and a pattern can bind it anywhere.
+//! - *reassignment*: `password = "…"` after `let mut password`; an
+//!   assignment has no keyword to anchor on, and `x = y` is everywhere.
+//! - *Some in a field*: `Login { password: Some("…") }`; a field's value
+//!   is read as one literal expression, not searched.
+//! - *index assignment*: `body["password"] = "…"`; the key is not followed
+//!   by `:` or `,`, and indexing is mostly reads.
+//! - *double-escaped JSON*: `"{\\\"password\\\":…}"`; JSON escaped inside
+//!   JSON text is read once, as written in the source.
+//! - *brace-led JSON value*: `"password":"{…}"` in a literal reads as a
+//!   format interpolation.
+//! - *non-English or fullwidth names*: `contraseña`, `ｐａｓｓｗｏｒｄ`; the
+//!   sensitive words are the English ASCII ones the tests use.
+//! - *values built by a macro*: `"password": format!(…)`, `login(app, "a",
+//!   concat!(…))`; an argument or value is read as one literal expression.
+//! - *included file contents*: `hash_password(include_str!("…"))`; the
+//!   included file is not Rust source, so it is not scanned.
+//! - *username variable beside a literal password*: `login(app, username,
+//!   "…")`; one literal in a sign-in call is taken as the username.
+//! - *constructors and other helpers*: `LoginRequest::new("a", "…")`,
+//!   `SignIn::new(…)`; only the callee's own name is read.
+//! - *non-.rs files*: `tests/fixtures/` and this guard's case corpus are
+//!   data, not code (tree-level; checked by
+//!   `the_walk_skips_links_and_data_and_names_bad_files`).
+//! - *symbolic links*: see **Scope** (tree-level; checked by the same test).
 //!
 //! Findings name the file, line, shape, and subject (the name, key, or
 //! callee), never the literal's text.
@@ -75,15 +123,37 @@ const SENSITIVE: [&str; 3] = ["password", "passphrase", "secret"];
 const LAST_ARGUMENT_CALLEES: [&str; 2] = ["initialize", "use_reset_code"];
 /// Sign-in helpers: the last argument is the password when another
 /// argument is a literal too.
-const SIGN_IN_FRAGMENTS: [&str; 2] = ["login", "sign_in"];
+const SIGN_IN_FRAGMENTS: [&str; 5] = ["login", "log_in", "sign_in", "signin", "authenticate"];
+
+/// The case corpus: synthetic sources and what the scan must find in each.
+const CASES: &str = include_str!("no_credential_literals/cases.txt");
+/// This file, for the header's list of what is not caught.
+const THIS_FILE: &str = include_str!("no_credential_literals.rs");
+/// Not-caught items proved on a tree rather than by a corpus case.
+const TREE_LEVEL_MISSES: [&str; 2] = ["non-.rs files", "symbolic links"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Shape {
     Binding,
     Field,
     JsonKey,
+    KeyPair,
     EmbeddedJson,
     Call,
+}
+
+impl Shape {
+    fn parse(name: &str) -> Self {
+        match name {
+            "Binding" => Self::Binding,
+            "Field" => Self::Field,
+            "JsonKey" => Self::JsonKey,
+            "KeyPair" => Self::KeyPair,
+            "EmbeddedJson" => Self::EmbeddedJson,
+            "Call" => Self::Call,
+            other => panic!("unknown shape {other} in cases.txt"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -295,6 +365,11 @@ fn sensitive(name: &str) -> bool {
     SENSITIVE.iter().any(|word| lower.contains(word))
 }
 
+fn ends_sensitive(key: &str) -> bool {
+    let lower = key.to_lowercase();
+    SENSITIVE.iter().any(|word| lower.ends_with(word))
+}
+
 fn ident(tokens: &[Token], at: usize) -> Option<&str> {
     match tokens.get(at).map(|t| &t.tok) {
         Some(Tok::Ident(name)) => Some(name),
@@ -306,17 +381,21 @@ fn punct(tokens: &[Token], at: usize, c: char) -> bool {
     tokens.get(at).map(|t| &t.tok) == Some(&Tok::Punct(c))
 }
 
+/// The line of a non-empty literal token at `at`.
+fn non_empty_literal(tokens: &[Token], at: usize) -> Option<usize> {
+    match tokens.get(at) {
+        Some(Token {
+            tok: Tok::Str(text),
+            line,
+        }) if !text.is_empty() => Some(*line),
+        _ => None,
+    }
+}
+
 /// The line of the literal expression starting at `at`, if one does.
 fn literal_expression(tokens: &[Token], mut at: usize) -> Option<usize> {
     while punct(tokens, at, '&') {
         at += 1;
-    }
-    if let Some(Token {
-        tok: Tok::Str(_),
-        line,
-    }) = tokens.get(at)
-    {
-        return Some(*line);
     }
     let from = ident(tokens, at) == Some("String")
         && punct(tokens, at + 1, ':')
@@ -325,6 +404,59 @@ fn literal_expression(tokens: &[Token], mut at: usize) -> Option<usize> {
         && punct(tokens, at + 4, '(');
     if from {
         return literal_expression(tokens, at + 5);
+    }
+    non_empty_literal(tokens, at)
+}
+
+/// The line of the first non-empty literal in the initializer that starts
+/// at `at` and ends at its `;` (or where its enclosing block closes).
+fn literal_in_initializer(tokens: &[Token], mut at: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    while let Some(token) = tokens.get(at) {
+        match token.tok {
+            Tok::Punct('(' | '[' | '{') => depth += 1,
+            Tok::Punct(')' | ']' | '}') => {
+                if depth == 0 {
+                    return None;
+                }
+                depth -= 1;
+            }
+            Tok::Punct(';') if depth == 0 => return None,
+            _ => {
+                if let Some(line) = non_empty_literal(tokens, at) {
+                    return Some(line);
+                }
+            }
+        }
+        at += 1;
+    }
+    None
+}
+
+/// The `(` (or `[`) that opens the call of the callee at `at`: `name(`,
+/// `name!(`, `name![`, or `name::<…>(`.
+fn call_open(tokens: &[Token], at: usize) -> Option<usize> {
+    if punct(tokens, at + 1, '(') {
+        return Some(at + 1);
+    }
+    if punct(tokens, at + 1, '!') && (punct(tokens, at + 2, '(') || punct(tokens, at + 2, '[')) {
+        return Some(at + 2);
+    }
+    if punct(tokens, at + 1, ':') && punct(tokens, at + 2, ':') && punct(tokens, at + 3, '<') {
+        let mut depth = 0usize;
+        let mut close = at + 3;
+        while close < tokens.len() {
+            if punct(tokens, close, '<') {
+                depth += 1;
+            } else if punct(tokens, close, '>') {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            close += 1;
+        }
+        return punct(tokens, close + 1, '(').then_some(close + 1);
     }
     None
 }
@@ -354,13 +486,37 @@ fn arguments(tokens: &[Token], open: usize) -> Vec<usize> {
         at += 1;
     }
     // A trailing comma leaves an empty last argument.
-    starts.retain(|start| !punct(tokens, *start, ')'));
+    starts.retain(|start| {
+        !(punct(tokens, *start, ')') || punct(tokens, *start, ']') || *start >= tokens.len())
+    });
     starts
 }
 
-/// The text of a literal holds a sensitive JSON key with a string value.
-/// Every quote is tried as a key's opening quote, so a quote earlier in
-/// the text cannot pair with the wrong one and hide a key.
+/// The arguments of the call at `open` that the call rule reads.
+fn checked_arguments(tokens: &[Token], callee: &str, open: usize) -> Vec<usize> {
+    let args = arguments(tokens, open);
+    if sensitive(callee) {
+        return args;
+    }
+    let lower = callee.to_lowercase();
+    let literals = args
+        .iter()
+        .filter(|start| literal_expression(tokens, **start).is_some())
+        .count();
+    let last_is_password = args.len() >= 2
+        && (LAST_ARGUMENT_CALLEES.contains(&callee)
+            || (SIGN_IN_FRAGMENTS.iter().any(|f| lower.contains(f)) && literals >= 2));
+    if last_is_password {
+        args[args.len() - 1..].to_vec()
+    } else {
+        Vec::new()
+    }
+}
+
+/// The text of a literal holds a sensitive JSON key with a non-empty
+/// string value that is not a format interpolation. Every quote is tried
+/// as a key's opening quote, so a quote earlier in the text cannot pair
+/// with the wrong one and hide a key.
 fn embedded_json_key(text: &str) -> Option<String> {
     let text = text.replace("\\\"", "\"");
     let mut rest = text.as_str();
@@ -371,7 +527,7 @@ fn embedded_json_key(text: &str) -> Option<String> {
         if sensitive(key)
             && let Some(value) = rest[close + 1..].trim_start().strip_prefix(':')
             && let Some(value) = value.trim_start().strip_prefix('"')
-            && !value.starts_with('{')
+            && !(value.is_empty() || value.starts_with(['{', '"']))
         {
             return Some(key.to_owned());
         }
@@ -405,7 +561,7 @@ fn scan_source(path: &str, src: &str) -> Vec<Finding> {
                     eq += 1;
                 }
                 if punct(&tokens, eq, '=')
-                    && let Some(line) = literal_expression(&tokens, eq + 1)
+                    && let Some(line) = literal_in_initializer(&tokens, eq + 1)
                 {
                     flag(line, Shape::Binding, name);
                 }
@@ -420,27 +576,15 @@ fn scan_source(path: &str, src: &str) -> Vec<Finding> {
                     flag(line, Shape::Field, name);
                 }
             }
-            Tok::Ident(callee) if punct(&tokens, at + 1, '(') => {
+            Tok::Ident(callee) => {
                 if at > 0 && ident(&tokens, at - 1) == Some("fn") {
                     continue;
                 }
-                let args = arguments(&tokens, at + 1);
-                let literals = args
-                    .iter()
-                    .filter(|start| literal_expression(&tokens, **start).is_some())
-                    .count();
-                let last_is_password = args.len() >= 2
-                    && (LAST_ARGUMENT_CALLEES.contains(&callee.as_str())
-                        || (SIGN_IN_FRAGMENTS.iter().any(|f| callee.contains(f)) && literals >= 2));
-                let checked: &[usize] = if sensitive(callee) {
-                    &args
-                } else if last_is_password {
-                    &args[args.len() - 1..]
-                } else {
-                    &[]
+                let Some(open) = call_open(&tokens, at) else {
+                    continue;
                 };
-                for start in checked {
-                    if let Some(line) = literal_expression(&tokens, *start) {
+                for start in checked_arguments(&tokens, callee, open) {
+                    if let Some(line) = literal_expression(&tokens, start) {
                         flag(line, Shape::Call, callee);
                     }
                 }
@@ -452,6 +596,14 @@ fn scan_source(path: &str, src: &str) -> Vec<Finding> {
                 {
                     flag(line, Shape::JsonKey, text);
                 }
+                if ends_sensitive(text)
+                    && at > 0
+                    && punct(&tokens, at - 1, '(')
+                    && punct(&tokens, at + 1, ',')
+                    && let Some(line) = literal_expression(&tokens, at + 2)
+                {
+                    flag(line, Shape::KeyPair, text);
+                }
                 if let Some(key) = embedded_json_key(text) {
                     flag(token.line, Shape::EmbeddedJson, &key);
                 }
@@ -462,14 +614,23 @@ fn scan_source(path: &str, src: &str) -> Vec<Finding> {
     findings
 }
 
+// ------------------------------------------------------------------ walk
+
+/// Every `.rs` file under `dir`, recursively, never following a link.
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
-        .expect("read test directory")
+        .unwrap_or_else(|err| panic!("read {}: {err}", dir.display()))
         .map(|entry| entry.expect("directory entry").path())
         .collect();
     entries.sort();
     for path in entries {
-        if path.is_dir() {
+        let kind = std::fs::symlink_metadata(&path)
+            .unwrap_or_else(|err| panic!("stat {}: {err}", path.display()))
+            .file_type();
+        if kind.is_symlink() {
+            continue;
+        }
+        if kind.is_dir() {
             rust_files(&path, out);
         } else if path.extension().is_some_and(|ext| ext == "rs") {
             out.push(path);
@@ -491,7 +652,8 @@ fn scan_tree(root: &Path) -> (Vec<Finding>, Vec<String>) {
             .map(|part| part.as_os_str().to_string_lossy())
             .collect::<Vec<_>>()
             .join("/");
-        let src = std::fs::read_to_string(&file).expect("read test source");
+        let src = std::fs::read_to_string(&file)
+            .unwrap_or_else(|err| panic!("read test source {label}: {err}"));
         findings.extend(scan_source(&label, &src));
         scanned.push(label);
     }
@@ -511,6 +673,81 @@ fn listing(findings: &[Finding]) -> String {
         .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+// ----------------------------------------------------------------- cases
+
+/// What a corpus case expects.
+enum Expect {
+    /// Exactly these findings (none: the source scans clean).
+    Findings(Vec<(Shape, String, usize)>),
+    /// No finding, and the header's not-caught list names this item.
+    Missed(String),
+    /// Malformed source: the scan only has to finish.
+    Robust,
+}
+
+struct Case {
+    id: String,
+    expect: Expect,
+    source: String,
+}
+
+/// `=== <id> findings [Shape:subject:line,…]`, `=== <id> missed <item>`,
+/// or `=== <id> robust`, each followed by its source. Lines before the
+/// first case are the corpus's own notes.
+fn cases() -> Vec<Case> {
+    let mut cases: Vec<Case> = Vec::new();
+    for line in CASES.split_inclusive('\n') {
+        let Some(spec) = line.strip_prefix("=== ") else {
+            if let Some(case) = cases.last_mut() {
+                case.source.push_str(line);
+            }
+            continue;
+        };
+        let spec = spec.trim_end();
+        let (id, rest) = spec.split_once(' ').expect("case id and kind");
+        let (kind, arg) = rest.split_once(' ').unwrap_or((rest, ""));
+        let expect = match kind {
+            "findings" => Expect::Findings(
+                arg.split(',')
+                    .filter(|item| !item.is_empty())
+                    .map(|item| {
+                        let mut parts = item.split(':');
+                        let shape = Shape::parse(parts.next().expect("shape"));
+                        let subject = parts.next().expect("subject").to_owned();
+                        let line = parts.next().expect("line").parse().expect("line number");
+                        (shape, subject, line)
+                    })
+                    .collect(),
+            ),
+            "missed" => Expect::Missed(arg.to_owned()),
+            "robust" => Expect::Robust,
+            other => panic!("case {id}: unknown kind {other}"),
+        };
+        cases.push(Case {
+            id: id.to_owned(),
+            expect,
+            source: String::new(),
+        });
+    }
+    cases
+}
+
+/// The items of the header's **Not caught** list: `//! - *item*: …`.
+fn not_caught_items() -> Vec<String> {
+    let section = THIS_FILE
+        .split("**Not caught, by design.**")
+        .nth(1)
+        .expect("not-caught section")
+        .split("\n\n")
+        .next()
+        .expect("section text");
+    section
+        .lines()
+        .filter_map(|line| line.strip_prefix("//! - *"))
+        .map(|item| item.split_once("*:").expect("item label").0.to_owned())
+        .collect()
 }
 
 // ----------------------------------------------------------------- tests
@@ -546,152 +783,51 @@ fn no_test_declares_its_own_credential_literal() {
     );
 }
 
-/// One synthetic source per forbidden shape, with the finding it must
-/// produce.
-fn forbidden_cases() -> Vec<(String, Shape, &'static str)> {
-    let key = |key: &str, value: &str| format!("json!({{ \"{key}\": {value} }})");
-    vec![
-        (
-            r#"const PASSWORD: &'static str = "x";"#.into(),
-            Shape::Binding,
-            "PASSWORD",
-        ),
-        (
-            r#"static ADMIN_SECRET: &'static str = "x";"#.into(),
-            Shape::Binding,
-            "ADMIN_SECRET",
-        ),
-        (
-            r#"let new_password = "x";"#.into(),
-            Shape::Binding,
-            "new_password",
-        ),
-        (
-            r#"let mut passphrase: String = "x".to_owned();"#.into(),
-            Shape::Binding,
-            "passphrase",
-        ),
-        (
-            r#"let password = String::from("x");"#.into(),
-            Shape::Binding,
-            "password",
-        ),
-        (
-            r##"const PASSWORD: &str = r#"x"#;"##.into(),
-            Shape::Binding,
-            "PASSWORD",
-        ),
-        (r#"let password = r"x";"#.into(), Shape::Binding, "password"),
-        // A quote in a character literal opens no string.
-        (
-            r#"let q = '"'; let e = '\''; let password = "x";"#.into(),
-            Shape::Binding,
-            "password",
-        ),
-        (
-            r#"Login { password: "x" }"#.into(),
-            Shape::Field,
-            "password",
-        ),
-        (key("password", r#""x""#), Shape::JsonKey, "password"),
-        (
-            key("new_password", r#""x""#),
-            Shape::JsonKey,
-            "new_password",
-        ),
-        (
-            key("current_password", r##"r#"x"#"##),
-            Shape::JsonKey,
-            "current_password",
-        ),
-        (
-            format!("let body = {:?};", key("password", r#""x""#)),
-            Shape::EmbeddedJson,
-            "password",
-        ),
-        (
-            r#"secrets::hash_password("x")"#.into(),
-            Shape::Call,
-            "hash_password",
-        ),
-        (
-            r#"secrets::verify_password("x", &phc)"#.into(),
-            Shape::Call,
-            "verify_password",
-        ),
-        (
-            r#"fx.login("avery.admin", "x")"#.into(),
-            Shape::Call,
-            "login",
-        ),
-        (
-            r#"support::sign_in(app, "avery.admin", &"x".to_owned())"#.into(),
-            Shape::Call,
-            "sign_in",
-        ),
-        (
-            r#"users::use_reset_code(&pool, "a", &code, "x")"#.into(),
-            Shape::Call,
-            "use_reset_code",
-        ),
-        (
-            r#"setup::initialize(&p, &c, "A", "a", "A", r"x",)"#.into(),
-            Shape::Call,
-            "initialize",
-        ),
-    ]
-}
-
-/// Each forbidden shape is found, naming the file and line.
+/// Every case in the corpus scans as it says: forbidden shapes are found
+/// at their file and line, allowed shapes scan clean, malformed sources
+/// finish, and each documented miss stays unflagged.
 #[test]
-fn each_forbidden_shape_is_found_with_its_file_and_line() {
-    for (body, shape, subject) in forbidden_cases() {
-        let src = format!("// line 1\n\n{body}\n");
-        let found = scan_source("synthetic.rs", &src);
-        let expected = Finding {
-            path: "synthetic.rs".into(),
-            line: 3,
-            shape,
-            subject: subject.into(),
-        };
+fn the_case_corpus_scans_as_written() {
+    let cases = cases();
+    assert!(cases.len() > 100, "{} cases", cases.len());
+    let documented = not_caught_items();
+    for case in &cases {
+        let path = format!("cases.txt#{}", case.id);
+        let found = scan_source(&path, &case.source);
+        match &case.expect {
+            Expect::Findings(expected) => {
+                let expected: Vec<Finding> = expected
+                    .iter()
+                    .map(|(shape, subject, line)| Finding {
+                        path: path.clone(),
+                        line: *line,
+                        shape: *shape,
+                        subject: subject.clone(),
+                    })
+                    .collect();
+                assert_eq!(found, expected, "case {}", case.id);
+            }
+            Expect::Missed(item) => {
+                assert!(found.is_empty(), "case {}:\n{}", case.id, listing(&found));
+                assert!(
+                    documented.contains(item),
+                    "case {}: `{item}` is not in the header's not-caught list",
+                    case.id
+                );
+            }
+            Expect::Robust => {}
+        }
+    }
+    // Every not-caught item has a case, or is proved on a tree.
+    for item in &documented {
+        let has_case = cases
+            .iter()
+            .any(|case| matches!(&case.expect, Expect::Missed(m) if m == item));
         assert!(
-            found.contains(&expected),
-            "{body}\nexpected {expected}\nfound:\n{}",
-            listing(&found)
+            has_case || TREE_LEVEL_MISSES.contains(&item.as_str()),
+            "not-caught item `{item}` has no `missed` case"
         );
     }
-}
-
-/// The shapes the sweep uses, the allowlisted fixture, and look-alikes
-/// that carry no credential all scan clean.
-#[test]
-fn allowed_shapes_yield_no_finding() {
-    let clean = [
-        "const PASSWORD_MIN: usize = 12;",
-        "let password = support::password();",
-        "static PASSWORD: OnceLock<String> = OnceLock::new();",
-        "let wrong = support::wrong_password();",
-        "let fresh = support::fresh_password();",
-        "fn login(&self, username: &str, password: &str) -> String { todo!() }",
-        "fx.login(\"avery.admin\", support::password()).await;",
-        "fx.login(\"casey.api\").await;",
-        "live_login(&addr, \"avery.admin\").await;",
-        "secrets::hash_password(support::password()).expect(\"hash\");",
-        "let secret = text.into_iter().collect();",
-        "sqlx::query(\"SELECT password_hash FROM user\");",
-        "(\"user.password_hash\", \"credential\")",
-        "format!(r#\"{{\"username\":\"{u}\",\"password\":\"{}\"}}\"#, support::password())",
-        "// const PASSWORD: &str = \"in a comment\";",
-        "/* let password = \"in a block comment\"; */",
-        "let c = '\"'; let password = support::password();",
-    ];
-    for src in clean {
-        let found = scan_source("synthetic.rs", src);
-        assert!(found.is_empty(), "{src}\nfound:\n{}", listing(&found));
-    }
-    let key = |value: &str| format!("json!({{ \"pass{}\": {value} }})", "word");
-    let found = scan_source("synthetic.rs", &key("support::password()"));
-    assert!(found.is_empty(), "{}", listing(&found));
 }
 
 /// The allowlist is by exact path, shape, and subject: the fixture is
@@ -722,21 +858,30 @@ fn the_allowlist_covers_only_the_named_fixture() {
     );
 }
 
-/// The token boundaries the rules rely on: a literal spanning lines
-/// reports its first line, and a quote inside a raw string or comment does
-/// not open a literal.
+/// The walk scans `.rs` files in nested directories, skips data files and
+/// symbolic links, and names a source it cannot read.
+#[cfg(unix)]
 #[test]
-fn literals_are_located_by_their_first_line() {
-    let src =
-        "let a = \"one\ntwo\";\n/* \" */\nlet b = r#\"\"\"#;\nconst PASSWORD: &str =\n    \"x\";";
-    let found = scan_source("synthetic.rs", src);
-    assert_eq!(
-        found,
-        vec![Finding {
-            path: "synthetic.rs".into(),
-            line: 6,
-            shape: Shape::Binding,
-            subject: "PASSWORD".into(),
-        }]
-    );
+fn the_walk_skips_links_and_data_and_names_bad_files() {
+    let forbidden = r#"const PASSWORD: &'static str = "x";"#;
+    let tree = tempfile::tempdir().expect("temp dir");
+    let outside = tempfile::tempdir().expect("temp dir");
+    std::fs::create_dir(tree.path().join("nested")).expect("mkdir");
+    std::fs::write(tree.path().join("nested/real.rs"), forbidden).expect("write");
+    std::fs::write(tree.path().join("data.txt"), forbidden).expect("write");
+    std::fs::write(outside.path().join("linked.rs"), forbidden).expect("write");
+    std::os::unix::fs::symlink(outside.path(), tree.path().join("linked_dir")).expect("link");
+    std::os::unix::fs::symlink(
+        outside.path().join("linked.rs"),
+        tree.path().join("linked_file.rs"),
+    )
+    .expect("link");
+    let (findings, scanned) = scan_tree(tree.path());
+    assert_eq!(scanned, ["nested/real.rs"]);
+    assert_eq!(listing(&findings), "nested/real.rs:1: Binding `PASSWORD`");
+
+    std::fs::write(tree.path().join("broken.rs"), [0xff, 0xfe, b'\n']).expect("write");
+    let panic = std::panic::catch_unwind(|| scan_tree(tree.path())).expect_err("non-UTF-8 fails");
+    let message = panic.downcast_ref::<String>().cloned().unwrap_or_default();
+    assert!(message.contains("broken.rs"), "{message}");
 }
