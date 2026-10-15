@@ -10,11 +10,40 @@ not a production-readiness statement.
 
 ## [Unreleased]
 
+### Added
+
+- Before a new version migrates the database, it takes a validated backup
+  of it as it was and refuses to migrate without one, whichever command
+  runs first; the install guide shows how to go back with the previous
+  release.
+- A version that finds a database upgraded by a newer release refuses it in
+  plain words and names the way back.
+- `--public-url` / `CONSOLEBOOK_PUBLIC_URL` (installer: `--public-url`): the
+  address people use. An `https://` address marks sign-in cookies `Secure`,
+  and the sign-in page points browsers that arrived by another address to it
+  (ADR 0025). The install guide gives a tested Caddy configuration for HTTPS.
+  Turning it on signs out sessions whose cookies were not `Secure`.
+- `doctor --backup-copy-dir` reports whether off-server backup copies are
+  current, behind, unreachable, or not configured, without writing anything.
+- [ADR 0027](docs/decisions/0027-backup-copy-encryption.md): Consolebook does
+  not encrypt backup copies; the install guide states what the share must
+  provide.
+
 ### Changed
 
 - The one-line install fetches the installer published with the latest
   release instead of the `main` branch, and every release asset carries
   build provenance (`gh attestation verify`; ADR 0026).
+
+### Fixed
+
+- A phase change that waited behind another write is no longer refused as
+  out of order; it is judged at the moment it can commit ([#108](https://github.com/FieldmouseWorks/consolebook/issues/108)).
+- After a restore, the set-aside database no longer counts as the newest
+  backup: snapshots order by their time, so off-server copy status,
+  catch-up copies, and retention follow the latest backup ([#105](https://github.com/FieldmouseWorks/consolebook/issues/105)).
+- A draft that saves after a failed save no longer keeps saying "The draft
+  did not save" ([#83](https://github.com/FieldmouseWorks/consolebook/issues/83)).
 
 ## [0.1.0] - 2026-10-14
 

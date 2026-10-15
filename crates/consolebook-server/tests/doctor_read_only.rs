@@ -48,7 +48,7 @@ async fn diagnostic_connection_cannot_create_a_missing_database() {
     let (_tmp, data) = installation();
     assert!(storage::open_diagnostic(&data.database()).await.is_err());
     assert!(!data.database().exists());
-    let findings = doctor::run(&data).await;
+    let findings = doctor::run(&data, None).await;
     assert!(doctor::has_failure(&findings));
     assert!(!data.database().exists());
 }
@@ -71,7 +71,7 @@ async fn doctor_reports_delete_mode_without_changing_any_files() {
     connection.close().await.expect("close fixture");
     let before = std::fs::read(data.database()).expect("database bytes");
 
-    let findings = doctor::run(&data).await;
+    let findings = doctor::run(&data, None).await;
     let failures: Vec<_> = findings
         .iter()
         .filter(|f| f.verdict == doctor::Verdict::Fail)
@@ -137,7 +137,7 @@ async fn doctor_reads_live_wal_commits_and_preserves_database_and_wal_bytes() {
     let wal_before = std::fs::read(&wal_path).expect("WAL before");
     assert!(wal_before.len() > 32, "fixture needs committed WAL frames");
 
-    let findings = doctor::run(&data).await;
+    let findings = doctor::run(&data, None).await;
     assert_healthy(&findings);
     assert!(
         findings
@@ -157,7 +157,7 @@ async fn doctor_reads_stopped_wal_installation_without_changing_database_bytes()
     assert!(!data.root().join("consolebook.db-wal").exists());
     assert!(!data.root().join("consolebook.db-shm").exists());
     let before = std::fs::read(data.database()).expect("before");
-    let findings = doctor::run(&data).await;
+    let findings = doctor::run(&data, None).await;
     assert_healthy(&findings);
     assert_eq!(before, std::fs::read(data.database()).expect("after"));
     for name in ["foreign_keys", "synchronous", "busy_timeout_ms"] {

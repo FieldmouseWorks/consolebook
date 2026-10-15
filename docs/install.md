@@ -6,7 +6,7 @@ systemd (Ubuntu, Debian, RHEL, Rocky, Alma, Fedora, and similar), x86_64 or
 arm64, and an administrator account that can use `sudo`.
 
 Consolebook is pre-alpha. Use invented data until your agency has decided it is
-ready for real records. [ADR 0024](decisions/0023-linux-installation-lifecycle.md)
+ready for real records. [ADR 0023](decisions/0023-linux-installation-lifecycle.md)
 records the locations, service account, and upgrade behavior this page relies on.
 
 ## 1. Install
@@ -57,9 +57,41 @@ curl -fsSL https://github.com/FieldmouseWorks/consolebook/releases/latest/downlo
 ```
 
 That serves plain HTTP on port 7770. That is fine for a trial on a trusted
-network. For real use, put HTTPS in front of it: run your agency's reverse
-proxy (nginx, Caddy, IIS ARR, or a load balancer) on the same machine, forwarding
-to `127.0.0.1:7770`, and keep the default listen address.
+network, with invented data.
+
+### HTTPS (required before real records)
+
+For real use, browsers reach Consolebook over HTTPS through a reverse proxy on
+the same machine, and Consolebook keeps listening on `127.0.0.1:7770`. Tell it
+the address people use, so it marks sign-in cookies `Secure` (a browser then
+never sends them over plain HTTP; ADR 0025):
+
+```sh
+curl -fsSL https://github.com/FieldmouseWorks/consolebook/releases/latest/download/install.sh | sudo sh -s -- --public-url https://consolebook.example.org
+```
+
+With [Caddy](https://caddyserver.com/docs/install), the whole proxy is this
+`/etc/caddy/Caddyfile`:
+
+```
+consolebook.example.org {
+	reverse_proxy 127.0.0.1:7770
+}
+```
+
+Caddy gets and renews a certificate by itself when the name is in public DNS
+and ports 80 and 443 reach the server. For a name only your network knows,
+use your agency's certificate instead (`tls /path/to/cert.pem
+/path/to/key.pem` inside the block), or `tls internal` for Caddy's own
+authority, which each browser must then trust.
+
+Any other proxy (nginx, IIS ARR, a load balancer) works the same way: terminate
+TLS, forward everything to `http://127.0.0.1:7770` with the original `Host`
+header, and set `--public-url` to the `https://` address. Opening Consolebook
+by any other address makes the sign-in page point to the right one: with
+`Secure` cookies, signing in over plain HTTP would not stick. Turning this on
+signs out everyone who signed in before it, since their cookies could still
+travel over plain HTTP; they sign in again at the public address.
 
 Other options: `--version 0.1.0` installs a specific release, `--listen
 ADDRESS:PORT` picks your own address, and `--from FILE` installs from a
@@ -109,6 +141,36 @@ definition, keeps `/var/lib/consolebook` and your settings, restarts the
 service, and prints the address. The database is upgraded on start, and
 startup refuses to run against data it cannot verify.
 
+When a new version changes the database, it first takes a validated backup
+of it as it was, `backups/consolebook-premigration-<stamp>.db`, and changes
+nothing unless that backup succeeded. Whichever command runs first takes it:
+the service, or `setup-code` or `recover` run by hand, which refuse while
+the old service is still running. The log names it:
+
+```sh
+journalctl -u consolebook | grep 'took a validated backup first'
+```
+
+There is no downgrade: an older version refuses a database a newer one has
+changed, and says so ("upgraded by a newer Consolebook"; 0.1.0 says
+"migration N was previously applied but is missing"). To go back after an
+upgrade, install the version you upgraded **from** and restore that backup
+with it. The backup holds that version's database; the new version would
+only migrate it again. The log names the version that ran before:
+
+```sh
+journalctl -u consolebook | grep 'starting Consolebook' | tail -n 2
+```
+
+Then, with that version in place of `<previous>`:
+
+```sh
+sudo systemctl stop consolebook
+curl -fsSL https://github.com/FieldmouseWorks/consolebook/releases/latest/download/install.sh | sudo sh -s -- --version <previous> --no-service
+sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook consolebook restore /var/lib/consolebook/backups/consolebook-premigration-<stamp>.db
+sudo systemctl start consolebook
+```
+
 ## Moving the data directory
 
 The installer will not point an installation that has records at a different
@@ -145,12 +207,23 @@ or a systemd mount unit). The copy directory must already exist on another
 filesystem than the data directory: the installer refuses it otherwise, and
 never creates it. If the share is not mounted later, its mount point is just an
 empty local directory; Consolebook refuses to copy there, keeps backups local,
-and reports the copy location as unreachable until the share is back. Copies are plain SQLite files: protect the share the way
-you protect the server.
+and reports the copy location as unreachable until the share is back.
+
+Each copy holds every record. Consolebook does not encrypt copies (ADR 0027),
+so the share must:
+
+- be stored on encrypted storage: an encrypted NAS volume or dataset, a
+  BitLocker volume on the file server, or LUKS on a second disk;
+- be writable only by the `consolebook` account;
+- be readable only by the people who may restore.
+
+Encryption at rest protects the files where they are stored. On a network
+share, also encrypt the path to it (SMB 3 encryption, or NFS with Kerberos
+`krb5p`), since a copy crosses the network every time it is written.
 
 ```sh
 sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook consolebook backup    # take one now
-sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook consolebook doctor    # read-only health check
+sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook consolebook doctor --backup-copy-dir /mnt/backups/consolebook    # read-only health check; without a copy directory, leave out --backup-copy-dir
 ```
 
 Restoring replaces the database, so stop the service first:

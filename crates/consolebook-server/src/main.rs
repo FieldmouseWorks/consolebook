@@ -10,11 +10,12 @@ use clap::{Parser, Subcommand};
 use consolebook_server::backup_copy::{self, BackupSettings};
 use consolebook_server::data_dir::DataDir;
 use consolebook_server::doctor::Verdict;
+use consolebook_server::public_url::PublicUrl;
 use consolebook_server::serve_lock::ServeLock;
 use consolebook_server::users::{IssueRefusal, ResetOrigin};
 use consolebook_server::{
     BUILD_COMMIT, BUILD_IDENTITY, VERSION, backup, doctor, export_verify, http, restore, scheduler,
-    setup, storage, users,
+    sessions, setup, storage, users,
 };
 
 #[derive(Parser)]
@@ -61,9 +62,19 @@ enum Command {
         /// network share, so backups survive the loss of this one (ADR 0024).
         #[arg(long, env = "CONSOLEBOOK_BACKUP_COPY_DIR")]
         backup_copy_dir: Option<PathBuf>,
+        /// The address people use, such as `https://consolebook.example.org`
+        /// behind a TLS proxy. An `https://` address marks session cookies
+        /// Secure (ADR 0025).
+        #[arg(long, env = "CONSOLEBOOK_PUBLIC_URL")]
+        public_url: Option<PublicUrl>,
     },
     /// Diagnose an existing installation without modifying it.
-    Doctor,
+    Doctor {
+        /// The backup copy directory the service uses, to check that
+        /// copies are current (ADR 0024). Read only.
+        #[arg(long, env = "CONSOLEBOOK_BACKUP_COPY_DIR")]
+        backup_copy_dir: Option<PathBuf>,
+    },
     /// Take a validated, consistent snapshot of the database into backups/.
     Backup {
         /// Snapshots retention keeps in backups/.
@@ -91,6 +102,11 @@ enum Command {
         #[command(subcommand)]
         action: ExportAction,
     },
+    /// Check a public URL as `serve` would and print its origin. The
+    /// installer runs it before changing anything, so a value the server
+    /// would refuse never stops a working service.
+    #[command(hide = true)]
+    CheckPublicUrl { url: PublicUrl },
     /// Print a fresh first-run setup code for an uninitialized installation.
     SetupCode,
     /// Issue a password reset code for a locked-out administrator.
@@ -138,6 +154,7 @@ async fn main() -> ExitCode {
             backup_interval_hours,
             backup_keep,
             backup_copy_dir,
+            public_url,
         } => {
             let settings = BackupSettings {
                 data_dir: DataDir::new(&cli.data_dir),
@@ -145,9 +162,11 @@ async fn main() -> ExitCode {
                 keep: usize::try_from(backup_keep).unwrap_or(usize::MAX),
                 copy_dir: backup_copy_dir,
             };
-            serve(bind, settings).await
+            serve(bind, settings, public_url).await
         }
-        Command::Doctor => run_doctor(&cli.data_dir).await,
+        Command::Doctor { backup_copy_dir } => {
+            run_doctor(&cli.data_dir, backup_copy_dir.as_deref()).await
+        }
         Command::Backup {
             keep,
             backup_copy_dir,
@@ -157,6 +176,10 @@ async fn main() -> ExitCode {
             action: ExportAction::Verify { archive },
         } => run_export_verify(&archive),
         Command::SetupCode => run_setup_code(&cli.data_dir).await,
+        Command::CheckPublicUrl { url } => {
+            println!("{url}");
+            Ok(ExitCode::SUCCESS)
+        }
         Command::Recover { username } => run_recover(&cli.data_dir, &username).await,
     };
     match result {
@@ -168,12 +191,27 @@ async fn main() -> ExitCode {
     }
 }
 
-async fn serve(bind: SocketAddr, settings: BackupSettings) -> Result<ExitCode> {
+async fn serve(
+    bind: SocketAddr,
+    settings: BackupSettings,
+    public_url: Option<PublicUrl>,
+) -> Result<ExitCode> {
     let data_dir = settings.data_dir.clone();
     data_dir.ensure_layout()?;
     let lock = ServeLock::acquire(&data_dir)?;
     tracing::debug!(lock = %lock.path().display(), "holding installation lock");
-    let pool = storage::open(&data_dir.database()).await?;
+    let pool = backup::open_migrated(
+        &data_dir,
+        Some(&lock),
+        settings
+            .copy_dir
+            .as_deref()
+            .map(|dir| backup::OffServerCopy {
+                dir,
+                keep: settings.keep,
+            }),
+    )
+    .await?;
     let installation_id = storage::installation_id(&pool).await?;
     tracing::info!(
         version = VERSION,
@@ -191,11 +229,15 @@ async fn serve(bind: SocketAddr, settings: BackupSettings) -> Result<ExitCode> {
     if let Some((code, expires_at)) = setup::issue_setup_code(&pool).await? {
         // The one deliberate secret in the log: the operator needs it to
         // complete first-run setup, and it is useless once setup completes
-        // or the code expires.
+        // or the code expires. It names the address people use: setup over
+        // plain HTTP would end at a sign-in whose Secure cookie never sticks.
+        let address = public_url
+            .as_ref()
+            .map_or_else(|| format!("http://{bind}"), |url| url.origin().to_owned());
         tracing::warn!(
             setup_code = code.raw,
             expires_in_minutes = (expires_at - now_unix()) / 60,
-            "installation is not initialized; open http://{bind}/ in a web browser and enter this setup code"
+            "installation is not initialized; open {address}/ in a web browser and enter this setup code"
         );
     }
 
@@ -207,22 +249,47 @@ async fn serve(bind: SocketAddr, settings: BackupSettings) -> Result<ExitCode> {
              set CONSOLEBOOK_BACKUP_COPY_DIR (docs/install.md)"
         );
     }
+    match &public_url {
+        Some(url) if url.is_secure() => {
+            tracing::info!(public_url = %url, "session cookies are marked Secure");
+            let revoked = sessions::revoke_not_secure(&pool).await?;
+            if revoked > 0 {
+                tracing::info!(
+                    revoked,
+                    "signed out sessions whose cookies were issued without Secure; \
+                     people sign in again at the public address"
+                );
+            }
+        }
+        _ if !bind.ip().is_loopback() => tracing::warn!(
+            "serving plain HTTP on the network: session cookies are not Secure; put HTTPS \
+             in front and set CONSOLEBOOK_PUBLIC_URL to its https:// address (docs/install.md)"
+        ),
+        _ => {}
+    }
     let scheduler = tokio::spawn(scheduler::run(settings.clone(), pool.clone()));
 
     let listener = tokio::net::TcpListener::bind(bind)
         .await
         .with_context(|| format!("binding {bind}"))?;
     tracing::info!(addr = %listener.local_addr()?, "listening");
-    http::serve(listener, http::AppState::new(pool).with_backups(settings)).await?;
+    let mut state = http::AppState::new(pool).with_backups(settings);
+    if let Some(url) = public_url {
+        state = state.with_public_url(url);
+    }
+    http::serve(listener, state).await?;
     scheduler.abort();
     drop(lock);
     tracing::info!("stopped");
     Ok(ExitCode::SUCCESS)
 }
 
-async fn run_doctor(data_dir: &std::path::Path) -> Result<ExitCode> {
+async fn run_doctor(
+    data_dir: &std::path::Path,
+    backup_copy_dir: Option<&std::path::Path>,
+) -> Result<ExitCode> {
     let data_dir = DataDir::new(data_dir);
-    let findings = doctor::run(&data_dir).await;
+    let findings = doctor::run(&data_dir, backup_copy_dir).await;
     for finding in &findings {
         let mark = match finding.verdict {
             Verdict::Ok => "ok  ",
@@ -244,7 +311,7 @@ fn now_unix() -> i64 {
 
 async fn run_setup_code(data_dir: &std::path::Path) -> Result<ExitCode> {
     let data_dir = DataDir::new(data_dir);
-    let pool = storage::open(&data_dir.database()).await?;
+    let pool = backup::open_migrated(&data_dir, None, None).await?;
     match setup::issue_setup_code(&pool).await? {
         None => {
             eprintln!("this installation is already initialized; setup is unavailable");
@@ -263,7 +330,7 @@ async fn run_setup_code(data_dir: &std::path::Path) -> Result<ExitCode> {
 
 async fn run_recover(data_dir: &std::path::Path, username: &str) -> Result<ExitCode> {
     let data_dir = DataDir::new(data_dir);
-    let pool = storage::open(&data_dir.database()).await?;
+    let pool = backup::open_migrated(&data_dir, None, None).await?;
     match users::issue_reset_code(&pool, username, ResetOrigin::Recovery).await? {
         Ok(issued) => {
             println!("{}", issued.code.raw);

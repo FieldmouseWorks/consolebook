@@ -31,6 +31,7 @@ pub mod packet_verify;
 pub mod program_export;
 pub mod programs;
 pub mod programs_http;
+pub mod public_url;
 pub mod record_envelope;
 pub mod record_export;
 pub mod restore;

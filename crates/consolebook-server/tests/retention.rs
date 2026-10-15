@@ -632,10 +632,14 @@ async fn http_refusals_are_typed_and_private() {
     use http_body_util::BodyExt;
     use tower::ServiceExt;
     let fx = Fixture::new().await;
-    let token = consolebook_server::sessions::create(&fx.pool, 3)
-        .await
-        .expect("token")
-        .0;
+    let token = consolebook_server::sessions::create(
+        &fx.pool,
+        3,
+        consolebook_server::sessions::CookieTransport::Plain,
+    )
+    .await
+    .expect("token")
+    .0;
     let app =
         consolebook_server::http::router(consolebook_server::http::AppState::new(fx.pool.clone()));
     for (method, path, body) in [

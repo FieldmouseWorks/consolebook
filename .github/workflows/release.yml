@@ -126,6 +126,10 @@ jobs:
           copy=$(sudo sh -c 'ls /srv/consolebook-copies/consolebook-*.db' | tail -n 1)
           sudo cmp "$copy" "/var/lib/consolebook/backups/$(basename "$copy")"
           sudo journalctl -u consolebook --no-pager | grep -q 'backup copied off the server and verified'
+          # doctor sees the same copy state, read-only, beside the running service.
+          sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook \
+            consolebook doctor --backup-copy-dir /srv/consolebook-copies | tee doctor-current.log
+          grep -Eq '^ok +backup copy +current: /srv/consolebook-copies has [0-9]+, newest consolebook-' doctor-current.log
           # A share that is gone at the next start (reboot, failed mount) must
           # not stop the service: it starts and keeps backing up locally.
           sudo umount /srv/consolebook-copies
@@ -137,7 +141,34 @@ jobs:
           done
           systemctl is-active consolebook
           curl -fsS http://127.0.0.2:7771/api/health
+          sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook \
+            consolebook doctor --backup-copy-dir /srv/consolebook-copies | tee doctor-gone.log
+          grep -Eq '^warn +backup copy +unreachable: /srv/consolebook-copies' doctor-gone.log
+          test ! -e /srv/consolebook-copies
 
+      # Behind a TLS proxy, the published https:// address makes sign-in
+      # cookies Secure (ADR 0025).
+      - name: Installer, public HTTPS address
+        run: |
+          sudo install/install.sh --from "dist/consolebook-linux-${{ matrix.arch }}.tar.gz" \
+            --public-url https://consolebook.example.invalid | tee public.log
+          grep -q 'sign-in cookies are Secure' public.log
+          grep -q '^CONSOLEBOOK_PUBLIC_URL=https://consolebook.example.invalid$' /etc/consolebook/consolebook.env
+          curl -fsS http://127.0.0.2:7771/api/instance | grep -q '"public_url":"https://consolebook.example.invalid"'
+          sudo journalctl -u consolebook --no-pager | grep -q 'session cookies are marked Secure'
+          sudo journalctl -u consolebook --no-pager | grep -q 'open https://consolebook.example.invalid/ in a web browser'
+          # A malformed address is refused before the running service is touched.
+          if sudo install/install.sh --from "dist/consolebook-linux-${{ matrix.arch }}.tar.gz" \
+            --public-url 'https://consolebook.example.invalid:notaport' 2>bad-url.log; then
+            echo "a malformed public URL was accepted" >&2; exit 1
+          fi
+          grep -q 'nothing was changed' bad-url.log
+          systemctl is-active consolebook
+          grep -q '^CONSOLEBOOK_PUBLIC_URL=https://consolebook.example.invalid$' /etc/consolebook/consolebook.env
+          # The printed command for a supervisor other than systemd carries it too.
+          sudo install/install.sh --from "dist/consolebook-linux-${{ matrix.arch }}.tar.gz" \
+            --no-service | tee no-service.log
+          grep -q 'CONSOLEBOOK_PUBLIC_URL=https://consolebook.example.invalid .* serve --bind' no-service.log
       # Jobs share archives through a draft release, published once all pass.
       - name: Upload to the draft release
         if: startsWith(github.ref, 'refs/tags/v')
