@@ -5,7 +5,9 @@
 //! installation, sets the current database aside as a pre-restore snapshot,
 //! moves the validated snapshot into place, and proves the result (connection
 //! invariants, integrity, instance identity) before reporting success. The
-//! restore is recorded as an audit event in the restored database.
+//! restore is recorded as an audit event in the restored database, which is
+//! then backed up: that backup is the newest, so copies off the server
+//! resume from the restored installation (#115).
 
 use std::path::{Path, PathBuf};
 
@@ -24,6 +26,9 @@ pub struct RestoreReport {
     pub restored_from: PathBuf,
     pub pre_restore_snapshot: Option<PathBuf>,
     pub installation_id: String,
+    /// The backup of the restored database, unless taking it failed. The
+    /// restore stands either way; the next scheduled backup takes one.
+    pub backup: Option<PathBuf>,
 }
 
 /// Restores `snapshot` as the installation's database.
@@ -47,7 +52,7 @@ pub async fn run(data_dir: &DataDir, snapshot: &Path) -> Result<RestoreReport> {
     // snapshot; one too damaged to snapshot must not block its own
     // replacement — its raw bytes are moved aside instead.
     let pre_restore_snapshot = if database.exists() {
-        match set_aside_current(data_dir).await {
+        match backup::set_aside_before_restore(data_dir).await {
             Ok(snapshot) => Some(snapshot),
             Err(err) => {
                 let stamp = timestamp()?;
@@ -64,7 +69,7 @@ pub async fn run(data_dir: &DataDir, snapshot: &Path) -> Result<RestoreReport> {
                 backup::persist(&aside)?;
                 tracing::warn!(
                     moved_to = %aside.display(),
-                    "current database could not be snapshotted; raw bytes moved aside"
+                    "current database could not be snapshotted ({err:#}); raw bytes moved aside"
                 );
                 Some(aside)
             }
@@ -109,10 +114,19 @@ pub async fn run(data_dir: &DataDir, snapshot: &Path) -> Result<RestoreReport> {
     audit::record(&pool, EventKind::RestoreCompleted, None, None).await?;
     pool.close().await;
 
+    let backup = match backup::run_after_restore(data_dir).await {
+        Ok(report) => Some(report.snapshot),
+        Err(err) => {
+            tracing::warn!("could not back up the restored database: {err:#}");
+            None
+        }
+    };
+
     Ok(RestoreReport {
         restored_from: snapshot.to_path_buf(),
         pre_restore_snapshot,
         installation_id,
+        backup,
     })
 }
 
@@ -122,30 +136,4 @@ fn timestamp() -> Result<String> {
             "[year][month][day]T[hour][minute][second]Z"
         ))
         .context("formatting pre-restore timestamp")
-}
-
-/// Snapshots the current database into `backups/` under a `prerestore`
-/// name, so a mistaken restore is itself recoverable.
-async fn set_aside_current(data_dir: &DataDir) -> Result<PathBuf> {
-    let stamp = timestamp()?;
-    let target = data_dir
-        .backups()
-        .join(format!("consolebook-prerestore-{stamp}.db"));
-    let pool = storage::open_existing(&data_dir.database())
-        .await
-        .context("opening current database for the pre-restore snapshot")?;
-    let target_str = target
-        .to_str()
-        .context("pre-restore path is not valid UTF-8")?;
-    sqlx::query("VACUUM INTO ?1")
-        .bind(target_str)
-        .execute(&pool)
-        .await
-        .context("taking pre-restore snapshot")?;
-    pool.close().await;
-    backup::validate_snapshot(&target)
-        .await
-        .context("pre-restore snapshot failed validation; aborting restore")?;
-    backup::persist(&target)?;
-    Ok(target)
 }

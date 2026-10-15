@@ -371,7 +371,7 @@ async fn run_backup(
     );
     println!("{}", report.snapshot.display());
     if let Some(copy_dir) = copy_dir {
-        let copy = backup_copy::copy_snapshot(&report.snapshot, copy_dir, keep)?;
+        let copy = backup_copy::copy_snapshot(&report.snapshot, copy_dir, keep).await?;
         tracing::info!(copy = %copy.copy.display(), sha256 = copy.sha256, "backup copied and verified");
         println!("{}", copy.copy.display());
     }
@@ -390,6 +390,12 @@ async fn run_restore(data_dir: &std::path::Path, snapshot: &std::path::Path) -> 
         report.restored_from.display(),
         report.installation_id
     );
+    if let Some(backup) = &report.backup {
+        eprintln!(
+            "backed up the restored database as {}; it is the copy the service sends off the server next",
+            backup.display()
+        );
+    }
     Ok(ExitCode::SUCCESS)
 }
 

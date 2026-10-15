@@ -189,6 +189,23 @@ pub async fn open_diagnostic(db_path: &Path) -> Result<SqlitePool> {
         .with_context(|| format!("opening database {} read-only", db_path.display()))
 }
 
+/// Opens a finished snapshot file read-only as `immutable`: `SQLite` takes no
+/// locks and creates no journal or WAL sidecars, so reading a copy on a
+/// network share leaves nothing behind there. Only for files nothing writes
+/// to again; a live database needs [`open_diagnostic`].
+pub async fn open_snapshot(snapshot: &Path) -> Result<SqlitePool> {
+    let options = SqliteConnectOptions::new()
+        .filename(snapshot)
+        .create_if_missing(false)
+        .read_only(true)
+        .immutable(true);
+    SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(options)
+        .await
+        .with_context(|| format!("opening snapshot {} read-only", snapshot.display()))
+}
+
 /// Reads all four PRAGMAs on one connection. Only WAL journal mode persists;
 /// the other checks describe this connection, not a running server's settings.
 pub async fn verify_invariants(pool: &SqlitePool) -> Result<Vec<InvariantCheck>> {

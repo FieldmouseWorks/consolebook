@@ -139,6 +139,7 @@ async fn the_pre_migration_backup_is_the_one_copied_off_the_server() {
     // is due, and catch-up copies the newest one, which is this snapshot.
     let share = tempfile::tempdir_in("/dev/shm").expect("these tests need /dev/shm (a tmpfs)");
     let copy = backup_copy::catch_up(&data_dir, share.path(), 14)
+        .await
         .expect("copy")
         .expect("the snapshot was not yet copied");
     assert_eq!(copy.copy.file_name(), snapshot.file_name());
@@ -410,6 +411,7 @@ async fn a_later_backup_is_newer_than_the_pre_migration_snapshot() {
     assert_eq!(names(&data_dir).last().map(String::as_str), Some(later));
     let share = tempfile::tempdir_in("/dev/shm").expect("these tests need /dev/shm (a tmpfs)");
     let copy = backup_copy::catch_up(&data_dir, share.path(), 14)
+        .await
         .expect("copy")
         .expect("the later backup was not yet copied");
     assert_eq!(

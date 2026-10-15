@@ -138,7 +138,9 @@ async fn a_copy_directory_without_the_newest_snapshot_is_behind() {
 async fn a_copy_directory_holding_the_newest_snapshot_is_current() {
     let fx = Installation::new().await;
     let share = fx.share();
-    backup_copy::copy_snapshot(&fx.snapshot, &share, 14).expect("copy");
+    backup_copy::copy_snapshot(&fx.snapshot, &share, 14)
+        .await
+        .expect("copy");
     let before = listing(&share);
     let finding = fx.copy_finding(Some(&share)).await;
     assert_eq!(finding.verdict, Verdict::Ok, "{finding:?}");

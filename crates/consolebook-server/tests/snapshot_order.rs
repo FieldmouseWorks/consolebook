@@ -71,8 +71,8 @@ fn retention_removes_the_oldest_by_time() {
     );
 }
 
-#[test]
-fn a_share_holding_only_the_set_aside_database_is_behind() {
+#[tokio::test]
+async fn a_share_holding_only_the_set_aside_database_is_behind() {
     let (tmp, data_dir) = installation();
     let other = other_filesystem(tmp.path());
     let share = other.path().join("offsite");
@@ -94,6 +94,7 @@ fn a_share_holding_only_the_set_aside_database_is_behind() {
 
     // Catching up copies the latest backup, not the database it replaced.
     let report = backup_copy::catch_up(&data_dir, &share, 14)
+        .await
         .expect("catch up")
         .expect("a copy was due");
     assert_eq!(

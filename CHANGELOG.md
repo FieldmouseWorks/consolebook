@@ -36,6 +36,14 @@ not a production-readiness statement.
 
 ### Fixed
 
+- A new server set up to replace a lost one no longer copies its own empty
+  database into the backup copy directory as the newest backup. A copy
+  directory holds one installation's backups, and copying there is refused
+  until the lost installation is restored; a restore then backs up what it
+  restored, so copies resume at once. The database a restore sets aside is
+  never copied off the server ([#115](https://github.com/FieldmouseWorks/consolebook/issues/115)).
+- Two backups or restores within the same second no longer fail or mislabel
+  the set-aside database as damaged; the second waits for a new name.
 - A phase change that waited behind another write is no longer refused as
   out of order; it is judged at the moment it can commit ([#108](https://github.com/FieldmouseWorks/consolebook/issues/108)).
 - After a restore, the set-aside database no longer counts as the newest
