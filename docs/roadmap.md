@@ -4,9 +4,9 @@ The roadmap is ordered by risk. Dates come later; fake schedules are how softwar
 
 ## Current state and next gates
 
-Release baseline: **0.2.0** (2026-10-15, tag `v0.2.0`; see the
-[changelog](../CHANGELOG.md)). 0.1.0 (2026-10-14) was the first versioned
-release. Milestones 0–4 are complete, including immutable
+Release baseline: **0.3.0** (2026-10-15, tag `v0.3.0`; see the
+[changelog](../CHANGELOG.md)). 0.2.0 (2026-10-15) added safer upgrades and
+recovery for a pilot, and 0.1.0 (2026-10-14) was the first versioned release. Milestones 0–4 are complete, including immutable
 finalized records, acknowledgments, amendments, summaries, and task signoffs
 ([Milestone 4 history](https://github.com/FieldmouseWorks/consolebook/issues/32)).
 Milestone 5 has file-verifiable [record exports](https://github.com/FieldmouseWorks/consolebook/pull/46)
@@ -17,7 +17,7 @@ and a [complete installation export](formats/installation-export.md)
 ([ADR 0028](decisions/0028-installation-export.md)) that carries everything but
 credentials.
 
-Operability as of 0.2.0:
+Operability as of 0.3.0:
 - versioned releases with a traceable build identity
   ([ADR 0022](decisions/0022-product-versioning.md)), installed by the installer
   published with each release, with build provenance
@@ -31,6 +31,9 @@ Operability as of 0.2.0:
 - verified backup copies off the server that a replacement server cannot
   bury, checked by `doctor` ([ADR 0024](decisions/0024-off-server-backup-copies.md),
   [ADR 0027](decisions/0027-backup-copy-encryption.md));
+- `doctor` reports exactly what `serve` would refuse, and only warns about
+  what the service does on its next start
+  ([ADR 0029](decisions/0029-doctor-migration-verdict.md));
 - a recorded [restore drill](restore-drill.md) and an
   [operations guide](operations.md).
 

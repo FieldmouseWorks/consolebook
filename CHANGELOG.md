@@ -10,6 +10,14 @@ not a production-readiness statement.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-15
+
+An agency can now leave with everything: a complete installation export
+carries all the installation holds except credentials, verifiable from the
+file alone. The stack moves to current versions, so **the interface now needs
+Chrome or Edge 111+, Firefox 114+, or Safari 16.4+**. **Upgrading from 0.2.0
+runs no migration**; existing data directories open unchanged.
+
 ### Added
 
 - A complete installation export: everything the installation holds except

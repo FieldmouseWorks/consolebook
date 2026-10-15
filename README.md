@@ -4,7 +4,7 @@ Consolebook is an early-stage training-record system for emergency communication
 
 Consolebook is a [Fieldmouse Works](https://github.com/FieldmouseWorks) project — open tools for closed systems.
 
-> **Status:** pre-alpha, version 0.2.0 ([changelog](CHANGELOG.md)), implemented
+> **Status:** pre-alpha, version 0.3.0 ([changelog](CHANGELOG.md)), implemented
 > through Milestone 5's export, trainee-packet, retention-policy, and hold
 > slices. The application is usable for development and evaluation, not
 > production. Do not put production or personnel data into this repository or
