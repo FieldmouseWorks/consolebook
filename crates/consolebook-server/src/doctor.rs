@@ -261,9 +261,14 @@ fn check_backups(data_dir: &DataDir, findings: &mut Vec<Finding>) {
     // Name the newest backup of this installation, not a database a restore
     // set aside, which the copy line does not count either (#115).
     let own = crate::backup::own_backups_in(&data_dir.backups()).unwrap_or_default();
-    let latest = own
-        .last()
-        .unwrap_or_else(|| snapshots.last().expect("non-empty"));
+    let Some(latest) = own.last() else {
+        findings.push(Finding::warn(
+            "backups",
+            "no backup of this installation yet, only a database a restore set aside; \
+             the server takes one automatically, or run `consolebook backup`",
+        ));
+        return;
+    };
     let latest_name = latest
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
