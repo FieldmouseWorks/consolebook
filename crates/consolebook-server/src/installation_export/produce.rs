@@ -147,7 +147,7 @@ pub async fn export_to<W: Write + Seek, F: FnOnce(ArchiveProduced)>(
             if cancelled() {
                 return Err(client_left());
             }
-            documents.push(read_document(&mut tx, table).await?);
+            documents.push(read_document(&mut tx, table, cancelled).await?);
         }
         tx.commit().await.context("ending export read")?;
         (installation_id, units, documents)
@@ -214,8 +214,15 @@ fn quoted(name: &str) -> String {
 }
 
 /// One carried table read in its specified columns and key order, mapped
-/// by the specification, and serialized as canonical JSON.
-async fn read_document(conn: &mut SqliteConnection, table: &Table) -> Result<Document> {
+/// by the specification, and serialized as canonical JSON. `cancelled` is
+/// asked for every row, as the record export's metadata pass asks it for
+/// every unit, so an abandoned export stops part way through a large table
+/// rather than holding its read transaction and export slot to the end.
+async fn read_document(
+    conn: &mut SqliteConnection,
+    table: &Table,
+    cancelled: &(dyn Fn() -> bool + Send + Sync),
+) -> Result<Document> {
     let columns: Vec<String> = table.columns.iter().map(|c| quoted(c.name)).collect();
     let key: Vec<String> = table.key.iter().map(|name| quoted(name)).collect();
     let sql = format!(
@@ -231,6 +238,9 @@ async fn read_document(conn: &mut SqliteConnection, table: &Table) -> Result<Doc
         .await
         .with_context(|| format!("reading table {}", table.name))?
     {
+        if cancelled() {
+            return Err(client_left());
+        }
         let index = out.len();
         let object = map_row(table, &row)
             .with_context(|| format!("exporting row {index} of table {}", table.name))?;

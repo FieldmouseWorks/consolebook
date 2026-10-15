@@ -191,3 +191,64 @@ async fn a_row_the_verifier_would_refuse_is_refused_at_production() {
         assert!(message.contains("subject_kind and subject_id"), "{message}");
     }
 }
+
+/// An abandoned export stops while it reads a table, not only between
+/// tables: the cancellation probe is asked for every stored row, as the
+/// record export's metadata pass asks it for every unit, and a probe that
+/// turns true part way through a table ends the export as a departed
+/// client.
+#[tokio::test]
+async fn an_abandoned_export_stops_inside_a_table() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let p = populate().await;
+    let fx = &p.fx;
+    let calls = AtomicUsize::new(0);
+    let counting = || {
+        calls.fetch_add(1, Ordering::SeqCst);
+        false
+    };
+    let (produced, sink) = installation_export::export_to(
+        &fx.pool,
+        fx.admin_id,
+        EXPORTED_AT,
+        Cursor::new(Vec::new()),
+        &counting,
+        |_| {},
+    )
+    .await
+    .expect("call");
+    produced.expect("exported");
+    let rows: i64 = manifest_of(&entries(&sink.into_inner()))
+        .tables
+        .iter()
+        .map(|table| table.rows)
+        .sum();
+    let rows = usize::try_from(rows).expect("rows");
+    let asked = calls.load(Ordering::SeqCst);
+    assert!(
+        asked >= rows,
+        "the probe was asked {asked} times for {rows} stored rows"
+    );
+
+    // Turn true half way through the rows: inside a table, after the
+    // audit and the unit list.
+    let limit = asked - rows / 2;
+    let calls = AtomicUsize::new(0);
+    let leaving = || calls.fetch_add(1, Ordering::SeqCst) >= limit;
+    let err = installation_export::export_to(
+        &fx.pool,
+        fx.admin_id,
+        EXPORTED_AT,
+        Cursor::new(Vec::new()),
+        &leaving,
+        |_| panic!("an abandoned export never starts its response"),
+    )
+    .await
+    .expect_err("the client left");
+    assert!(
+        err.chain()
+            .filter_map(|cause| cause.downcast_ref::<std::io::Error>())
+            .any(|io| io.kind() == std::io::ErrorKind::BrokenPipe),
+        "{err:#}"
+    );
+}
