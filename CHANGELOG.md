@@ -29,6 +29,11 @@ not a production-readiness statement.
   not encrypt backup copies; the install guide states what the share must
   provide.
 
+- [Operating a pilot installation](docs/operations.md): what to monitor and
+  how, the logs and their retention, reporting a problem, and what support a
+  pre-alpha pilot can expect. The release workflow runs its commands against
+  a real install.
+
 ### Fixed
 
 - A phase change that waited behind another write is no longer refused as

@@ -24,6 +24,8 @@ page walks you through the first day. Run the same command to upgrade. Give it
 backup is also copied off the server's own disk; without it, the installer and
 the administrator's home both warn until you do.
 [docs/install.md](docs/install.md) covers network access, backups, and the rest.
+[docs/operations.md](docs/operations.md) covers what to watch, the logs, and how to
+report a problem.
 
 ## Product goals
 
