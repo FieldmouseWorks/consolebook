@@ -12,7 +12,7 @@ use consolebook_server::data_dir::DataDir;
 use consolebook_server::users::{IssueRefusal, ResetOrigin};
 use consolebook_server::{http, setup, storage, users};
 
-const PASSWORD: &str = "invented-passphrase-1";
+mod support;
 
 struct Fixture {
     _tmp: tempfile::TempDir,
@@ -54,7 +54,7 @@ impl Fixture {
                 "agency_name": "Example County Communications",
                 "username": "avery.admin",
                 "display_name": "Avery Admin",
-                "password": PASSWORD,
+                "password": support::password(),
             }),
         )
         .await;
@@ -138,7 +138,7 @@ async fn setup_login_session_lifecycle() {
     let fx = Fixture::new().await;
     fx.initialized().await;
 
-    let cookie = fx.login("avery.admin", PASSWORD).await;
+    let cookie = fx.login("avery.admin", support::password()).await;
 
     let response = get(fx.app(), "/api/auth/session", Some(&cookie)).await;
     assert_eq!(response.status(), StatusCode::OK);
@@ -172,7 +172,7 @@ async fn setup_requires_valid_code() {
             "setup_code": "00000000000000000000000000000000",
             "agency_name": "Example County Communications",
             "username": "avery.admin",
-            "password": PASSWORD,
+            "password": support::password(),
         }),
     )
     .await;
@@ -188,7 +188,7 @@ async fn setup_code_is_single_use_and_setup_unrepeatable() {
         "setup_code": code,
         "agency_name": "Example County Communications",
         "username": "avery.admin",
-        "password": PASSWORD,
+        "password": support::password(),
     });
     let response = post_json(fx.app(), "/api/setup", None, request.clone()).await;
     assert_eq!(response.status(), StatusCode::CREATED);
@@ -222,7 +222,7 @@ async fn setup_rejects_expired_code() {
             "setup_code": code,
             "agency_name": "Example County Communications",
             "username": "avery.admin",
-            "password": PASSWORD,
+            "password": support::password(),
         }),
     )
     .await;
@@ -241,7 +241,7 @@ async fn setup_enforces_password_policy() {
             "setup_code": code,
             "agency_name": "Example County Communications",
             "username": "avery.admin",
-            "password": "short",
+            "password": support::too_short_password(),
         }),
     )
     .await;
@@ -255,23 +255,23 @@ async fn login_rejects_bad_password_and_unknown_user_identically() {
     let fx = Fixture::new().await;
     fx.initialized().await;
 
-    let wrong_password = post_json(
+    let wrong_attempt = post_json(
         fx.app(),
         "/api/auth/login",
         None,
-        json!({ "username": "avery.admin", "password": "wrong-password-1" }),
+        json!({ "username": "avery.admin", "password": support::wrong_password() }),
     )
     .await;
     let unknown_user = post_json(
         fx.app(),
         "/api/auth/login",
         None,
-        json!({ "username": "nobody.here", "password": "wrong-password-1" }),
+        json!({ "username": "nobody.here", "password": support::wrong_password() }),
     )
     .await;
-    assert_eq!(wrong_password.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(wrong_attempt.status(), StatusCode::UNAUTHORIZED);
     assert_eq!(unknown_user.status(), StatusCode::UNAUTHORIZED);
-    let a = body_json(wrong_password).await;
+    let a = body_json(wrong_attempt).await;
     let b = body_json(unknown_user).await;
     assert_eq!(a, b, "responses must not reveal whether the account exists");
 }
@@ -280,14 +280,14 @@ async fn login_rejects_bad_password_and_unknown_user_identically() {
 async fn login_is_case_insensitive_on_username() {
     let fx = Fixture::new().await;
     fx.initialized().await;
-    let _cookie = fx.login("AVERY.ADMIN", PASSWORD).await;
+    let _cookie = fx.login("AVERY.ADMIN", support::password()).await;
 }
 
 #[tokio::test]
 async fn expired_session_is_rejected() {
     let fx = Fixture::new().await;
     fx.initialized().await;
-    let cookie = fx.login("avery.admin", PASSWORD).await;
+    let cookie = fx.login("avery.admin", support::password()).await;
 
     sqlx::query("UPDATE session SET expires_at = 1")
         .execute(&fx.pool)
@@ -311,7 +311,7 @@ async fn garbage_session_token_is_rejected() {
 async fn admin_issued_reset_revokes_sessions_and_rotates_password() {
     let fx = Fixture::new().await;
     fx.initialized().await;
-    let admin_cookie = fx.login("avery.admin", PASSWORD).await;
+    let admin_cookie = fx.login("avery.admin", support::password()).await;
 
     let response = post_json(
         fx.app(),
@@ -324,7 +324,7 @@ async fn admin_issued_reset_revokes_sessions_and_rotates_password() {
     let body = body_json(response).await;
     let reset_code = body["reset_code"].as_str().expect("code").to_string();
 
-    let new_password = "rotated-passphrase-2";
+    let new_password = support::fresh_password();
     let response = post_json(
         fx.app(),
         "/api/auth/reset",
@@ -345,11 +345,11 @@ async fn admin_issued_reset_revokes_sessions_and_rotates_password() {
         fx.app(),
         "/api/auth/login",
         None,
-        json!({ "username": "avery.admin", "password": PASSWORD }),
+        json!({ "username": "avery.admin", "password": support::password() }),
     )
     .await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    let _cookie = fx.login("avery.admin", new_password).await;
+    let _cookie = fx.login("avery.admin", &new_password).await;
 
     // The code is single-use.
     let response = post_json(
@@ -359,7 +359,7 @@ async fn admin_issued_reset_revokes_sessions_and_rotates_password() {
         json!({
             "username": "avery.admin",
             "reset_code": reset_code,
-            "new_password": "another-passphrase-3",
+            "new_password": support::fresh_password(),
         }),
     )
     .await;
@@ -373,14 +373,14 @@ async fn issuing_reset_codes_requires_manage_users() {
 
     // A user with no capabilities (created directly; user management API is
     // a later slice).
-    let hash = consolebook_server::secrets::hash_password(PASSWORD).expect("hash");
+    let hash = consolebook_server::secrets::hash_password(support::password()).expect("hash");
     let mut conn = fx.pool.acquire().await.expect("conn");
     users::create(&mut conn, "taylor.trainee", "Taylor Trainee", "", "", &hash)
         .await
         .expect("create user");
     drop(conn);
 
-    let cookie = fx.login("taylor.trainee", PASSWORD).await;
+    let cookie = fx.login("taylor.trainee", support::password()).await;
     let response = post_json(
         fx.app(),
         "/api/auth/reset-codes",
@@ -421,7 +421,7 @@ async fn expired_reset_code_is_refused() {
         &fx.pool,
         "avery.admin",
         &issued.code.raw,
-        "rotated-passphrase-2",
+        &support::fresh_password(),
     )
     .await
     .expect("use");
@@ -439,16 +439,12 @@ async fn recovery_rescues_an_administrator_without_credentials() {
         .await
         .expect("recover")
         .expect("issued");
-    let outcome = users::use_reset_code(
-        &fx.pool,
-        "avery.admin",
-        &issued.code.raw,
-        "recovered-passphrase-4",
-    )
-    .await
-    .expect("use");
+    let recovered = support::fresh_password();
+    let outcome = users::use_reset_code(&fx.pool, "avery.admin", &issued.code.raw, &recovered)
+        .await
+        .expect("use");
     assert_eq!(outcome, users::ResetOutcome::Done);
-    let _cookie = fx.login("avery.admin", "recovered-passphrase-4").await;
+    let _cookie = fx.login("avery.admin", &recovered).await;
 
     // The recovery is on the audit record.
     let kinds: Vec<String> = sqlx::query_scalar("SELECT kind FROM audit_event ORDER BY id")
@@ -462,7 +458,7 @@ async fn recovery_rescues_an_administrator_without_credentials() {
 async fn recovery_refuses_non_administrators_and_unknown_users() {
     let fx = Fixture::new().await;
     fx.initialized().await;
-    let hash = consolebook_server::secrets::hash_password(PASSWORD).expect("hash");
+    let hash = consolebook_server::secrets::hash_password(support::password()).expect("hash");
     let mut conn = fx.pool.acquire().await.expect("conn");
     users::create(&mut conn, "taylor.trainee", "Taylor Trainee", "", "", &hash)
         .await

@@ -14,6 +14,8 @@ use tower::ServiceExt;
 use consolebook_server::data_dir::DataDir;
 use consolebook_server::{http, setup, storage, web_assets};
 
+mod support;
+
 async fn app() -> (tempfile::TempDir, axum::Router, sqlx::SqlitePool) {
     let tmp = tempfile::tempdir().expect("create temp dir");
     let data_dir = DataDir::new(tmp.path().join("data"));
@@ -100,7 +102,7 @@ async fn instance_reports_initialization_state() {
         "Example County Communications",
         "avery.admin",
         "Avery Admin",
-        "invented-passphrase-1",
+        support::password(),
     )
     .await
     .expect("initialize")

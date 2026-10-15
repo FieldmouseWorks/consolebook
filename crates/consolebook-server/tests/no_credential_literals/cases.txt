@@ -1,0 +1,345 @@
+Synthetic sources for tests/no_credential_literals.rs. Data, not code:
+the guard scans only .rs files. Every value here is invented.
+Case lines: "=== <id> findings [Shape:subject:line,...]" (exactly these;
+none means clean), "=== <id> missed <not-caught item>", "=== <id> robust".
+FN*, FP*, and R* cases are the independent review's probes for #126;
+FP* cases that expect findings are the documented fail-closed set.
+
+=== own-const findings Binding:PASSWORD:1
+const PASSWORD: &str = "x";
+=== own-static findings Binding:ADMIN_SECRET:1
+static ADMIN_SECRET: &str = "x";
+=== own-let findings Binding:new_password:1
+let new_password = "x";
+=== own-let-mut-chain findings Binding:passphrase:1
+let mut passphrase: String = "x".to_owned();
+=== own-string-from findings Binding:password:1
+let password = String::from("x");
+=== own-raw-hash findings Binding:PASSWORD:1
+const PASSWORD: &str = r#"x"#;
+=== own-raw findings Binding:password:1
+let password = r"x";
+=== own-char-quotes findings Binding:password:1
+let q = '"'; let e = '\''; let password = "x";
+=== own-field findings Field:password:1
+Login { password: "x" }
+=== own-json findings JsonKey:password:1
+json!({ "password": "x" })
+=== own-json-new findings JsonKey:new_password:1
+json!({ "new_password": "x" })
+=== own-json-raw findings JsonKey:current_password:1
+json!({ "current_password": r#"x"# })
+=== own-embedded findings EmbeddedJson:password:1
+let body = "{\"password\":\"x\"}";
+=== own-hash findings Call:hash_password:1
+secrets::hash_password("x")
+=== own-verify findings Call:verify_password:1
+secrets::verify_password("x", &phc)
+=== own-login findings Call:login:1
+fx.login("avery.admin", "x")
+=== own-sign-in findings Call:sign_in:1
+support::sign_in(app, "avery.admin", &"x".to_owned())
+=== own-reset findings Call:use_reset_code:1
+users::use_reset_code(&pool, "a", &code, "x")
+=== own-initialize findings Call:initialize:1
+setup::initialize(&p, &c, "A", "a", "A", r"x",)
+=== own-multiline findings Binding:PASSWORD:6
+let a = "one
+two";
+/* " */
+let b = r#"""#;
+const PASSWORD: &str =
+    "x";
+=== FN01 missed non-sensitive names
+let creds = ("avery.admin", "pw-literal-1234");
+let cookie = login(app, creds.0, creds.1).await;
+=== FN01b missed destructuring
+let (username, password) = ("avery.admin", "pw-literal-1234");
+=== FN02a missed values built by a macro
+let body = serde_json::json!({ "password": format!("x") });
+=== FN02b findings JsonKey:password:1
+let body = serde_json::json!({ "password": "pw-literal-1234" });
+=== FN03 findings KeyPair:password:1
+client.post(url).form(&[("username", "a"), ("password", "lit")]);
+=== FN04a findings Binding:bad_passwords:1
+let bad_passwords = vec!["short", "alllowercase"];
+=== FN04b findings Binding:bad_passwords:1
+let bad_passwords = ["short", "alllowercase"];
+=== FN04c missed non-sensitive names
+for candidate in ["short", "alllowercase"] { check_password_policy(candidate); }
+=== FN04d missed non-sensitive names
+let accounts = [("avery.admin", "pw-literal-1234"), ("casey", "pw-two")];
+=== FN05a findings Binding:password:1
+let password = concat!("pw-", "literal");
+=== FN05b missed values built by a macro
+login(app, "avery.admin", concat!("pw", "1")).await;
+=== FN06 findings Binding:password:1
+let password = &*"pw-literal-1234".to_string();
+=== FN06b findings Binding:password:1
+let password = ("pw-literal-1234");
+=== FN06c findings Binding:password:1
+let password = Some("pw-literal-1234");
+=== FN06d missed Some in a field
+Credentials { username: "a", password: Some("pw-literal") }
+=== FN06e findings Binding:password:1
+let password: String = Into::into("pw-literal-1234");
+=== FN07 findings Binding:password:1
+let password = match role { Role::Admin => "pw-admin-1234", _ => "pw-other-1234" };
+=== FN07b findings Binding:password:1
+let password = if admin { "pw-admin-1234" } else { "pw-other-1234" };
+=== FN08a findings JsonKey:password:4
+let body = json!({
+    "username": "avery.admin",
+    "password":
+        "pw-literal-1234",
+});
+=== FN08b findings Call:login:4
+let cookie = support::login(
+    app.clone(),
+    "avery.admin",
+    "pw-literal-1234",
+)
+.await;
+=== FN09a findings Call:login:1
+let cookie = login!(app, "avery.admin", "pw-literal-1234");
+=== FN09b findings Call:hash_password:1
+let hash = hash_password!("pw-literal-1234");
+=== FN09c findings Call:login:1
+let cookie = login::<Json>(app, "avery.admin", "pw-literal-1234").await;
+=== FN11 findings EmbeddedJson:password:1
+let body = r##"{"username":"a","password":"p"#w"}"##;
+=== FN12a findings EmbeddedJson:password:1
+let body = "{\"username\":\"a\",\"password\":\"pw-literal\"}";
+=== FN12b missed double-escaped JSON
+let body = "{\\\"password\\\":\\\"pw\\\"}";
+=== FN12c findings EmbeddedJson:password:1
+let body = "{ \"password\" : \"pw-literal\" }";
+=== FN13a findings Binding:password:1
+let password = b"pw-literal-1234";
+=== FN13b findings EmbeddedJson:password:1
+let body = Body::from(&b"{\"password\":\"pw\"}"[..]);
+=== FN13c findings Call:hash_password:1
+hash_password(b"pw-literal");
+=== FN14a missed non-English or fullwidth names
+let contraseña = "pw-literal-1234";
+=== FN14b findings Binding:password:1
+let password = "pässwörd-литерал";
+=== FN14c missed non-English or fullwidth names
+let body = json!({ "ｐａｓｓｗｏｒｄ": "x" });
+=== FN15 missed username variable beside a literal password
+let username = "avery.admin";
+login(app, username, "pw-literal-1234").await;
+=== FN16 missed brace-led JSON value
+let body = r#"{"password":"{not-a-format}"}"#;
+=== FN17 missed index assignment
+body["password"] = "pw-literal-1234".into();
+=== FN18 findings KeyPair:password:1
+map.insert("password", "pw-literal-1234");
+=== FN19 missed reassignment
+let mut password = String::new();
+password = "pw-literal-1234".to_owned();
+=== FN20 missed non-sensitive names
+const ADMIN_PW: &str = "pw-literal-1234";
+=== FN21 missed non-sensitive names
+let pwd = "pw-literal-1234"; let pass = "x"; let creds = "x"; let token = "x";
+=== FN22 findings Binding:password:1
+let password = format!("pw-{}", 1);
+=== FN23 missed constructors and other helpers
+LoginRequest::new("avery.admin", "pw-literal-1234")
+=== FN24 findings Binding:PASSWORD:1
+#[cfg(test)] mod tests { const PASSWORD: &str = "x"; }
+=== FN26 findings EmbeddedJson:password:1
+format!(r#"{{"password":"pw-{}"}}"#, 1)
+=== FN27 findings Binding:PASSWORDS:1
+static PASSWORDS: &[&str] = &["a", "b"];
+=== FN28 findings Binding:password:1
+let password: &'static str = "pw";
+=== FN29 findings Binding:password:1
+let password = c"pw-literal";
+=== FN30 findings Field:password:1
+Login { password: &"pw" }
+=== FN31 findings Binding:password:1
+let password = || "pw-literal";
+=== FN10 findings Binding:password:1
+let password = include_str!("fixtures/password.txt");
+=== FN10b missed included file contents
+let cookie = hash_password(include_str!("fixtures/creds.txt"));
+=== FN25a findings Call:signIn:1
+signIn(app, "a", "b");
+=== FN25b missed constructors and other helpers
+SignIn::new("a","b");
+=== FN25c findings Call:log_in:1
+log_in(app, "a", "b");
+=== FN25d findings Call:authenticate:1
+authenticate(app, "a", "b");
+=== FP01 findings
+let username = "avery.admin"; login(app, username, support::password()).await;
+=== FP02 findings
+sqlx::query("SELECT password_hash FROM user WHERE username = ?").bind("avery.admin");
+=== FP03 findings Binding:PASSWORD_HASH_COLUMN:1
+const PASSWORD_HASH_COLUMN: &str = "password_hash";
+=== FP04 findings Binding:password_error:1
+let password_error = "password must be at least 12 bytes";
+=== FP05 findings
+assert_eq!(body["error"], "password_too_short");
+=== FP06 findings
+let body = json!({ "username": "a", "password": null });
+=== FP07 findings
+let body = json!({ "username": "a", "password": "" });
+=== FP08 findings JsonKey:password:1
+let body = json!({ "password": "<redacted>" });
+=== FP09 findings
+assert!(html.contains("Password"));
+=== FP10 findings
+Field { label: "Password", name: "password" }
+=== FP11 findings
+/// The `password: "x"` shape is forbidden; `let password = "x"` too.
+fn f() {}
+=== FP12 findings
+assert!(!body.contains("\"password\":\""));
+=== FP13 findings
+assert!(!export.contains(r#""password":""#));
+=== FP14 findings
+let body = json!({ "must_change_password": true });
+=== FP15 findings JsonKey:password_policy:1
+let body = json!({ "password_policy": "length" });
+=== FP16 findings Binding:secret_kind:1
+let secret_kind = "reset_code";
+=== FP17 findings Call:get_login_page:1
+let response = get_login_page(&addr, "/login", "text/html").await;
+=== FP18 findings Call:initialize:1
+let x = config.initialize("agency-a", "America/Chicago");
+=== FP19 findings
+let s = secrets::SecretString::from(code);
+=== FP20 findings
+assert_eq!(err.to_string(), "password: too short");
+=== FP21 findings Field:password_message:1
+Expected { password_message: "Enter your password" }
+=== FP22 findings EmbeddedJson:password:1
+assert!(log.contains("\"password\":\"[REDACTED]\""));
+=== FP23 findings Binding:secrets_dir:1
+let secrets_dir = "secrets";
+=== FP24 findings Call:post_sign_in:1
+let response = post_sign_in(&addr, "/api/auth/login", "{}").await;
+=== FP25 findings
+match key { "password" => {}, _ => {} }
+=== FP26 findings EmbeddedJson:password:1
+#[doc = "{\"password\":\"x\"}"]
+=== FP27 findings
+let body = format!("{{\"password\":\"{}\"}}", support::password());
+=== closed-response findings Binding:wrong_password:1
+let wrong_password = post_json(app, "/api/auth/login", None, body).await;
+=== allowed-01 findings
+const PASSWORD_MIN: usize = 12;
+=== allowed-02 findings
+let password = support::password();
+=== allowed-03 findings
+static PASSWORD: OnceLock<String> = OnceLock::new();
+=== allowed-04 findings
+let wrong = support::wrong_password();
+=== allowed-05 findings
+let fresh = support::fresh_password();
+=== allowed-06 findings
+fn login(&self, username: &str, password: &str) -> String { todo!() }
+=== allowed-07 findings
+fx.login("avery.admin", support::password()).await;
+=== allowed-08 findings
+fx.login("casey.api").await;
+=== allowed-09 findings
+live_login(&addr, "avery.admin").await;
+=== allowed-10 findings
+secrets::hash_password(support::password()).expect("hash");
+=== allowed-11 findings
+let secret = text.into_iter().collect();
+=== allowed-12 findings
+sqlx::query("SELECT password_hash FROM user");
+=== allowed-13 findings
+("user.password_hash", "credential")
+=== allowed-14 findings
+("password_reset_code", "credential")
+=== allowed-15 findings
+format!(r#"{{"username":"{u}","password":"{}"}}"#, support::password())
+=== allowed-16 findings
+// const PASSWORD: &str = "in a comment";
+=== allowed-17 findings
+/* let password = "in a block comment"; */
+=== allowed-18 findings
+json!({ "password": support::password() })
+=== allowed-19 findings
+json!({"username": "jordan.trainee", "password": ""})
+=== allowed-20 findings
+let password = "";
+=== allowed-21 findings
+Login { password: "" }
+=== allowed-22 findings
+form(&[("password", "")])
+=== allowed-23 findings
+assert!(!body.contains("\"password\":\""));
+=== allowed-24 findings
+let near_miss = format!("{prefix}{}", last);
+=== allowed-25 findings
+const WORDS: [&str; 3] = ["password", "passphrase", "secret"];
+=== allowed-26 findings
+assert_eq!(field, "password", "the form names its field");
+=== R01 findings Binding:password:4
+// a
+// b
+let x = 1;
+let password = "pw";
+=== R02 findings Binding:password:2
+/* outer /* inner " */ still comment " */
+let password = "pw";
+=== R03 findings Binding:password:2
+/* /* */ let password = "hidden"; */
+let password = "pw";
+=== R04 findings Binding:password:2
+fn f<'a>(x: &'a str) -> &'a str { x }
+let password = "pw";
+=== R05 findings Binding:password:5
+let q = '"';
+let e = '\'';
+let b = b'"';
+let u = '\u{22}';
+let password = "pw";
+=== R06 findings Binding:password:2
+let s = r###"a"##"b"#"###;
+let password = "pw";
+=== R07 findings Binding:password:2
+let s = "\\";
+let password = "pw";
+=== R08 findings Binding:password:2
+let url = "http://x/*y";
+let password = "pw";
+=== R09 findings Binding:password:3
+/** let password = "doc"; */
+//! let password = "inner doc";
+let password = "pw";
+=== R10 findings Binding:password:1
+let password = r#"pw
+=== R11 robust
+let s = "abc
+let password = "pw";
+=== R12 findings Binding:password:2
+assert_eq!(c, '\\');
+let password = "pw";
+=== R13 findings Binding:password:2
+'outer: loop { break 'outer; }
+let password = "pw";
+=== R14 findings Binding:password:1
+let r#password = "pw";
+=== R15 findings Binding:password:2
+let s = "é中😀";
+let password = "pw";
+=== R16 robust
+let body = r#"a "# ";
+let password = "pw";
+=== R17 findings Binding:password:3
+struct S<'a>(&'a str);
+impl<'a> S<'a> { fn f(&self) -> char { 'a' } }
+let password = "pw";
+=== R18 robust
+let s = "abc\
+=== R19 robust
+'
+=== R20 robust
+// alet password = "pw";

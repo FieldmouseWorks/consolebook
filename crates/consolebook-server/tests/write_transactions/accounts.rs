@@ -90,8 +90,18 @@ async fn reset_code_is_consumed_once_and_revokes_sessions() {
         .0;
     let (left, right) = contend(
         &fx.pool,
-        users::use_reset_code(&fx.pool, "taylor.trainee", &issued.code.raw, PASSWORD),
-        users::use_reset_code(&fx.pool, "taylor.trainee", &issued.code.raw, PASSWORD),
+        users::use_reset_code(
+            &fx.pool,
+            "taylor.trainee",
+            &issued.code.raw,
+            support::password(),
+        ),
+        users::use_reset_code(
+            &fx.pool,
+            "taylor.trainee",
+            &issued.code.raw,
+            support::password(),
+        ),
     )
     .await;
     let outcomes = (left.expect("left"), right.expect("right"));
@@ -135,7 +145,7 @@ async fn setup_has_one_administrator_and_consumes_its_code_once() {
                 "Invented County",
                 "avery.admin",
                 "Avery Admin",
-                PASSWORD,
+                support::password(),
             ),
             setup::initialize(
                 &fx.pool,
@@ -143,7 +153,7 @@ async fn setup_has_one_administrator_and_consumes_its_code_once() {
                 "Invented County",
                 "rowan.admin",
                 "Rowan Admin",
-                PASSWORD,
+                support::password(),
             ),
         )
         .await,
@@ -179,7 +189,7 @@ async fn setup_code_rotation_serializes_with_initialization() {
             "Invented County",
             "avery.admin",
             "Avery Admin",
-            PASSWORD,
+            support::password(),
         ),
         setup::issue_setup_code(&fx.pool),
     )
@@ -193,7 +203,7 @@ async fn setup_code_rotation_serializes_with_initialization() {
                 "Invented County",
                 "avery.admin",
                 "Avery Admin",
-                PASSWORD,
+                support::password(),
             )
             .await
             .expect("call")

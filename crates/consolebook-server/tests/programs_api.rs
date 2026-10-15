@@ -3,14 +3,14 @@
 //! the wire. Every fixture is invented.
 
 use axum::body::Body;
-use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE, COOKIE, SET_COOKIE};
+use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE, COOKIE};
 use axum::http::{Request, StatusCode};
 use consolebook_server::data_dir::DataDir;
 use consolebook_server::{http, secrets, setup, storage, users};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 
-const PASSWORD: &str = "invented-passphrase-1";
+mod support;
 
 struct Fixture {
     _tmp: tempfile::TempDir,
@@ -34,7 +34,7 @@ impl Fixture {
             "Example County Communications",
             "avery.admin",
             "Avery Admin",
-            PASSWORD,
+            support::password(),
         )
         .await
         .expect("initialize")
@@ -48,7 +48,7 @@ impl Fixture {
 
     /// Creates a user with no capability grants who can sign in.
     async fn create_plain_user(&self) {
-        let hash = secrets::hash_password(PASSWORD).expect("hash");
+        let hash = secrets::hash_password(support::password()).expect("hash");
         let mut conn = self.pool.acquire().await.expect("conn");
         users::create(&mut conn, "jordan.trainer", "Jordan Trainer", "", "", &hash)
             .await
@@ -56,30 +56,7 @@ impl Fixture {
     }
 
     async fn login(&self, username: &str) -> String {
-        let response = self
-            .app()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/auth/login")
-                    .header(CONTENT_TYPE, "application/json")
-                    .body(Body::from(
-                        serde_json::json!({ "username": username, "password": PASSWORD })
-                            .to_string(),
-                    ))
-                    .expect("request"),
-            )
-            .await
-            .expect("response");
-        assert_eq!(response.status(), StatusCode::OK);
-        let cookie = response
-            .headers()
-            .get(SET_COOKIE)
-            .expect("cookie")
-            .to_str()
-            .expect("ascii");
-        let (pair, _) = cookie.split_once(';').expect("attrs");
-        pair.split_once('=').expect("pair").1.to_string()
+        support::login(self.app(), username, support::password()).await
     }
 }
 

@@ -10,7 +10,7 @@ use tower::ServiceExt;
 use consolebook_server::public_url::PublicUrl;
 use consolebook_server::{http, setup, storage};
 
-const PASSWORD: &str = "invented-passphrase-1";
+mod support;
 
 async fn initialized_pool() -> (tempfile::TempDir, sqlx::SqlitePool) {
     let tmp = tempfile::tempdir().expect("temp dir");
@@ -28,7 +28,7 @@ async fn initialized_pool() -> (tempfile::TempDir, sqlx::SqlitePool) {
         "Example County Communications",
         "avery.admin",
         "Avery Admin",
-        PASSWORD,
+        support::password(),
     )
     .await
     .expect("initialize")
@@ -47,7 +47,7 @@ async fn cookie_headers(state: http::AppState) -> (String, String) {
                 .uri("/api/auth/login")
                 .header(CONTENT_TYPE, "application/json")
                 .body(Body::from(
-                    serde_json::json!({ "username": "avery.admin", "password": PASSWORD })
+                    serde_json::json!({ "username": "avery.admin", "password": support::password() })
                         .to_string(),
                 ))
                 .expect("request"),

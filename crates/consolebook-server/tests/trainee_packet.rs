@@ -10,7 +10,7 @@ use std::io::{Cursor, Read, Write};
 use std::time::Duration;
 
 use axum::body::Body;
-use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE, COOKIE, SET_COOKIE};
+use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE, COOKIE};
 use axum::http::{HeaderMap, Request, StatusCode};
 use consolebook_server::acknowledgments::{self, AckKind, TraineeAckKind};
 use consolebook_server::capabilities::RoleBundle;
@@ -30,7 +30,7 @@ use consolebook_server::trainee_packet::{
 use consolebook_server::training_sessions::{self, Disposition, SessionInput};
 use consolebook_server::{
     amendments, assignments, canonical, data_dir::DataDir, enrollments, evaluation_drafts,
-    finalization, setup, storage, users,
+    finalization, setup, storage,
 };
 use http_body_util::BodyExt;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
@@ -40,7 +40,7 @@ use zip::write::{SimpleFileOptions, ZipWriter};
 #[path = "trainee_packet/pin_history.rs"]
 mod pin_history;
 
-const PASSWORD: &str = "invented-passphrase-1";
+mod support;
 
 /// 2026-09-01T19:00:00Z.
 const EXPORTED_AT: i64 = 1_788_289_200;
@@ -74,7 +74,7 @@ impl Fixture {
             "Example County Communications",
             "avery.admin",
             "Avery Admin",
-            PASSWORD,
+            support::password(),
         )
         .await
         .expect("initialize")
@@ -91,34 +91,11 @@ impl Fixture {
     }
 
     async fn login(&self, username: &str) -> String {
-        let response = self
-            .app()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/auth/login")
-                    .header(CONTENT_TYPE, "application/json")
-                    .body(Body::from(
-                        serde_json::json!({ "username": username, "password": PASSWORD })
-                            .to_string(),
-                    ))
-                    .expect("request"),
-            )
-            .await
-            .expect("response");
-        assert_eq!(response.status(), StatusCode::OK, "login {username}");
-        let cookie = response
-            .headers()
-            .get(SET_COOKIE)
-            .expect("cookie")
-            .to_str()
-            .expect("ascii");
-        let (pair, _) = cookie.split_once(';').expect("attrs");
-        pair.split_once('=').expect("pair").1.to_string()
+        support::login(self.app(), username, support::password()).await
     }
 
     async fn user_with_role(&self, username: &str, display_name: &str, role: RoleBundle) -> i64 {
-        let created = users::create_with_reset_code(
+        support::user_with_role(
             &self.pool,
             self.admin_id,
             username,
@@ -128,15 +105,6 @@ impl Fixture {
             role,
         )
         .await
-        .expect("create")
-        .expect("accepted");
-        assert_eq!(
-            users::use_reset_code(&self.pool, username, &created.reset_code.raw, PASSWORD)
-                .await
-                .expect("reset"),
-            users::ResetOutcome::Done
-        );
-        created.id
     }
 
     async fn audit_count(&self, kind: &str) -> i64 {
