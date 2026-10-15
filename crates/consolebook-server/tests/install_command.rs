@@ -59,3 +59,19 @@ fn install_commands_fetch_the_released_installer() {
     let readme = std::fs::read_to_string(root.join("README.md")).expect("README");
     assert!(readme.contains(FROM_RELEASE), "the README leads with it");
 }
+
+/// The release workflow stamps the published installer by replacing this
+/// exact line; if it changed, the stamp would silently miss and the
+/// installer from `releases/latest` would fetch whatever release is latest
+/// at that moment, not its own.
+#[test]
+fn the_installer_carries_the_line_the_release_stamps() {
+    let script =
+        std::fs::read_to_string(repository().join("install/install.sh")).expect("install.sh");
+    let lines = script
+        .lines()
+        .filter(|line| line.starts_with("RELEASED_VERSION="))
+        .collect::<Vec<_>>();
+    assert_eq!(lines, [r#"RELEASED_VERSION="""#]);
+    assert!(script.contains(r#"version="$RELEASED_VERSION""#));
+}

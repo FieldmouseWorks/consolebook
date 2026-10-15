@@ -28,6 +28,11 @@
 set -eu
 
 REPO="FieldmouseWorks/consolebook"
+# The release workflow stamps the installer it publishes with that release's
+# version, so the installer fetched from releases/latest installs the
+# archives it shipped with, even if a newer release appears in between
+# (ADR 0026). Empty here: the latest release.
+RELEASED_VERSION=""
 BIN=/usr/local/bin/consolebook
 DEFAULT_DATA=/var/lib/consolebook
 ETC=/etc/consolebook
@@ -38,7 +43,7 @@ DROPIN="$DROPIN_DIR/paths.conf"
 ACCOUNT=consolebook
 DEFAULT_LISTEN=127.0.0.1:7770
 
-version=""
+version="$RELEASED_VERSION"
 from=""
 listen=""
 public_url=""

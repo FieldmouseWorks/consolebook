@@ -211,7 +211,9 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
-          subject-path: dist/consolebook-linux-${{ matrix.arch }}.tar.gz
+          subject-path: |
+            dist/consolebook-linux-${{ matrix.arch }}.tar.gz
+            dist/consolebook-linux-${{ matrix.arch }}.tar.gz.sha256
     permissions:
       contents: write
       id-token: write
@@ -236,13 +238,19 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cp install/install.sh install.sh
+          # Stamped with this release, so the installer fetched through
+          # releases/latest installs its own release's archives.
+          sed 's/^RELEASED_VERSION=""$/RELEASED_VERSION="'"${GITHUB_REF_NAME#v}"'"/' \
+            install/install.sh > install.sh
+          grep -qx "RELEASED_VERSION=\"${GITHUB_REF_NAME#v}\"" install.sh
           sha256sum install.sh > install.sh.sha256
           gh release upload "$GITHUB_REF_NAME" --clobber install.sh install.sh.sha256
       - name: Attest installer provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
-          subject-path: install.sh
+          subject-path: |
+            install.sh
+            install.sh.sha256
       - name: Notes from the changelog, then publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

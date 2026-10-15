@@ -28,10 +28,13 @@ The options for origin evidence were:
   documented command fetches
   `https://github.com/FieldmouseWorks/consolebook/releases/latest/download/install.sh`,
   so it runs the reviewed script that was released with the archives it
-  installs. A test fails if any document, the interface, or a workflow
-  points the command at `main` again.
+  installs. The published copy is stamped with its release's version, so
+  it fetches that release's archives even if a newer release appears
+  between the two downloads. A test fails if any document, the interface,
+  or a workflow points the command at `main` again, or if the line the
+  release stamps changes.
 - **Every release asset carries build provenance.** The release workflow
-  attests each archive and the installer with
+  attests each archive, the installer, and their `.sha256` files with
   `actions/attest-build-provenance`. Anyone can check an asset's origin with
   `gh attestation verify <file> -R FieldmouseWorks/consolebook`.
 - **No long-lived signing key for now.** Provenance gives origin evidence
