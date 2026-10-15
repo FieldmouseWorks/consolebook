@@ -40,7 +40,13 @@ cleanup() {  # never leave a server or the tmpfs copy directory behind
   if [[ -n $COPY ]]; then rm -rf "$COPY"; fi
 }
 trap cleanup EXIT
-rm -rf "$WORK"; mkdir -p "$WORK"
+# WORK must be new or empty: the drill writes there and never deletes
+# anything it did not create.
+if [[ -e $WORK && -n $(ls -A "$WORK") ]]; then
+  echo "refusing to use $WORK: it is not empty (give a new directory)" >&2
+  exit 2
+fi
+mkdir -p "$WORK"
 COPY=$(mktemp -d /dev/shm/consolebook-drill-copy.XXXXXX)
 echo "copy directory: $COPY (filesystem $(stat -f -c %T "$COPY")); data on $(stat -f -c %T "$WORK")"
 
@@ -76,6 +82,7 @@ test ! -e "$WORK/hostA" && echo "host A is gone; only the copy directory and the
 # Host A's newest copy, recorded before host B can add anything, for the
 # diagnostic fallback if the guide's "restore the newest copy" fails.
 A_NEWEST=$(printf '%s\n' "$COPY"/consolebook-2*.db | sort | tail -1)
+A_LISTING=$(ls "$COPY")
 
 # A real replacement starts long after the last backup; snapshot names carry
 # the second, so keep host B's first backup from sharing host A's last name.
@@ -97,6 +104,14 @@ step "host B: stop the service"
 stop $PID
 grep -E 'backup|cop(y|ied)' "$WORK/hostB-1.log" || true
 ls -l --time-style=+%H:%M:%S "$COPY"
+# The protection the guide relies on: the new server refuses to copy into a
+# directory holding another installation's backups, and adds nothing there.
+if grep -q 'holds the backups of installation' "$WORK/hostB-1.log" && [[ $(ls "$COPY") == "$A_LISTING" ]]; then
+  REFUSAL_OK=1
+else
+  REFUSAL_OK=0
+  echo "SURPRISE: the new server did not refuse to copy over host A's backups"
+fi
 
 # Scheduled backups only (consolebook-<stamp>.db), newest last by name.
 NEWEST=$(printf '%s\n' "$COPY"/consolebook-2*.db | sort | tail -1)
@@ -154,6 +169,10 @@ for side in before after; do
 done
 if [[ $RESTORED_OK == 0 ]]; then
   step "DRILL FAILED: restoring the newest copy, as the install guide says, did not bring the records back"
+  exit 1
+fi
+if [[ $REFUSAL_OK == 0 ]]; then
+  step "DRILL FAILED: the new server did not refuse to copy into host A's copy directory"
   exit 1
 fi
 if [[ $DOCTOR_OK == 0 ]]; then
