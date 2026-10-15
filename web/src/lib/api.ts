@@ -11,6 +11,8 @@ export interface Instance {
 	/** Source commit of the running build (ADR 0022), or `unknown`. */
 	commit: string;
 	agency: string | null;
+	/** The address people should use, when the operator set one (ADR 0025). */
+	public_url: string | null;
 }
 
 export interface SessionUser {

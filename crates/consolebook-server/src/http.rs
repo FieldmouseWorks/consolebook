@@ -45,6 +45,9 @@ pub struct AppState {
     /// How this server takes and copies backups, for the health read; absent
     /// for a state built without a data directory (most tests).
     pub backups: Option<std::sync::Arc<crate::backup_copy::BackupSettings>>,
+    /// The address people use to reach this installation (ADR 0025); an
+    /// `https://` address marks session cookies `Secure`.
+    pub public_url: Option<std::sync::Arc<crate::public_url::PublicUrl>>,
 }
 
 impl AppState {
@@ -57,6 +60,7 @@ impl AppState {
                 crate::exports_http::EXPORT_SLOTS,
             )),
             backups: None,
+            public_url: None,
         }
     }
 
@@ -65,6 +69,18 @@ impl AppState {
     pub fn with_backups(mut self, settings: crate::backup_copy::BackupSettings) -> Self {
         self.backups = Some(std::sync::Arc::new(settings));
         self
+    }
+
+    /// Records the address people use; see [`crate::public_url`].
+    #[must_use]
+    pub fn with_public_url(mut self, url: crate::public_url::PublicUrl) -> Self {
+        self.public_url = Some(std::sync::Arc::new(url));
+        self
+    }
+
+    /// Whether session cookies carry `Secure` (an `https://` public URL).
+    fn secure_cookies(&self) -> bool {
+        self.public_url.as_ref().is_some_and(|url| url.is_secure())
     }
 }
 
@@ -198,19 +214,21 @@ impl FromRequestParts<AppState> for CurrentUser {
     }
 }
 
-fn session_cookie(token: String) -> Cookie<'static> {
+fn session_cookie(token: String, secure: bool) -> Cookie<'static> {
     Cookie::build((SESSION_COOKIE, token))
         .path("/")
         .http_only(true)
+        .secure(secure)
         .same_site(SameSite::Strict)
         .max_age(time::Duration::seconds(sessions::SESSION_TTL_SECONDS))
         .build()
 }
 
-fn removal_cookie() -> Cookie<'static> {
+fn removal_cookie(secure: bool) -> Cookie<'static> {
     Cookie::build((SESSION_COOKIE, ""))
         .path("/")
         .http_only(true)
+        .secure(secure)
         .same_site(SameSite::Strict)
         .max_age(time::Duration::ZERO)
         .build()
@@ -252,10 +270,14 @@ struct Instance {
     version: &'static str,
     commit: &'static str,
     agency: Option<String>,
+    /// The address people should use, when the operator set one; the
+    /// sign-in page points elsewhere-reached browsers to it.
+    public_url: Option<String>,
 }
 
 /// Unauthenticated installation facts the web shell needs to route:
-/// whether setup has run, the running version and commit, and the agency name.
+/// whether setup has run, the running version and commit, the agency name,
+/// and the public URL when the operator set one.
 async fn instance(State(state): State<AppState>) -> Result<Json<Instance>, ApiError> {
     let agency = setup::agency_name(&state.pool).await?;
     Ok(Json(Instance {
@@ -263,6 +285,7 @@ async fn instance(State(state): State<AppState>) -> Result<Json<Instance>, ApiEr
         version: VERSION,
         commit: BUILD_COMMIT,
         agency,
+        public_url: state.public_url.as_ref().map(|url| url.origin().to_owned()),
     }))
 }
 
@@ -359,7 +382,12 @@ async fn login(
         return Err(invalid());
     }
 
-    let (token, expires_at) = sessions::create(&state.pool, user.id).await?;
+    let transport = if state.secure_cookies() {
+        sessions::CookieTransport::Secure
+    } else {
+        sessions::CookieTransport::Plain
+    };
+    let (token, expires_at) = sessions::create(&state.pool, user.id, transport).await?;
     audit::record(
         &state.pool,
         EventKind::LoginSucceeded,
@@ -377,7 +405,8 @@ async fn login(
         capabilities,
         expires_at,
     };
-    Ok((jar.add(session_cookie(token.raw)), Json(body)).into_response())
+    let secure = state.secure_cookies();
+    Ok((jar.add(session_cookie(token.raw, secure)), Json(body)).into_response())
 }
 
 async fn logout(State(state): State<AppState>, jar: CookieJar) -> Result<Response, ApiError> {
@@ -393,7 +422,11 @@ async fn logout(State(state): State<AppState>, jar: CookieJar) -> Result<Respons
         }
         sessions::revoke(&state.pool, cookie.value()).await?;
     }
-    Ok((jar.add(removal_cookie()), StatusCode::NO_CONTENT).into_response())
+    Ok((
+        jar.add(removal_cookie(state.secure_cookies())),
+        StatusCode::NO_CONTENT,
+    )
+        .into_response())
 }
 
 async fn current_session(

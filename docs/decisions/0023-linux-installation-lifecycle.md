@@ -89,12 +89,12 @@ an existing installation or refuses with instructions. It never strands data.
 
 - Operators can script around fixed, documented paths, and an upgrade never
   touches their data or settings.
-- HTTPS is not part of the installation: the service speaks plain HTTP, and
-  `docs/install.md` tells operators to put TLS in front of anything beyond a
-  trial. A supported reverse-proxy configuration, and the `Secure` cookie
-  attribute that ADR 0004 defers to deployment hardening, are separate work.
-- An upgrade that changes the database takes a validated backup first, from
-  `serve` before it migrates, and does not start without it. That backup is
+- HTTPS is not part of the installation: the service speaks plain HTTP behind
+  a TLS reverse proxy. The installer's `--public-url` records the `https://`
+  address, which makes session cookies `Secure` (ADR 0025); the install
+  guide gives the supported proxy configuration.
+- An upgrade that changes the database takes a validated backup first,
+  whichever command migrates, and does not migrate without it. That backup is
   the recovery point for going back with the previous release.
 - The one-line command fetches the installer from `main` and the archive from
   the release. Pinning the installer to the release and signing archives are
