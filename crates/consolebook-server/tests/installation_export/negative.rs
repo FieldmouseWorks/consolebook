@@ -7,18 +7,18 @@ use serde_json::Value;
 
 use super::*;
 
-fn installation(finding: InstallationFinding) -> Finding {
+pub(super) fn installation(finding: InstallationFinding) -> Finding {
     Finding::Installation { finding }
 }
 
-fn edit_json(bytes: &[u8], edit: impl FnOnce(&mut Value)) -> Vec<u8> {
+pub(super) fn edit_json(bytes: &[u8], edit: impl FnOnce(&mut Value)) -> Vec<u8> {
     let mut value: Value = serde_json::from_slice(bytes).expect("json");
     edit(&mut value);
     canonical::canonical_bytes(&value).expect("canonical")
 }
 
 /// The archive with the manifest edited and re-serialized canonically.
-fn with_manifest(
+pub(super) fn with_manifest(
     listed: &[(String, Vec<u8>)],
     edit: impl FnOnce(&mut Value),
 ) -> Vec<(String, Vec<u8>)> {
@@ -38,7 +38,7 @@ fn with_manifest(
 
 /// The archive with one table document's rows edited; the manifest's
 /// `sha256` and `rows` follow, so only what the rows say can be wrong.
-fn with_rows(
+pub(super) fn with_rows(
     listed: &[(String, Vec<u8>)],
     table: &str,
     edit: impl FnOnce(&mut Vec<Value>),
@@ -51,7 +51,7 @@ fn with_rows(
 
 /// The archive with one document's bytes replaced; the manifest's hash
 /// follows, and its row count too when `rows` is given.
-fn with_document(
+pub(super) fn with_document(
     listed: &[(String, Vec<u8>)],
     table: &str,
     bytes: &[u8],
@@ -82,7 +82,7 @@ fn with_document(
 }
 
 /// The archive without one unit: its entries and its manifest listing.
-fn without_unit(
+pub(super) fn without_unit(
     listed: &[(String, Vec<u8>)],
     record_id: i64,
     version_number: i64,
@@ -104,7 +104,7 @@ fn without_unit(
 }
 
 /// Verifies the edited archive and asserts it names `expected`.
-fn assert_finds(edited: &[(String, Vec<u8>)], expected: &Finding, what: &str) {
+pub(super) fn assert_finds(edited: &[(String, Vec<u8>)], expected: &Finding, what: &str) {
     let report = export_verify::verify_archive(&repack(edited));
     let findings = all_findings(&report);
     assert!(!report.verified(), "{what}: verified");
@@ -114,7 +114,10 @@ fn assert_finds(edited: &[(String, Vec<u8>)], expected: &Finding, what: &str) {
     );
 }
 
-fn first_row<'a>(rows: &'a mut [Value], what: &str) -> &'a mut serde_json::Map<String, Value> {
+pub(super) fn first_row<'a>(
+    rows: &'a mut [Value],
+    what: &str,
+) -> &'a mut serde_json::Map<String, Value> {
     rows.first_mut()
         .unwrap_or_else(|| panic!("{what} has a row"))
         .as_object_mut()

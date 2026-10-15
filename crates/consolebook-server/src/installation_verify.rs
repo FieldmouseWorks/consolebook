@@ -12,6 +12,8 @@
 
 mod rows;
 
+pub(crate) use rows::row_findings;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -40,6 +42,9 @@ pub enum InstallationFinding {
     LedgerDuplicated { name: String },
     /// A ledger list is not strictly ascending by name.
     LedgerOutOfOrder { list: &'static str },
+    /// A carried table's ledger `sha256` is not 64 lowercase hex
+    /// characters.
+    LedgerHash { name: String },
     /// An exclusion gives a reason other than the format's.
     LedgerReason { name: String, reason: String },
     /// `tables/instance.json` is not exactly one row naming the
@@ -118,6 +123,10 @@ impl fmt::Display for InstallationFinding {
                     "the ledger's {list} list is not strictly ascending by name"
                 )
             }
+            Self::LedgerHash { name } => write!(
+                f,
+                "the ledger's sha256 for {name} is not 64 lowercase hex characters"
+            ),
             Self::LedgerReason { name, reason } => write!(
                 f,
                 "the ledger excludes {name} for '{reason}', which is not the format's reason"
@@ -318,7 +327,9 @@ fn ledger_findings(manifest: &InstallationManifest) -> Vec<Finding> {
             }));
         }
         if !is_lowercase_hex_hash(&entry.sha256) {
-            findings.push(Finding::HashNotCanonical { member: "sha256" });
+            findings.push(finding(InstallationFinding::LedgerHash {
+                name: entry.name.clone(),
+            }));
         }
     }
     for entry in &manifest.excluded {
@@ -462,13 +473,18 @@ fn unit_agreement_findings(units: &[UnitEntry], versions: &Rows) -> Vec<Finding>
             disagree("predecessor_content_hash");
         }
     }
+    // Rows per identity, counted once: linear in rows and units.
+    let mut rows_by_identity: BTreeMap<(i64, i64), usize> = BTreeMap::new();
+    for row in &parsed {
+        *rows_by_identity
+            .entry((row.record_id, row.version_number))
+            .or_default() += 1;
+    }
     for unit in units {
-        let rows = parsed
-            .iter()
-            .filter(|row| {
-                (row.record_id, row.version_number) == (unit.record_id, unit.version_number)
-            })
-            .count();
+        let rows = rows_by_identity
+            .get(&(unit.record_id, unit.version_number))
+            .copied()
+            .unwrap_or(0);
         if rows != 1 {
             findings.push(finding(InstallationFinding::UnitVersionRows {
                 path: unit.path.clone(),

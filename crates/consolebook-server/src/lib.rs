@@ -11,6 +11,7 @@ pub mod backup;
 pub mod backup_copy;
 pub mod canonical;
 pub mod capabilities;
+mod closed_vocabulary;
 pub mod data_dir;
 pub mod doctor;
 pub mod draft_access;

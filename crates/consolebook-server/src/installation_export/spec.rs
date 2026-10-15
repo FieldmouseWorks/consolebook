@@ -19,7 +19,7 @@ use crate::notices::NoticeKind;
 mod coverage;
 mod tables;
 
-pub use coverage::{CoverageFinding, coverage_findings, in_lists};
+pub use coverage::{CoverageFinding, coverage_findings, in_lists, specification_findings};
 pub use tables::TABLES;
 
 /// How a column's value is written in a document.
@@ -300,4 +300,65 @@ pub fn table(name: &str) -> Option<&'static Table> {
 #[must_use]
 pub fn exclusion(name: &str) -> Option<&'static Exclusion> {
     EXCLUSIONS.iter().find(|exclusion| exclusion.name == name)
+}
+
+/// The specification as one deterministic text: every table with its key
+/// and every column's type, nullability, reference, agreement, vocabulary
+/// (module vocabularies by their values), and text form; every exclusion
+/// with its reason; every column carried as units. Anything the format
+/// carries or checks changes this text.
+#[must_use]
+pub fn describe(
+    tables: &[Table],
+    exclusions: &[Exclusion],
+    unit_columns: &[(&str, &str)],
+) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    for table in tables {
+        let _ = writeln!(out, "table {} key {}", table.name, table.key.join(","));
+        for column in table.columns {
+            let vocabulary = column.vocabulary.map_or_else(
+                || "-".to_owned(),
+                |vocabulary| {
+                    format!(
+                        "{}[{}]",
+                        vocabulary.module_name().unwrap_or("check"),
+                        vocabulary.values().join(",")
+                    )
+                },
+            );
+            let _ = writeln!(
+                out,
+                "  column {} {} null={} ref={} agrees={} vocabulary={} form={}",
+                column.name,
+                column.ty.as_str(),
+                column.nullable,
+                column.references.unwrap_or("-"),
+                column.agrees,
+                vocabulary,
+                column.form.map_or("-", TextForm::as_str),
+            );
+        }
+    }
+    for exclusion in exclusions {
+        let _ = writeln!(
+            out,
+            "exclude {} {}",
+            exclusion.name,
+            exclusion.reason.as_str()
+        );
+    }
+    for (table, column) in unit_columns {
+        let _ = writeln!(out, "unit {table}.{column}");
+    }
+    out
+}
+
+/// The SHA-256 of [`describe`] over this build's specification, lowercase
+/// hex. A test pins it per `format_version`: a changed specification is a
+/// new format version with its own recorded fingerprint.
+#[must_use]
+pub fn fingerprint() -> String {
+    crate::canonical::content_hash_hex(describe(&TABLES, &EXCLUSIONS, &UNIT_COLUMNS).as_bytes())
 }

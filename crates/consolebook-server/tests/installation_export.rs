@@ -36,10 +36,14 @@ use zip::write::{SimpleFileOptions, ZipWriter};
 
 #[path = "installation_export/coverage.rs"]
 mod coverage;
+#[path = "installation_export/document.rs"]
+mod document;
 #[path = "installation_export/negative.rs"]
 mod negative;
 #[path = "installation_export/properties.rs"]
 mod properties;
+#[path = "installation_export/verifier.rs"]
+mod verifier;
 
 const PASSWORD: &str = "invented-passphrase-1";
 
@@ -333,6 +337,15 @@ async fn populate() -> Populated {
     .expect("call")
     .expect("issued");
     fx.login("avery.admin").await;
+    // A session as an HTTPS deployment creates it, so the Secure marker
+    // table holds a row too.
+    consolebook_server::sessions::create(
+        &fx.pool,
+        fx.admin_id,
+        consolebook_server::sessions::CookieTransport::Secure,
+    )
+    .await
+    .expect("secure session");
 
     // Retention administration.
     retention::set_authority(

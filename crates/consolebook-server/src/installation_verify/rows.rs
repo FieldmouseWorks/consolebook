@@ -119,9 +119,10 @@ fn check_rows(
     rows
 }
 
-/// A row's exact members, and each value's type, nullability,
-/// vocabulary, and text form.
-fn row_findings(
+/// A row's exact members, each value's type, nullability, vocabulary,
+/// and text form, and the audit subject's shape: the one row rule the
+/// producer applies before writing and the verifier applies on reading.
+pub(crate) fn row_findings(
     table: &Table,
     path: &str,
     row: usize,

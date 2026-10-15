@@ -45,36 +45,77 @@ async fn the_export_is_a_function_of_the_rows_and_the_instant() {
     assert_eq!(first_manifest, second_manifest);
 }
 
+/// Every credential the ledger excludes, read from the database by the
+/// exclusion list itself: a dotted exclusion's column, and every text
+/// column of an excluded table that is not a closed vocabulary (a
+/// `CHECK ... IN` list such as `issued_via` names a kind, not a secret).
+async fn excluded_values(fx: &Fixture) -> Vec<(&'static str, Vec<String>)> {
+    let mut out = Vec::new();
+    for exclusion in &spec::EXCLUSIONS {
+        let (table, columns) = if let Some((table, column)) = exclusion.name.split_once('.') {
+            (table, vec![column.to_owned()])
+        } else {
+            {
+                let sql: String =
+                    sqlx::query_scalar("SELECT sql FROM sqlite_master WHERE name = ?1")
+                        .bind(exclusion.name)
+                        .fetch_one(&fx.pool)
+                        .await
+                        .expect("table sql");
+                let vocabularies = spec::in_lists(&sql);
+                let text: Vec<String> = sqlx::query_scalar(
+                    "SELECT name FROM pragma_table_info(?1) WHERE type = 'TEXT'",
+                )
+                .bind(exclusion.name)
+                .fetch_all(&fx.pool)
+                .await
+                .expect("columns");
+                let secret = text
+                    .into_iter()
+                    .filter(|column| !vocabularies.contains_key(column))
+                    .collect();
+                (exclusion.name, secret)
+            }
+        };
+        let mut values = Vec::new();
+        for column in columns {
+            let found: Vec<String> = sqlx::query_scalar(&format!(
+                "SELECT \"{column}\" FROM \"{table}\" WHERE \"{column}\" IS NOT NULL"
+            ))
+            .fetch_all(&fx.pool)
+            .await
+            .expect("credentials");
+            values.extend(found);
+        }
+        out.push((exclusion.name, values));
+    }
+    out
+}
+
 #[tokio::test]
 async fn credentials_never_leave_the_installation() {
     let p = populate().await;
     let fx = &p.fx;
     let bytes = export(fx, fx.admin_id).await;
-    let mut secrets: Vec<String> = Vec::new();
-    for sql in [
-        "SELECT password_hash FROM user",
-        "SELECT token_hash FROM session",
-        "SELECT code_hash FROM password_reset_code",
-    ] {
-        let found: Vec<String> = sqlx::query_scalar(sql)
-            .fetch_all(&fx.pool)
-            .await
-            .expect("credentials");
-        // Positive control: the credential is stored, so its absence from
-        // the archive is a property of the export, not of the fixture.
-        assert!(!found.is_empty(), "{sql} found nothing");
-        secrets.extend(found);
-    }
-    secrets.push(fx.setup_code_hash.clone());
     assert!(
         contains(&bytes, "avery.admin"),
         "the search sees stored text"
     );
-    for secret in &secrets {
-        assert!(
-            !contains(&bytes, secret),
-            "a credential left in the archive"
-        );
+    for (name, mut values) in excluded_values(fx).await {
+        if name == "setup_code" {
+            // Setup deletes its code in the transaction that uses it; the
+            // fixture read the stored hash before that.
+            values.push(fx.setup_code_hash.clone());
+        }
+        // Positive control: the credential is stored, so its absence from
+        // the archive is a property of the export, not of the fixture.
+        assert!(!values.is_empty(), "{name} holds nothing to look for");
+        for value in &values {
+            assert!(
+                !contains(&bytes, value),
+                "a {name} value left in the archive"
+            );
+        }
     }
     for name in ["password_hash", "token_hash", "code_hash"] {
         assert!(!contains(&bytes, &format!("\"{name}\"")), "{name} member");
@@ -122,4 +163,31 @@ async fn unknown_stored_values_are_refused_at_production() {
         .await
         .expect_err("a flag of 2 is refused");
     assert!(format!("{err:#}").contains("flag"), "{err:#}");
+}
+
+/// The producer applies the verifier's row rules: an audit subject with a
+/// kind and no positive id, which verification would refuse, is refused
+/// at production instead, naming the table and the row's key — never
+/// exported as a complete archive that then fails verification.
+#[tokio::test]
+async fn a_row_the_verifier_would_refuse_is_refused_at_production() {
+    for subject_id in [None, Some(0)] {
+        let fx = Fixture::new().await;
+        let id: i64 = sqlx::query_scalar(
+            "INSERT INTO audit_event (occurred_at, kind, actor_user_id, subject_kind, subject_id)
+             VALUES (1, 'program_created', ?1, 'program', ?2) RETURNING id",
+        )
+        .bind(fx.admin_id)
+        .bind(subject_id)
+        .fetch_one(&fx.pool)
+        .await
+        .expect("raw audit row");
+        let err = installation_export::export_at(&fx.pool, fx.admin_id, EXPORTED_AT)
+            .await
+            .expect_err("refused at production");
+        let message = format!("{err:#}");
+        assert!(message.contains("table audit_event"), "{message}");
+        assert!(message.contains(&format!("id={id}")), "{message}");
+        assert!(message.contains("subject_kind and subject_id"), "{message}");
+    }
 }

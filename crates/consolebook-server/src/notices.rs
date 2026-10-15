@@ -10,73 +10,28 @@ use serde::Serialize;
 use sqlx::{Executor, Row, Sqlite, SqlitePool};
 use time::OffsetDateTime;
 
+use crate::closed_vocabulary::closed_vocabulary;
+
 use crate::capabilities::Capability;
 
-/// Notice vocabulary. Training-workflow kinds join with their milestones.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NoticeKind {
-    BackupFailed,
-    /// A validated backup could not be copied off the server (ADR 0024).
-    BackupCopyFailed,
-    AssignmentCreated,
-    DraftOwnershipReceived,
-    DraftSubmittedForReview,
-    DraftApproved,
-    DraftChangesRequested,
-    DraftReturned,
-    DraftFinalized,
-    RecordAwaitsAcknowledgment,
-    AcknowledgmentResponse,
-    AcknowledgmentRefused,
-    AcknowledgmentAttested,
-    AmendmentOpened,
-}
-
-impl NoticeKind {
-    /// Every value, once. Values are only ever added, never removed:
-    /// an older installation's stored rows must keep exporting.
-    pub const ALL: [Self; 14] = [
-        Self::BackupFailed,
-        Self::BackupCopyFailed,
-        Self::AssignmentCreated,
-        Self::DraftOwnershipReceived,
-        Self::DraftSubmittedForReview,
-        Self::DraftApproved,
-        Self::DraftChangesRequested,
-        Self::DraftReturned,
-        Self::DraftFinalized,
-        Self::RecordAwaitsAcknowledgment,
-        Self::AcknowledgmentResponse,
-        Self::AcknowledgmentRefused,
-        Self::AcknowledgmentAttested,
-        Self::AmendmentOpened,
-    ];
-
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::BackupFailed => "backup_failed",
-            Self::BackupCopyFailed => "backup_copy_failed",
-            Self::AssignmentCreated => "assignment_created",
-            Self::DraftOwnershipReceived => "draft_ownership_received",
-            Self::DraftSubmittedForReview => "draft_submitted_for_review",
-            Self::DraftApproved => "draft_approved",
-            Self::DraftChangesRequested => "draft_changes_requested",
-            Self::DraftReturned => "draft_returned",
-            Self::DraftFinalized => "draft_finalized",
-            Self::RecordAwaitsAcknowledgment => "record_awaits_acknowledgment",
-            Self::AcknowledgmentResponse => "acknowledgment_response",
-            Self::AcknowledgmentRefused => "acknowledgment_refused",
-            Self::AcknowledgmentAttested => "acknowledgment_attested",
-            Self::AmendmentOpened => "amendment_opened",
-        }
-    }
-
-    /// The stored value as this build knows it, or `None` for one it does
-    /// not (docs/formats/installation-export.md, Vocabularies).
-    #[must_use]
-    pub fn parse(stored: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|value| value.as_str() == stored)
+closed_vocabulary! {
+    /// Notice vocabulary. Training-workflow kinds join with their milestones.
+    pub enum NoticeKind {
+        BackupFailed => "backup_failed",
+        /// A validated backup could not be copied off the server (ADR 0024).
+        BackupCopyFailed => "backup_copy_failed",
+        AssignmentCreated => "assignment_created",
+        DraftOwnershipReceived => "draft_ownership_received",
+        DraftSubmittedForReview => "draft_submitted_for_review",
+        DraftApproved => "draft_approved",
+        DraftChangesRequested => "draft_changes_requested",
+        DraftReturned => "draft_returned",
+        DraftFinalized => "draft_finalized",
+        RecordAwaitsAcknowledgment => "record_awaits_acknowledgment",
+        AcknowledgmentResponse => "acknowledgment_response",
+        AcknowledgmentRefused => "acknowledgment_refused",
+        AcknowledgmentAttested => "acknowledgment_attested",
+        AmendmentOpened => "amendment_opened",
     }
 }
 
@@ -205,7 +160,7 @@ mod vocabulary_tests {
         names.sort_unstable();
         names.dedup();
         assert_eq!(names.len(), NoticeKind::ALL.len());
-        for value in NoticeKind::ALL {
+        for value in NoticeKind::ALL.iter().copied() {
             assert_eq!(NoticeKind::parse(value.as_str()), Some(value));
         }
         assert_eq!(NoticeKind::parse("invented_unknown_value"), None);

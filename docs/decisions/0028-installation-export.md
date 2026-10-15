@@ -141,8 +141,11 @@ download; one pull request.
 
 - A schema change and this format now move together. Any migration that adds
   or changes a table or column bumps `format_version` and updates the format
-  document, producer, verifier, and fixtures (CONTRIBUTING.md), and the
-  coverage test makes that impossible to forget. A build refuses an unknown
+  document, producer, verifier, and fixtures (CONTRIBUTING.md). The coverage
+  test makes a schema change impossible to forget, and a test that pins the
+  specification's fingerprint to each `format_version` makes the bump
+  impossible to skip: a changed specification fails it until a new version
+  is recorded beside the old ones. A build refuses an unknown
   format version by name. The ADR for a later version decides how earlier
   archives keep verifying.
 - The format exposes the storage schema's names and shapes to whoever reads an

@@ -1,13 +1,11 @@
 //! The format's table and column lists are enforced, not just written
 //! down: the coverage guard compares the migrated schema with the table
-//! specification both ways, and the format document's column tables,
-//! agreements, and module vocabularies are compared with the same
-//! specification.
-
-use std::collections::BTreeMap;
+//! specification both ways. Each control below changes one thing on a
+//! scratch database and names the finding it must produce.
 
 use consolebook_server::installation_export::spec::{
-    CoverageFinding, Vocabulary, coverage_findings,
+    self as table_spec, CoverageFinding, Exclusion, ExclusionReason, coverage_findings,
+    specification_findings,
 };
 
 use super::*;
@@ -126,245 +124,251 @@ async fn a_check_list_that_differs_from_the_vocabulary_fails_coverage() {
     );
 }
 
-// ------------------------------------------------------- document sync
-
-const FORMAT_DOC: &str = include_str!("../../../../docs/formats/installation-export.md");
-
-/// The section of `doc` from `start` to the next heading that `end`
-/// begins.
-fn section<'a>(doc: &'a str, start: &str, end: &str) -> &'a str {
-    let from = doc.find(start).unwrap_or_else(|| panic!("no {start}"));
-    let rest = &doc[from + start.len()..];
-    let to = rest.find(end).unwrap_or(rest.len());
-    &rest[..to]
-}
-
-fn cells(line: &str) -> Vec<String> {
-    line.trim()
-        .trim_matches('|')
-        .split('|')
-        .map(|cell| cell.trim().to_owned())
-        .collect()
-}
-
-fn unquote(cell: &str) -> String {
-    cell.trim_matches('`').to_owned()
-}
-
-/// Every backticked token in `text`.
-fn ticked(text: &str) -> Vec<String> {
-    text.split('`')
-        .skip(1)
-        .step_by(2)
-        .map(str::to_owned)
-        .collect()
-}
-
-/// A column's rule as the format document writes it.
-fn rule(table: &spec::Table, column: &spec::Column) -> String {
-    let mut parts = Vec::new();
-    if let Some(position) = table.key.iter().position(|key| *key == column.name) {
-        parts.push(if table.key.len() == 1 {
-            "key".to_owned()
-        } else {
-            format!("key ({})", position + 1)
-        });
-    }
-    if let Some(target) = column.references {
-        parts.push(format!("→ `{target}`"));
-    }
-    match column.vocabulary {
-        Some(Vocabulary::OneOf(values)) => parts.push(format!(
-            "one of {}",
-            values
-                .iter()
-                .map(|value| format!("`{value}`"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )),
-        Some(vocabulary) => parts.push(format!(
-            "{} (see Vocabularies)",
-            vocabulary.module_name().expect("module vocabulary")
-        )),
-        None => {}
-    }
-    if let Some(form) = column.form {
-        parts.push(form.as_str().to_owned());
-    }
-    parts.join("; ")
-}
-
-/// Every difference between the format document `doc` and the table
-/// specification: the column tables (table, column, type, nullability,
-/// rule, in stored order), the agreements table, and the four module
-/// vocabularies.
-fn doc_differences(doc: &str) -> Vec<String> {
-    let mut differences = Vec::new();
-
-    // Column tables.
-    let mut documented: BTreeMap<String, Vec<Vec<String>>> = BTreeMap::new();
-    for line in section(doc, "### Columns", "### References").lines() {
-        let row = cells(line);
-        if row.len() != 5 || !row[0].starts_with('`') {
+/// Coverage of a scratch database after `edits`: each edit recreates one
+/// stored table with `from` replaced by `to` in its SQL (an empty `from`
+/// drops the table), on one connection with foreign keys off so a parent
+/// can be recreated under its children.
+async fn after(edits: &[(&str, &str, &str)]) -> Vec<CoverageFinding> {
+    let (_tmp, pool) = scratch().await;
+    let mut conn = pool.acquire().await.expect("connection");
+    sqlx::query("PRAGMA foreign_keys = OFF")
+        .execute(&mut *conn)
+        .await
+        .expect("foreign keys off");
+    for (table, from, to) in edits {
+        let sql: String = sqlx::query_scalar("SELECT sql FROM sqlite_master WHERE name = ?1")
+            .bind(table)
+            .fetch_one(&mut *conn)
+            .await
+            .expect("table sql");
+        sqlx::query(&format!("DROP TABLE \"{table}\""))
+            .execute(&mut *conn)
+            .await
+            .expect("drop");
+        if from.is_empty() {
             continue;
         }
-        documented.entry(unquote(&row[0])).or_default().push(vec![
-            unquote(&row[1]),
-            row[2].clone(),
-            row[3].clone(),
-            row[4].clone(),
-        ]);
+        assert!(sql.contains(from), "the control edits real SQL: {from}");
+        sqlx::query(&sql.replacen(from, to, 1))
+            .execute(&mut *conn)
+            .await
+            .expect("recreate");
     }
-    let mut specified: BTreeMap<String, Vec<Vec<String>>> = BTreeMap::new();
-    for table in &spec::TABLES {
-        let rows = table
-            .columns
-            .iter()
-            .map(|column| {
-                vec![
-                    column.name.to_owned(),
-                    column.ty.as_str().to_owned(),
-                    if column.nullable { "yes" } else { "no" }.to_owned(),
-                    rule(table, column),
-                ]
-            })
-            .collect();
-        specified.insert(table.name.to_owned(), rows);
-    }
-    for (table, rows) in &specified {
-        match documented.get(table) {
-            None => differences.push(format!("{table}: not documented")),
-            Some(documented) if documented != rows => differences.push(format!(
-                "{table}: documented {documented:?}, specified {rows:?}"
-            )),
-            Some(_) => {}
-        }
-    }
-    for table in documented.keys() {
-        if !specified.contains_key(table) {
-            differences.push(format!("{table}: documented, not specified"));
-        }
-    }
-
-    // Agreements.
-    let mut documented: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for line in section(doc, "### Agreements", "### Vocabularies").lines() {
-        let row = cells(line);
-        if row.len() != 2 || !row[0].starts_with('`') {
-            continue;
-        }
-        let columns = ticked(&row[1])
-            .into_iter()
-            .filter(|name| name != "null")
-            .collect();
-        documented.insert(unquote(&row[0]), columns);
-    }
-    let specified: BTreeMap<String, Vec<String>> = spec::TABLES
-        .iter()
-        .filter_map(|table| {
-            let pinned: Vec<String> = table
-                .columns
-                .iter()
-                .filter(|column| column.agrees)
-                .map(|column| column.name.to_owned())
-                .collect();
-            (!pinned.is_empty()).then(|| (table.name.to_owned(), pinned))
-        })
-        .collect();
-    if documented != specified {
-        differences.push(format!(
-            "agreements: documented {documented:?}, specified {specified:?}"
-        ));
-    }
-
-    // Module vocabularies: each bullet's backticked values, after the
-    // owning file's name.
-    let vocabularies = section(doc, "### Vocabularies", "## What the export does not carry");
-    for vocabulary in [
-        Vocabulary::Capability,
-        Vocabulary::NoticeKind,
-        Vocabulary::AuditEventKind,
-        Vocabulary::AuditSubjectKind,
-    ] {
-        let name = vocabulary.module_name().expect("module vocabulary");
-        let marker = format!("- **{name}** (");
-        let Some(from) = vocabularies.find(&marker) else {
-            differences.push(format!("{name}: not documented"));
-            continue;
-        };
-        let rest = &vocabularies[from + marker.len()..];
-        let bullet = &rest[..rest.find("\n- ").unwrap_or(rest.len())];
-        let mut documented: Vec<String> = ticked(bullet).into_iter().skip(1).collect();
-        documented.sort();
-        let mut specified: Vec<String> =
-            vocabulary.values().into_iter().map(str::to_owned).collect();
-        specified.sort();
-        if documented != specified {
-            differences.push(format!(
-                "{name}: documented {documented:?}, specified {specified:?}"
-            ));
-        }
-    }
-    differences
+    coverage_findings(&mut conn).await.expect("coverage")
 }
 
-#[test]
-fn the_format_document_states_the_specification() {
-    assert_eq!(doc_differences(FORMAT_DOC), Vec::<String>::new());
+fn text(value: &str) -> String {
+    value.to_owned()
 }
 
-#[test]
-fn a_drifted_format_document_is_reported() {
-    let edits = [
-        // A type.
+/// Every stored foreign key is compared, so a second key on a column
+/// cannot hide behind the first (before #98's review fix, this composite
+/// key overwrote the column's plain one and coverage came back empty).
+#[tokio::test]
+async fn a_second_foreign_key_on_a_column_is_reported() {
+    let found = after(&[(
+        "evaluation_record",
+        "UNIQUE (id, program_version_id)",
+        "FOREIGN KEY (enrollment_id, program_version_id)
+             REFERENCES enrollment (id, program_version_id),
+         UNIQUE (id, program_version_id)",
+    )])
+    .await;
+    assert_eq!(
+        found,
+        vec![CoverageFinding::ReferenceNotInSpec {
+            table: text("evaluation_record"),
+            column: text("enrollment_id"),
+            target: text("enrollment"),
+            pinned: true,
+        }]
+    );
+}
+
+/// One table recreated with `from` replaced by `to`.
+type Edit<'a> = (&'a str, &'a str, &'a str);
+/// What a control does, its edits, and the findings it must produce.
+type Case<'a> = (&'a str, Vec<Edit<'a>>, Vec<CoverageFinding>);
+
+/// Each kind of schema drift names its finding.
+#[tokio::test]
+async fn every_kind_of_schema_drift_is_reported() {
+    let cases: Vec<Case<'_>> = vec![
         (
-            "| `user` | `title` | text | no |  |",
-            "| `user` | `title` | integer | no |  |",
-            "user:",
+            "column type",
+            vec![("notice", "read_at INTEGER", "read_at TEXT")],
+            vec![CoverageFinding::ColumnType {
+                table: text("notice"),
+                column: text("read_at"),
+                stored: text("TEXT"),
+                spec: "integer",
+            }],
         ),
-        // A reference target.
         (
-            "| `notice` | `user_id` | integer | no | → `user` |",
-            "| `notice` | `user_id` | integer | no | → `enrollment` |",
-            "notice:",
+            "nullability",
+            vec![("notice", "read_at INTEGER", "read_at INTEGER NOT NULL")],
+            vec![CoverageFinding::ColumnNullability {
+                table: text("notice"),
+                column: text("read_at"),
+                stored_nullable: false,
+            }],
         ),
-        // A CHECK vocabulary value.
         (
-            "`litigation`, `anticipated_litigation`",
-            "`litigation`",
-            "record_hold:",
+            "key order",
+            vec![(
+                "capability_grant",
+                "PRIMARY KEY (user_id, capability)",
+                "PRIMARY KEY (capability, user_id)",
+            )],
+            vec![CoverageFinding::Key {
+                table: text("capability_grant"),
+                stored: vec![text("capability"), text("user_id")],
+                spec: vec![text("user_id"), text("capability")],
+            }],
         ),
-        // An agreement.
         (
-            "| `task` | `competency_id` |\n",
-            "| `task` | `program_version_id` |\n",
-            "agreements:",
+            "new reference",
+            vec![(
+                "notice",
+                "read_at INTEGER",
+                "read_at INTEGER REFERENCES user (id)",
+            )],
+            vec![CoverageFinding::ReferenceNotInSpec {
+                table: text("notice"),
+                column: text("read_at"),
+                target: text("user"),
+                pinned: false,
+            }],
         ),
-        // A module vocabulary value.
         (
-            "and `installation_exported` (see Authorization)",
-            "(see Authorization)",
-            "audit event kind:",
+            "pin removed",
+            vec![(
+                "task",
+                "FOREIGN KEY (competency_id, program_version_id)
+        REFERENCES competency (id, program_version_id)",
+                "FOREIGN KEY (competency_id) REFERENCES competency (id)",
+            )],
+            vec![
+                CoverageFinding::ReferenceNotInSpec {
+                    table: text("task"),
+                    column: text("competency_id"),
+                    target: text("competency"),
+                    pinned: false,
+                },
+                CoverageFinding::ReferenceNotInSchema {
+                    table: text("task"),
+                    column: text("competency_id"),
+                    target: "competency",
+                    pinned: true,
+                },
+            ],
         ),
-        // A column dropped from the document.
         (
-            "| `notice` | `read_at` | integer | yes |  |\n",
-            "",
-            "notice:",
+            "spec table dropped",
+            vec![("hold_release", "", "")],
+            vec![CoverageFinding::TableNotInSchema {
+                table: text("hold_release"),
+            }],
+        ),
+        (
+            "lowercase, newline-split CHECK list",
+            vec![(
+                "notice",
+                "kind TEXT NOT NULL,",
+                "kind TEXT NOT NULL CHECK (kind\n    in ('backup_failed')),",
+            )],
+            vec![CoverageFinding::Vocabulary {
+                table: text("notice"),
+                column: text("kind"),
+                stored: vec![text("backup_failed")],
+                spec: Vec::new(),
+            }],
         ),
     ];
-    for (from, to, reported) in edits {
-        assert!(
-            FORMAT_DOC.contains(from),
-            "the control edits real text: {from}"
-        );
-        let drifted = FORMAT_DOC.replacen(from, to, 1);
-        let differences = doc_differences(&drifted);
-        assert!(
-            differences
-                .iter()
-                .any(|difference| difference.starts_with(reported)),
-            "{from:?} → {to:?}: {differences:#?}"
-        );
+    for (what, edits, expected) in cases {
+        assert_eq!(after(&edits).await, expected, "{what}");
+    }
+}
+
+/// A dotted exclusion or a unit column must be a stored column.
+#[tokio::test]
+async fn an_excluded_column_the_schema_lost_is_reported() {
+    let (_tmp, pool) = scratch().await;
+    for sql in [
+        "ALTER TABLE user DROP COLUMN password_hash",
+        "ALTER TABLE evaluation_version DROP COLUMN canonical_bytes",
+    ] {
+        sqlx::query(sql).execute(&pool).await.expect(sql);
+    }
+    assert_eq!(
+        findings(&pool).await,
+        vec![
+            CoverageFinding::ExcludedColumnNotInSchema {
+                name: text("user.password_hash"),
+            },
+            CoverageFinding::ExcludedColumnNotInSchema {
+                name: text("evaluation_version.canonical_bytes"),
+            },
+        ]
+    );
+}
+
+/// No name is both carried and excluded or carried as units.
+#[test]
+fn a_name_both_carried_and_excluded_is_reported() {
+    assert_eq!(
+        specification_findings(
+            &table_spec::TABLES,
+            &table_spec::EXCLUSIONS,
+            &table_spec::UNIT_COLUMNS
+        ),
+        Vec::new()
+    );
+    let mut exclusions = table_spec::EXCLUSIONS.to_vec();
+    for name in ["notice", "user.username"] {
+        exclusions.push(Exclusion {
+            name,
+            reason: ExclusionReason::Credential,
+        });
+    }
+    let mut units = table_spec::UNIT_COLUMNS.to_vec();
+    units.push(("evaluation_version", "content_hash"));
+    assert_eq!(
+        specification_findings(&table_spec::TABLES, &exclusions, &units),
+        vec![
+            CoverageFinding::CarriedAndExcluded {
+                name: text("notice")
+            },
+            CoverageFinding::CarriedAndExcluded {
+                name: text("user.username"),
+            },
+            CoverageFinding::CarriedAndExcluded {
+                name: text("evaluation_version.content_hash"),
+            },
+        ]
+    );
+}
+
+/// `IN` lists are read in any case, after any whitespace, with or without
+/// a space before the parenthesis; `NOT IN` and words containing `in` are
+/// not lists.
+#[test]
+fn check_lists_are_read_however_they_are_spelled() {
+    for sql in [
+        "kind TEXT CHECK (kind IN ('a', 'b'))",
+        "kind TEXT CHECK (kind\nIN ('a', 'b'))",
+        "kind TEXT CHECK (kind\tin('a', 'b'))",
+        "kind TEXT CHECK (kind in (\n'a', 'b'))",
+    ] {
+        let lists = table_spec::in_lists(sql);
+        assert_eq!(lists.len(), 1, "{sql:?}: {lists:?}");
+        assert_eq!(lists["kind"], vec![text("a"), text("b")], "{sql:?}");
+    }
+    for sql in [
+        "kind TEXT CHECK (kind NOT IN ('a'))",
+        "kind TEXT CHECK (kind = 'in') -- kind IN ('a')",
+        "id INTEGER, inside INTEGER, CHECK (main (1))",
+    ] {
+        assert!(table_spec::in_lists(sql).is_empty(), "{sql:?}");
     }
 }

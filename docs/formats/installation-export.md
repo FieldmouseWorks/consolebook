@@ -129,6 +129,11 @@ row. The rules:
 `draft_snapshot.content` is the draft content the installation stored when the
 snapshot was taken, as a string. The export does not parse or re-serialize it.
 
+`amendment.opened_after_event_id` and `amendment.opened_after_decision_id` are
+workflow watermarks, not references: the highest `contributor_event` and
+`review_decision` ids of the record when the amendment opened, or `0` when
+there were none (migration 0012). The verifier does not resolve them.
+
 ### Columns
 
 Each table's columns are listed in stored order, with these meanings:
@@ -636,7 +641,10 @@ the home page beside the installation record export, at
 event is committed before the snapshot is read, so the archive includes it. The audit
 event records the export the installation produced from its state at the
 recorded instant. As with the record export, it is not a receipt for a
-completed download.
+completed download. The event stands for the attempt: an export refused at
+production, for example because a stored value is one this build does not
+know, still leaves its `installation_exported` row, as the record export's
+does.
 
 ## Coverage and format versions
 
@@ -651,6 +659,12 @@ The format's table and column lists are enforced, not just written down:
 - A second test reads the column tables in this document and compares them
   with the same specification, so the document cannot drift from the
   producer.
+- A third test pins a fingerprint of the specification (every table, key,
+  column rule, exclusion, and column carried as units) to each
+  `format_version`. A changed specification fails it until `format_version`
+  is bumped and the new version's fingerprint is recorded beside the earlier
+  ones; a recorded fingerprint is never edited. This test is what enforces
+  the bump.
 
 Changing what the format carries changes the format: a new `format_version`,
 this document, the producer, the verifier, and the fixtures move together

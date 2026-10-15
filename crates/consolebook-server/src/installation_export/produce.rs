@@ -13,7 +13,7 @@
 
 use std::io::{Cursor, Seek, Write};
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, bail};
 use futures_util::TryStreamExt;
 use serde_json::{Map, Value};
 use sqlx::sqlite::SqliteRow;
@@ -28,6 +28,7 @@ use super::{
 use crate::audit::{self, EventKind};
 use crate::canonical;
 use crate::capabilities::{self, Capability};
+use crate::installation_verify::row_findings;
 use crate::record_export::{
     ARCHIVE_MANIFEST_PATH, ArchiveProduced, ArchiveWriter, ExportRefusal, Scope, UnitEntry,
     canonical_json, client_left, collect_meta, stamp, write_units_streaming,
@@ -233,6 +234,17 @@ async fn read_document(conn: &mut SqliteConnection, table: &Table) -> Result<Doc
         let index = out.len();
         let object = map_row(table, &row)
             .with_context(|| format!("exporting row {index} of table {}", table.name))?;
+        // The verifier's own row rules, so nothing leaves that a verifier
+        // would refuse: an archive is never produced "complete" only to
+        // fail verification.
+        let findings = row_findings(table, &table.path(), index, &object);
+        if let Some(finding) = findings.first() {
+            bail!(
+                "table {} row with key ({}) is not what the format carries: {finding}",
+                table.name,
+                key_text(table, &object)
+            );
+        }
         out.push(Value::Object(object));
     }
     let count = out.len();
@@ -249,7 +261,19 @@ async fn read_document(conn: &mut SqliteConnection, table: &Table) -> Result<Doc
     })
 }
 
+/// A row's key as `column=value, ...`, for a refusal that names it.
+fn key_text(table: &Table, object: &Map<String, Value>) -> String {
+    table
+        .key
+        .iter()
+        .map(|name| format!("{name}={}", object.get(*name).unwrap_or(&Value::Null)))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// One stored row as its document object: every specified column, typed.
+/// Mapping only converts storage to JSON; whether the row is one the
+/// format carries is [`row_findings`]' answer, shared with the verifier.
 fn map_row(table: &Table, row: &SqliteRow) -> Result<Map<String, Value>> {
     let mut object = Map::new();
     for (index, column) in table.columns.iter().enumerate() {
@@ -271,23 +295,7 @@ fn map_value(column: &Column, row: &SqliteRow, index: usize) -> Result<Value> {
             Some(1) => Some(Value::Bool(true)),
             Some(other) => bail!("a flag is stored as 0 or 1, not {other}"),
         },
-        ColumnType::Text => match row.try_get::<Option<String>, _>(index)? {
-            None => None,
-            Some(text) => {
-                if let Some(vocabulary) = column.vocabulary
-                    && !vocabulary.admits(&text)
-                {
-                    return Err(anyhow!(
-                        "the stored value {text:?} is not in the vocabulary this build knows"
-                    ));
-                }
-                Some(Value::String(text))
-            }
-        },
+        ColumnType::Text => row.try_get::<Option<String>, _>(index)?.map(Value::String),
     };
-    match value {
-        Some(value) => Ok(value),
-        None if column.nullable => Ok(Value::Null),
-        None => Err(anyhow!("a null where the format carries no null")),
-    }
+    Ok(value.unwrap_or(Value::Null))
 }

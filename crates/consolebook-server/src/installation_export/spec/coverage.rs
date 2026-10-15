@@ -7,7 +7,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use anyhow::{Context, Result};
 use sqlx::{Row, SqliteConnection};
 
-use super::{ColumnType, EXCLUSIONS, TABLES, Table, UNIT_COLUMNS, Vocabulary, exclusion, table};
+use super::{
+    ColumnType, EXCLUSIONS, Exclusion, TABLES, Table, UNIT_COLUMNS, Vocabulary, exclusion, table,
+};
 
 /// One difference between the migrated schema and the specification.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,22 +48,30 @@ pub enum CoverageFinding {
         stored: Vec<String>,
         spec: Vec<String>,
     },
-    /// The column's stored foreign key names a different table than the
-    /// specified reference (or one exists where none is specified, or the
-    /// reverse).
-    Reference {
+    /// A stored foreign key on the column — the table its value names,
+    /// and whether the same key pins `program_version_id` — that the
+    /// specification does not declare. Every foreign key is compared, so
+    /// a second key on a column is reported, never hidden by the first.
+    ReferenceNotInSpec {
         table: String,
         column: String,
-        stored: Option<String>,
-        spec: Option<&'static str>,
+        target: String,
+        pinned: bool,
     },
-    /// The stored composite key pins `program_version_id` where the
-    /// specification does not, or the reverse.
-    Agreement {
+    /// The specified reference (and its agreement) has no stored foreign
+    /// key of that shape.
+    ReferenceNotInSchema {
         table: String,
         column: String,
-        stored: bool,
+        target: &'static str,
+        pinned: bool,
     },
+    /// A dotted exclusion (`table.column`) or a column carried as units
+    /// names a column the schema does not have.
+    ExcludedColumnNotInSchema { name: String },
+    /// One name is both carried and excluded (or carried as units): the
+    /// ledger would state it twice.
+    CarriedAndExcluded { name: String },
 }
 
 /// One stored column, as `pragma table_info` reports it.
@@ -116,7 +126,50 @@ pub async fn coverage_findings(conn: &mut SqliteConnection) -> Result<Vec<Covera
         let references = stored_references(conn, name).await?;
         findings.extend(compare_table(spec, sql, &columns, &references));
     }
+    findings.extend(specification_findings(&TABLES, &EXCLUSIONS, &UNIT_COLUMNS));
+    // Every dotted exclusion and every unit column is a stored column.
+    let dotted = EXCLUSIONS
+        .iter()
+        .filter_map(|exclusion| exclusion.name.split_once('.'))
+        .chain(UNIT_COLUMNS);
+    for (table_name, column) in dotted {
+        let stored = stored_columns(conn, table_name).await?;
+        if !stored.iter().any(|stored| stored.name == column) {
+            findings.push(CoverageFinding::ExcludedColumnNotInSchema {
+                name: format!("{table_name}.{column}"),
+            });
+        }
+    }
     Ok(findings)
+}
+
+/// What the specification must say of itself, whatever the schema: no
+/// name is both carried and excluded, and no column carried as units is
+/// also carried in a document. Public so a test can hand it a
+/// specification that breaks the rule.
+#[must_use]
+pub fn specification_findings(
+    tables: &[Table],
+    exclusions: &[Exclusion],
+    unit_columns: &[(&str, &str)],
+) -> Vec<CoverageFinding> {
+    let carried = |name: &str| match name.split_once('.') {
+        None => tables.iter().any(|table| table.name == name),
+        Some((table, column)) => tables
+            .iter()
+            .any(|spec| spec.name == table && spec.column(column).is_some()),
+    };
+    exclusions
+        .iter()
+        .map(|exclusion| exclusion.name.to_owned())
+        .chain(
+            unit_columns
+                .iter()
+                .map(|(table, column)| format!("{table}.{column}")),
+        )
+        .filter(|name| carried(name))
+        .map(|name| CoverageFinding::CarriedAndExcluded { name })
+        .collect()
 }
 
 async fn stored_columns(conn: &mut SqliteConnection, table: &str) -> Result<Vec<StoredColumn>> {
@@ -136,15 +189,15 @@ async fn stored_columns(conn: &mut SqliteConnection, table: &str) -> Result<Vec<
         .collect())
 }
 
-/// What the stored foreign keys say about each column: the table its
-/// value names by `id`, and whether the same key pins
-/// `program_version_id` to the referenced row's. A foreign-key pair of
-/// any other shape is reported under the column as a reference to
-/// `table(column)`, which no specification entry matches.
+/// Every stored foreign key, by column: the table its value names by
+/// `id`, and whether the same key pins `program_version_id` to the
+/// referenced row's. A column with two keys has both. A foreign-key pair
+/// of any other shape is listed as a reference to `table(column)`, which
+/// no specification entry matches.
 async fn stored_references(
     conn: &mut SqliteConnection,
     table: &str,
-) -> Result<BTreeMap<String, (String, bool)>> {
+) -> Result<BTreeMap<String, BTreeSet<(String, bool)>>> {
     let rows: Vec<(i64, String, String, Option<String>)> = sqlx::query_as(
         r#"SELECT id, "table", "from", "to" FROM pragma_foreign_key_list(?1) ORDER BY id, seq"#,
     )
@@ -158,7 +211,7 @@ async fn stored_references(
             .or_default()
             .push((target, from, to.unwrap_or_default()));
     }
-    let mut references = BTreeMap::new();
+    let mut references: BTreeMap<String, BTreeSet<(String, bool)>> = BTreeMap::new();
     for pairs in keys.values() {
         let pinned = pairs
             .iter()
@@ -172,7 +225,10 @@ async fn stored_references(
             } else {
                 format!("{target}({to})")
             };
-            references.insert(from.clone(), (named, pinned));
+            references
+                .entry(from.clone())
+                .or_default()
+                .insert((named, pinned));
         }
     }
     // A `program_version_id` that only composite keys pin has no foreign
@@ -185,11 +241,11 @@ async fn stored_references(
                 .iter()
                 .any(|(_, from, to)| from == "program_version_id" && to == "program_version_id")
     });
-    if pins && !references.contains_key("program_version_id") {
-        references.insert(
-            "program_version_id".to_owned(),
-            ("program_version".to_owned(), false),
-        );
+    if pins {
+        references
+            .entry("program_version_id".to_owned())
+            .or_default()
+            .insert(("program_version".to_owned(), false));
     }
     Ok(references)
 }
@@ -198,7 +254,7 @@ fn compare_table(
     spec: &Table,
     sql: &str,
     columns: &[StoredColumn],
-    references: &BTreeMap<String, (String, bool)>,
+    references: &BTreeMap<String, BTreeSet<(String, bool)>>,
 ) -> Vec<CoverageFinding> {
     let mut findings = Vec::new();
     let table = spec.name.to_owned();
@@ -253,22 +309,26 @@ fn compare_table(
                 spec: spec_list,
             });
         }
-        let (stored_reference, stored_pinned) = match references.get(&stored.name) {
-            Some((target, pinned)) => (Some(target.clone()), *pinned),
-            None => (None, false),
-        };
-        if stored_reference.as_deref() != column.references {
-            findings.push(CoverageFinding::Reference {
+        let stored_keys = references.get(&stored.name).cloned().unwrap_or_default();
+        let declared = column.references.map(|target| (target, column.agrees));
+        for (target, pinned) in &stored_keys {
+            if declared != Some((target.as_str(), *pinned)) {
+                findings.push(CoverageFinding::ReferenceNotInSpec {
+                    table: table.clone(),
+                    column: stored.name.clone(),
+                    target: target.clone(),
+                    pinned: *pinned,
+                });
+            }
+        }
+        if let Some((target, pinned)) = declared
+            && !stored_keys.contains(&(target.to_owned(), pinned))
+        {
+            findings.push(CoverageFinding::ReferenceNotInSchema {
                 table: table.clone(),
                 column: stored.name.clone(),
-                stored: stored_reference,
-                spec: column.references,
-            });
-        } else if stored_pinned != column.agrees {
-            findings.push(CoverageFinding::Agreement {
-                table: table.clone(),
-                column: stored.name.clone(),
-                stored: stored_pinned,
+                target,
+                pinned,
             });
         }
     }
@@ -296,9 +356,11 @@ fn compare_table(
 
 /// Every `column IN (...)` literal list in a table's SQL, by column,
 /// merged and sorted: a column constrained in more than one place (a
-/// column check and a table check naming a subset) has the union. String
-/// literals lose their quotes; integers stay as written. Comments are
-/// skipped.
+/// column check and a table check naming a subset) has the union. The
+/// keyword matches in any case and after any whitespace, with or without
+/// space before its parenthesis. String literals lose their quotes;
+/// integers stay as written. Comments are skipped; `NOT IN` is not a
+/// vocabulary.
 #[must_use]
 pub fn in_lists(sql: &str) -> BTreeMap<String, Vec<String>> {
     let code: String = sql
@@ -309,13 +371,19 @@ pub fn in_lists(sql: &str) -> BTreeMap<String, Vec<String>> {
     let bytes = code.as_bytes();
     let mut lists: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let is_word = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_';
-    let mut at = 0;
-    while let Some(found) = code[at..].find(" IN") {
-        let start = at + found;
-        at = start + 3;
-        // The keyword is followed by optional space and an opening paren.
-        let rest = code[at..].trim_start();
-        if !rest.starts_with('(') || bytes.get(at).is_some_and(|b| is_word(*b)) {
+    let mut at = 1;
+    while at + 2 <= bytes.len() {
+        let start = at;
+        at += 1;
+        // `IN` as a whole word after whitespace, then an opening paren.
+        if !bytes[start..start + 2].eq_ignore_ascii_case(b"in")
+            || !bytes[start - 1].is_ascii_whitespace()
+            || bytes.get(start + 2).is_some_and(|byte| is_word(*byte))
+        {
+            continue;
+        }
+        let rest = code[start + 2..].trim_start();
+        if !rest.starts_with('(') {
             continue;
         }
         // The identifier immediately before the keyword.

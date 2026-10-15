@@ -157,8 +157,9 @@ pub enum Finding {
     /// The predecessor is in the archive and its content hash is not
     /// what this unit's chain was computed over.
     PredecessorMismatch,
-    /// A packet carries every retained version, so a unit whose
-    /// predecessor is not carried is a hole in the lineage.
+    /// A trainee packet and an installation export carry every retained
+    /// version, so a unit whose predecessor is not carried is a hole in
+    /// the lineage.
     PredecessorNotCarried,
     /// A packet document disagrees with the pin history the lifecycle
     /// events and the manifest define.
