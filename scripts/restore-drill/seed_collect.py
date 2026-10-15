@@ -17,6 +17,8 @@ the manifests.
 Everything here is invented: agency, people, dates, and narratives.
 """
 
+from __future__ import annotations  # Python 3.8: annotations stay unevaluated
+
 import hashlib
 import http.cookiejar
 import json
