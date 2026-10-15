@@ -34,7 +34,9 @@ while the proxy or its certificate is not.
 systemctl is-active consolebook
 ```
 
-`active` means the service is running. systemd restarts it if it exits.
+`active` means the service is running. systemd restarts it when it fails
+(`Restart=on-failure`), but a service that was stopped, or exited cleanly,
+stays stopped, so check for `active` whatever the reason.
 
 ### Are backups reaching their copy?
 
