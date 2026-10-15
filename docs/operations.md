@@ -137,6 +137,13 @@ Jordan Example saved a daily evaluation for the invented session on
 2026-10-14 and the page said 'did not save'". Read log lines before
 pasting them; replace anything that identifies a person or a call.
 
+**Remove every `setup_code=` value before pasting a log.** Until first-run
+setup is complete, the log carries the setup code, and anyone who has it and
+can reach the server can create the first administrator. Replace it with
+`setup_code=REDACTED`, along with any password, reset code, or session
+cookie that ended up in something you paste. If you cannot tell whether a
+log is safe to share, report through [SECURITY.md](../SECURITY.md) instead.
+
 ## What support to expect
 
 Consolebook is pre-alpha, maintained in the open, with **no support commitment**:
