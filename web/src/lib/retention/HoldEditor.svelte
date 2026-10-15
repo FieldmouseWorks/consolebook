@@ -1,6 +1,6 @@
 <script lang="ts">
-    import { ApiError } from '$lib/api/transport';
-    import { saveHold, holdLabels, type Hold, type HoldKind, type HoldScope, type ScopeOptions } from '$lib/api/retention';
+    import { ApiError } from '#lib/api/transport.js';
+    import { saveHold, holdLabels, type Hold, type HoldKind, type HoldScope, type ScopeOptions } from '#lib/api/retention.js';
     let { previous = null, options, onSaved, onCancel }: { previous?: Hold | null; options: ScopeOptions; onSaved: () => Promise<void>; onCancel: () => void } = $props();
     let scopeKind = $state<HoldScope['kind']>('installation');
     let scopeId = $state(0);

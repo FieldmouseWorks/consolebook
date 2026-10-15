@@ -1,8 +1,8 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { goto, invalidateAll } from '$app/navigation';
+	import { goto, refreshAll } from '$app/navigation';
 	import { page } from '$app/state';
-	import { logout } from '$lib/api';
+	import { logout } from '#lib/api.js';
 	import type { ShellData } from './+layout';
 
 	let { data, children }: { data: ShellData; children: Snippet } = $props();
@@ -29,7 +29,7 @@
 				if (here() !== '/') return;
 			}
 			await logout();
-			await invalidateAll();
+			await refreshAll();
 			await goto('/login');
 		} finally {
 			signingOut = false;

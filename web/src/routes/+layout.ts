@@ -5,7 +5,7 @@ export const prerender = false;
 
 import { redirect } from '@sveltejs/kit';
 import type { LayoutLoad } from './$types';
-import { getInstance, getNotices, getSession, type Instance, type Session } from '$lib/api';
+import { getInstance, getNotices, getSession, type Instance, type Session } from '#lib/api.js';
 
 export interface ShellData {
 	instance: Instance;

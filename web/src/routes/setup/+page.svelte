@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { goto, invalidateAll } from '$app/navigation';
-	import { ApiError, completeSetup } from '$lib/api';
+	import { goto, refreshAll } from '$app/navigation';
+	import { ApiError, completeSetup } from '#lib/api.js';
 
 	let setupCode = $state('');
 	let agencyName = $state('');
@@ -22,7 +22,7 @@
 				display_name: displayName,
 				password
 			});
-			await invalidateAll();
+			await refreshAll();
 			await goto('/login');
 		} catch (err) {
 			error = err instanceof ApiError ? err.message : 'the server could not be reached';

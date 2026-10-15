@@ -1,10 +1,10 @@
 <script lang="ts">
-    import { ApiError } from '$lib/api/transport';
-    import { listPolicies, listHolds, listScopes, releaseHold, recordHolds, classLabels, triggerLabels, holdLabels, scopeLabel, type Policy, type Hold, type ScopeOptions } from '$lib/api/retention';
-    import PolicyEditor from '$lib/retention/PolicyEditor.svelte';
-    import HoldEditor from '$lib/retention/HoldEditor.svelte';
-    import AuthorityPanel from '$lib/retention/AuthorityPanel.svelte';
-    import { instant } from '$lib/format';
+    import { ApiError } from '#lib/api/transport.js';
+    import { listPolicies, listHolds, listScopes, releaseHold, recordHolds, classLabels, triggerLabels, holdLabels, scopeLabel, type Policy, type Hold, type ScopeOptions } from '#lib/api/retention.js';
+    import PolicyEditor from '#lib/retention/PolicyEditor.svelte';
+    import HoldEditor from '#lib/retention/HoldEditor.svelte';
+    import AuthorityPanel from '#lib/retention/AuthorityPanel.svelte';
+    import { instant } from '#lib/format.js';
     import type { ShellData } from '../+layout';
     let { data }: { data: ShellData } = $props();
     let canManage = $derived(data.session?.capabilities.includes('manage_retention') ?? false);

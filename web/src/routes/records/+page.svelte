@@ -8,9 +8,9 @@
 		type AckKind,
 		type OwnEnrollment,
 		type TimelineRecord
-	} from '$lib/api';
-	import SignoffHistoryPanel from '$lib/signoffs/SignoffHistoryPanel.svelte';
-	import { instant } from '$lib/format';
+	} from '#lib/api.js';
+	import SignoffHistoryPanel from '#lib/signoffs/SignoffHistoryPanel.svelte';
+	import { instant } from '#lib/format.js';
 	import type { ShellData } from '../+layout';
 
 	let { data }: { data: ShellData } = $props();

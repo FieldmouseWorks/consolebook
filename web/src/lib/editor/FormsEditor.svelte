@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { FormDef, RecordType } from '$lib/api';
+	import type { FormDef, RecordType } from '#lib/api.js';
 
 	let {
 		forms = $bindable(),

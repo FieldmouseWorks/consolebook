@@ -1,8 +1,8 @@
 <script lang="ts">
 	// Backup health for administrators (ADR 0024). Copies off the server are
 	// pressed for, not required: the warning stays until they are current.
-	import { BACKUP_DIR_COMMAND, type BackupStatus } from '$lib/api';
-	import { instant } from '$lib/format';
+	import { BACKUP_DIR_COMMAND, type BackupStatus } from '#lib/api.js';
+	import { instant } from '#lib/format.js';
 
 	let { status }: { status: BackupStatus } = $props();
 

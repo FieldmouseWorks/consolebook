@@ -2,7 +2,7 @@
 	// Local text missing from the server copy, kept in memory after a
 	// refused or unconfirmed save (#34; ADR 0008). Read-only and copyable:
 	// this component never merges, resubmits, or persists the buffer.
-	import type { RefusedBuffer } from '$lib/drafts/editor.svelte';
+	import type { RefusedBuffer } from '#lib/drafts/editor.svelte.js';
 
 	let {
 		buffers,

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { beforeNavigate, goto } from '$app/navigation';
-	import ProblemState from '$lib/ui/ProblemState.svelte';
+	import ProblemState from '#lib/ui/ProblemState.svelte';
 	import { navigating, page } from '$app/state';
 	import { untrack } from 'svelte';
 	import {
@@ -38,16 +38,16 @@
 		type TraineeAckKind,
 		type Verification,
 		type VersionHistoryRow
-	} from '$lib/api';
+	} from '#lib/api.js';
 	import {
 		DraftEditorController,
 		divergentBuffer,
 		openForEditing,
 		type EditorSnapshot,
 		type SaveResult
-	} from '$lib/drafts/editor.svelte';
-	import RefusedTextPanel from '$lib/drafts/RefusedTextPanel.svelte';
-	import { instant } from '$lib/format';
+	} from '#lib/drafts/editor.svelte.js';
+	import RefusedTextPanel from '#lib/drafts/RefusedTextPanel.svelte';
+	import { instant } from '#lib/format.js';
 	import type { ShellData } from '../../+layout';
 
 	let { data }: { data: ShellData } = $props();
@@ -140,9 +140,8 @@
 		// depth intact. Only a real router settlement unlocks the editor.
 		try {
 			await goto(page.url.href, {
-				replaceState: true,
-				keepFocus: true,
-				noScroll: true,
+				replace: true,
+				reset: false,
 				state: page.state
 			});
 		} catch {

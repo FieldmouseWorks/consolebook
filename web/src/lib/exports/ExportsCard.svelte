@@ -9,7 +9,7 @@
 		exportSummary,
 		installationExportPath,
 		type ExportSummary
-	} from '$lib/api';
+	} from '#lib/api.js';
 
 	let { busy = $bindable() }: { busy: boolean } = $props();
 

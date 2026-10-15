@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { PhaseDef, TransitionDef, TransitionKind } from '$lib/api';
+	import type { PhaseDef, TransitionDef, TransitionKind } from '#lib/api.js';
 
 	let {
 		phases = $bindable(),

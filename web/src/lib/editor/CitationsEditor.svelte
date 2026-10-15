@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { CitationDef } from '$lib/api';
+	import type { CitationDef } from '#lib/api.js';
 
 	let {
 		citations = $bindable(),

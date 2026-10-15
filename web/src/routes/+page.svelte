@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { goto, invalidateAll } from '$app/navigation';
+	import { goto, refreshAll } from '$app/navigation';
 	import {
 		ApiError,
 		closeSession,
@@ -25,10 +25,10 @@
 		type BackupStatus,
 		type Role,
 		type SessionDisposition
-	} from '$lib/api';
-	import { capabilityName, instant, localSpan } from '$lib/format';
-	import BackupHealth from '$lib/backups/BackupHealth.svelte';
-	import ExportsCard from '$lib/exports/ExportsCard.svelte';
+	} from '#lib/api.js';
+	import { capabilityName, instant, localSpan } from '#lib/format.js';
+	import BackupHealth from '#lib/backups/BackupHealth.svelte';
+	import ExportsCard from '#lib/exports/ExportsCard.svelte';
 	import type { ShellData } from './+layout';
 
 	let { data }: { data: ShellData } = $props();
@@ -104,7 +104,7 @@
 	async function acknowledge(notice: Notice) {
 		await markNoticeRead(notice.id);
 		notices = (await getNotices()).notices;
-		await invalidateAll();
+		await refreshAll();
 	}
 
 	// Unread notices lead; read ones stay one click away. Five unread are
@@ -125,7 +125,7 @@
 		} finally {
 			notices = (await getNotices()).notices;
 			markingAll = false;
-			await invalidateAll();
+			await refreshAll();
 		}
 	}
 

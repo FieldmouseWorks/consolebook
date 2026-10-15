@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { ModifierDef, ScaleDef, ScaleKind } from '$lib/api';
+	import type { ModifierDef, ScaleDef, ScaleKind } from '#lib/api.js';
 
 	let {
 		scales = $bindable(),

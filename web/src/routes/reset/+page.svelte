@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { ApiError, resetPassword } from '$lib/api';
+	import { ApiError, resetPassword } from '#lib/api.js';
 
 	let username = $state('');
 	let resetCode = $state('');
