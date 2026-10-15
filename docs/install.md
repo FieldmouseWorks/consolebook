@@ -234,9 +234,27 @@ sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook consolebook restor
 sudo systemctl start consolebook
 ```
 
-If the server's disk is gone, install on a new machine with the same
-`--backup-dir`, stop the service, and restore the newest file from the copy
-directory the same way.
+If the server's disk is gone, recover on a new machine:
+
+1. Mount the copy directory there and install with the same `--backup-dir`.
+   Until step 3, the new installation refuses to copy into a directory that
+   holds another installation's backups, and logs why. That is expected: it
+   keeps your copies from being buried under the new, empty database.
+2. Stop the service: `sudo systemctl stop consolebook`.
+3. Restore the newest copy. `ls -t` lists the newest first, and the time is
+   also in each name:
+
+   ```sh
+   ls -t /mnt/backups/consolebook
+   sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook consolebook restore /mnt/backups/consolebook/<newest copy>
+   ```
+
+   The restore prints the installation id, which is the lost server's, and
+   backs up the restored database; the service copies that backup off the
+   server next.
+4. Start the service (`sudo systemctl start consolebook`), sign in with an
+   existing account, and run the `doctor` command above until the backup
+   copy is `current`.
 
 ## Day to day
 
@@ -245,6 +263,7 @@ directory the same way.
 | Is it running? | `systemctl status consolebook` |
 | Logs | `journalctl -u consolebook` |
 | Which version? | `consolebook --version`, or the footer of any page |
+| What to monitor, logs, reporting a problem | [Operating a pilot installation](operations.md) |
 | Locked out administrator | `sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook consolebook recover --username NAME` |
 | Change the listen address | edit `CONSOLEBOOK_BIND` in `/etc/consolebook/consolebook.env`, then `sudo systemctl restart consolebook` |
 

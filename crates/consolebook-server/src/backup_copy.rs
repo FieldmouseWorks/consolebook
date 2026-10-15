@@ -14,8 +14,15 @@
 //! empty mount point), and a copy there shares the failure it exists to
 //! survive.
 //!
+//! A copy directory holds one installation's backups. A copy is refused
+//! when the directory's newest copy belongs to another installation: a new
+//! server set up to replace a lost one would otherwise copy its own empty
+//! database there as the newest backup, and prune the real ones (#115).
+//! Only this installation's own backups are copied, never the database a
+//! restore set aside.
+//!
 //! Health is read from the files themselves, never from stored state: a
-//! copy is current exactly when the newest local snapshot's file name is
+//! copy is current exactly when the newest local backup's file name is
 //! present in a copy directory on another filesystem.
 
 use std::fs::File;
@@ -51,10 +58,11 @@ pub struct CopyReport {
 /// Copies one validated local snapshot into `copy_dir` and prunes there.
 ///
 /// Refuses a missing or non-directory target, one on the snapshot's own
-/// filesystem, and an existing copy of the same name. A copy that does not
-/// match the snapshot, or whose rename cannot be made durable, is removed so
-/// the next attempt makes it again; the local snapshot is never touched.
-pub fn copy_snapshot(snapshot: &Path, copy_dir: &Path, keep: usize) -> Result<CopyReport> {
+/// filesystem, one holding another installation's backups, and an existing
+/// copy of the same name. A copy that does not match the snapshot, or whose
+/// rename cannot be made durable, is removed so the next attempt makes it
+/// again; the local snapshot is never touched.
+pub async fn copy_snapshot(snapshot: &Path, copy_dir: &Path, keep: usize) -> Result<CopyReport> {
     let name = snapshot
         .file_name()
         .context("snapshot path has no file name")?
@@ -77,6 +85,7 @@ pub fn copy_snapshot(snapshot: &Path, copy_dir: &Path, keep: usize) -> Result<Co
     if let Some(problem) = shares_filesystem(copy_dir, local_dir)? {
         bail!("backup copy directory {}: {problem}", copy_dir.display());
     }
+    ensure_same_installation(snapshot, copy_dir).await?;
     let target = copy_dir.join(&name);
     if target.exists() {
         bail!(
@@ -127,22 +136,69 @@ pub fn copy_snapshot(snapshot: &Path, copy_dir: &Path, keep: usize) -> Result<Co
 /// copy that failed (or a copy directory added later) catches up without
 /// waiting for the next backup. When the newest copy is already there, it
 /// finishes retention instead, which a prune that failed after its copy
-/// left undone. Returns `None` when no copy was made.
-pub fn catch_up(data_dir: &DataDir, copy_dir: &Path, keep: usize) -> Result<Option<CopyReport>> {
-    let Some(newest) = backup::snapshots(data_dir)?.pop() else {
+/// left undone; that prune deletes nothing until the directory is known to
+/// be this installation's, since a file of the same name may be another's.
+/// Returns `None` when no copy was made.
+pub async fn catch_up(
+    data_dir: &DataDir,
+    copy_dir: &Path,
+    keep: usize,
+) -> Result<Option<CopyReport>> {
+    let Some(newest) = backup::own_backups_in(&data_dir.backups())?.pop() else {
         return Ok(None);
     };
     let name = newest
         .file_name()
         .context("snapshot path has no file name")?;
     if !copy_dir.join(name).exists() {
-        return copy_snapshot(&newest, copy_dir, keep).map(Some);
+        return copy_snapshot(&newest, copy_dir, keep).await.map(Some);
     }
     if let Some(problem) = shares_filesystem(copy_dir, &data_dir.backups())? {
         bail!("backup copy directory {}: {problem}", copy_dir.display());
     }
-    backup::prune_in(copy_dir, keep)?;
+    if backup::snapshots_in(copy_dir)?.len() > keep.max(1) {
+        ensure_same_installation(&newest, copy_dir).await?;
+        backup::prune_in(copy_dir, keep)?;
+    }
     Ok(None)
+}
+
+/// Refuses `snapshot` when the copy directory belongs to another
+/// installation: the one in its newest readable backup or, failing any,
+/// its newest readable copy of any kind (an earlier release copied
+/// pre-restore snapshots too). Both are read from the files, so a copy
+/// directory written before this check existed is protected too. A file
+/// that cannot be read as a backup restores nothing, so it neither claims
+/// the directory nor blocks the copy that replaces it. A copy directory
+/// with nothing readable belongs to whoever copies there first.
+async fn ensure_same_installation(snapshot: &Path, copy_dir: &Path) -> Result<()> {
+    let own = backup::own_backups_in(copy_dir)?;
+    let others = backup::snapshots_in(copy_dir)?
+        .into_iter()
+        .filter(|path| !own.contains(path));
+    let mut candidates: Vec<PathBuf> = own.iter().rev().cloned().collect();
+    candidates.extend(others.rev());
+    let mut theirs = None;
+    for copy in &candidates {
+        if let Ok(id) = backup::snapshot_installation(copy).await {
+            theirs = Some(id);
+            break;
+        }
+    }
+    let Some(theirs) = theirs else {
+        return Ok(());
+    };
+    let ours = backup::snapshot_installation(snapshot).await?;
+    if theirs != ours {
+        bail!(
+            "backup copy directory {} holds the backups of installation {theirs}, and this \
+             is installation {ours}; copying here would bury them. If this server replaces \
+             that installation, stop the service and restore the newest copy there \
+             (docs/install.md); otherwise give this installation its own copy directory",
+            copy_dir.display()
+        );
+    }
+    Ok(())
 }
 
 const SAME_FILESYSTEM: &str = "is on the same filesystem as the local backups, so it is not \
@@ -197,7 +253,8 @@ pub struct BackupStatus {
 pub struct LocalStatus {
     pub directory: String,
     pub count: usize,
-    /// File name of the newest snapshot, which carries its UTC timestamp.
+    /// File name of the newest backup of this installation (never a database
+    /// a restore set aside), which carries its UTC timestamp.
     pub newest: Option<String>,
     /// Unix time the newest snapshot was written.
     pub newest_at: Option<i64>,
@@ -247,10 +304,7 @@ pub async fn status_for(
 pub fn status(settings: &BackupSettings) -> Result<BackupStatus> {
     let local_dir = settings.data_dir.backups();
     let local = backup::snapshots(&settings.data_dir)?;
-    let newest_local = local
-        .last()
-        .and_then(|path| path.file_name())
-        .map(|name| name.to_string_lossy().into_owned());
+    let newest_local = newest_own_backup(&settings.data_dir)?;
     let copy = copy_status_of(
         settings.copy_dir.as_deref(),
         &local_dir,
@@ -273,15 +327,19 @@ pub fn status(settings: &BackupSettings) -> Result<BackupStatus> {
 /// never creates, writes, or repairs the copy directory, so `doctor` can
 /// use it (ADR 0003).
 pub fn copy_status(data_dir: &DataDir, copy_dir: Option<&Path>) -> Result<CopyStatus> {
-    let newest_local = backup::snapshots(data_dir)?
-        .last()
-        .and_then(|path| path.file_name())
-        .map(|name| name.to_string_lossy().into_owned());
     Ok(copy_status_of(
         copy_dir,
         &data_dir.backups(),
-        newest_local.as_deref(),
+        newest_own_backup(data_dir)?.as_deref(),
     ))
+}
+
+/// The file name of the newest backup that catch-up would copy.
+fn newest_own_backup(data_dir: &DataDir) -> Result<Option<String>> {
+    Ok(backup::own_backups_in(&data_dir.backups())?
+        .last()
+        .and_then(|path| path.file_name())
+        .map(|name| name.to_string_lossy().into_owned()))
 }
 
 fn copy_status_of(
