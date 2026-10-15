@@ -223,11 +223,8 @@ def collect(base: str, out: Path) -> None:
             misses += 1
             continue
         misses = 0
-        ack = None
-        try:
-            ack = admin.call("GET", f"/api/drafts/{record_id}/acknowledgment")
-        except SystemExit:
-            pass
+        # No acknowledgment reads as {"acknowledgment": null}; any error stops the drill.
+        ack = admin.call("GET", f"/api/drafts/{record_id}/acknowledgment")
         archive = admin.call("GET", f"/api/drafts/{record_id}/export", raw=True)
         path = out / f"record-{record_id}.zip"
         path.write_bytes(archive)
