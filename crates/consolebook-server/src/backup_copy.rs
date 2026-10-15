@@ -251,10 +251,11 @@ pub fn status(settings: &BackupSettings) -> Result<BackupStatus> {
         .last()
         .and_then(|path| path.file_name())
         .map(|name| name.to_string_lossy().into_owned());
-    let copy = match &settings.copy_dir {
-        None => CopyStatus::NotConfigured,
-        Some(dir) => copy_status(dir, &local_dir, newest_local.as_deref()),
-    };
+    let copy = copy_status_of(
+        settings.copy_dir.as_deref(),
+        &local_dir,
+        newest_local.as_deref(),
+    );
     Ok(BackupStatus {
         interval_hours: settings.interval_hours,
         keep: settings.keep,
@@ -268,7 +269,29 @@ pub fn status(settings: &BackupSettings) -> Result<BackupStatus> {
     })
 }
 
-fn copy_status(dir: &Path, local_dir: &Path, newest_local: Option<&str>) -> CopyStatus {
+/// Where off-server copies stand, from the files alone. Reads only: it
+/// never creates, writes, or repairs the copy directory, so `doctor` can
+/// use it (ADR 0003).
+pub fn copy_status(data_dir: &DataDir, copy_dir: Option<&Path>) -> Result<CopyStatus> {
+    let newest_local = backup::snapshots(data_dir)?
+        .last()
+        .and_then(|path| path.file_name())
+        .map(|name| name.to_string_lossy().into_owned());
+    Ok(copy_status_of(
+        copy_dir,
+        &data_dir.backups(),
+        newest_local.as_deref(),
+    ))
+}
+
+fn copy_status_of(
+    copy_dir: Option<&Path>,
+    local_dir: &Path,
+    newest_local: Option<&str>,
+) -> CopyStatus {
+    let Some(dir) = copy_dir else {
+        return CopyStatus::NotConfigured;
+    };
     let directory = dir.display().to_string();
     match std::fs::metadata(dir) {
         Ok(metadata) if metadata.is_dir() => {}
