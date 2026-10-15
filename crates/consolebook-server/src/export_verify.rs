@@ -466,6 +466,8 @@ pub fn verify_archive(bytes: &[u8]) -> ArchiveReport {
         .collect()
     {
         Ok(names) => names,
+        // Fail closed if a name cannot be decoded; unreachable with zip 9.0.3
+        // (UTF-8 first, then CP437, which maps every byte), kept for upgrades.
         Err(err) => {
             report.findings.push(Finding::NotAnArchive {
                 detail: err.to_string(),

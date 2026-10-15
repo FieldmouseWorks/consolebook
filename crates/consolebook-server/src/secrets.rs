@@ -104,8 +104,8 @@ pub fn hash_password(password: &str) -> Result<String> {
 }
 
 /// Verifies a password against a stored PHC string.
-#[must_use]
 /// A string that does not parse as a PHC hash verifies nothing.
+#[must_use]
 pub fn verify_password(password: &str, phc_string: &str) -> bool {
     Argon2::default()
         .verify_password(password.as_bytes(), phc_string)

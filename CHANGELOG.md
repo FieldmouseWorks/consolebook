@@ -23,6 +23,14 @@ not a production-readiness statement.
   [format](docs/formats/installation-export.md)). The archive is not
   encrypted.
 
+### Changed
+
+- Building from source needs Rust 1.99 (`rust-toolchain.toml`), and the
+  bundled SQLite is now 3.51.3 (was 3.46.0) with sqlx 0.9. Existing data
+  directories open unchanged: their recorded migrations, records, exports,
+  and passwords are byte-for-byte compatible, and a test pins the released
+  migration checksums and the export container's bytes.
+
 ## [0.2.0] - 2026-10-15
 
 Safer upgrades and recovery for a pilot: a backup before every migration,
