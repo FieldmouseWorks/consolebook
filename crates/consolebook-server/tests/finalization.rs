@@ -166,7 +166,7 @@ impl Fixture {
         .expect("modifier id")
     }
 
-    async fn count(&self, sql: &str, bind: i64) -> i64 {
+    async fn count(&self, sql: &'static str, bind: i64) -> i64 {
         sqlx::query_scalar(sql)
             .bind(bind)
             .fetch_one(&self.pool)

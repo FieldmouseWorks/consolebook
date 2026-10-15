@@ -150,7 +150,7 @@ impl Fixture {
         created.id
     }
 
-    async fn id(&self, sql: &str, bind: i64) -> i64 {
+    async fn id(&self, sql: &'static str, bind: i64) -> i64 {
         sqlx::query_scalar(sql)
             .bind(bind)
             .fetch_one(&self.pool)
@@ -159,10 +159,13 @@ impl Fixture {
     }
 
     async fn count(&self, table: &str) -> i64 {
-        sqlx::query_scalar(&format!("SELECT COUNT(*) FROM \"{table}\""))
-            .fetch_one(&self.pool)
-            .await
-            .expect("count")
+        // Audited: `table` is a name from the specification's static list.
+        sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT COUNT(*) FROM \"{table}\""
+        )))
+        .fetch_one(&self.pool)
+        .await
+        .expect("count")
     }
 
     async fn installation_audits(
@@ -650,7 +653,7 @@ fn entries(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
         let mut file = archive.by_index(index).expect("entry");
         let mut content = Vec::new();
         file.read_to_end(&mut content).expect("read");
-        out.push((file.name().to_owned(), content));
+        out.push((file.name().expect("entry name").into_owned(), content));
     }
     out
 }
@@ -907,7 +910,8 @@ async fn an_installation_without_finalized_versions_still_exports() {
     let fx = Fixture::new().await;
     let bytes = export(&fx, fx.admin_id).await;
     let listed = entries(&bytes);
-    assert!(manifest_of(&listed).units.is_empty());
+    let units = manifest_of(&listed).units;
+    assert!(units.is_empty(), "{units:?}");
     let report = export_verify::verify_archive(&bytes);
     assert!(report.verified(), "{:#?}", all_findings(&report));
 }

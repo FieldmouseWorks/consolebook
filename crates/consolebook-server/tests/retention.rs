@@ -549,7 +549,8 @@ async fn storage_refuses_mutated_history_and_invalid_shapes() {
             format!("UPDATE {table} SET reason='changed'"),
             format!("DELETE FROM {table}"),
         ] {
-            let error = sqlx::query(&sql)
+            // Audited: `table` comes from the literal list above.
+            let error = sqlx::query(sqlx::AssertSqlSafe(sql))
                 .execute(&fx.pool)
                 .await
                 .expect_err("append-only")
@@ -592,13 +593,11 @@ async fn authority_audit_failure_leaves_no_partial_state() {
             .await
             .expect("grant rolled back")
     );
-    assert!(
-        retention::authority_history(&fx.pool, 1)
-            .await
-            .expect("call")
-            .expect("history")
-            .is_empty()
-    );
+    let history = retention::authority_history(&fx.pool, 1)
+        .await
+        .expect("call")
+        .expect("history");
+    assert!(history.is_empty(), "{history:?}");
 }
 
 #[tokio::test]
@@ -611,13 +610,11 @@ async fn policy_audit_failure_leaves_no_partial_state() {
             .await
             .is_err()
     );
-    assert!(
-        retention::list_policies(&fx.pool, 2)
-            .await
-            .expect("call")
-            .expect("policies")
-            .is_empty()
-    );
+    let policies = retention::list_policies(&fx.pool, 2)
+        .await
+        .expect("call")
+        .expect("policies");
+    assert!(policies.is_empty(), "{policies:?}");
 }
 
 #[tokio::test]

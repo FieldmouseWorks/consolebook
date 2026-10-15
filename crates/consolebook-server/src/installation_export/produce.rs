@@ -231,7 +231,9 @@ async fn read_document(
         quoted(table.name),
         key.join(", ")
     );
-    let mut rows = sqlx::query(&sql).fetch(&mut *conn);
+    // Audited: every identifier is a `&'static str` from the specification
+    // (`spec::TABLES`), quoted; no value from input reaches this text.
+    let mut rows = sqlx::query(sqlx::AssertSqlSafe(sql)).fetch(&mut *conn);
     let mut out = Vec::new();
     while let Some(row) = rows
         .try_next()

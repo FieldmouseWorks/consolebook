@@ -79,9 +79,11 @@ async fn excluded_values(fx: &Fixture) -> Vec<(&'static str, Vec<String>)> {
         };
         let mut values = Vec::new();
         for column in columns {
-            let found: Vec<String> = sqlx::query_scalar(&format!(
+            // Audited: `table` and `column` are names from the specification
+            // or the schema's own column list, never from input.
+            let found: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                 "SELECT \"{column}\" FROM \"{table}\" WHERE \"{column}\" IS NOT NULL"
-            ))
+            )))
             .fetch_all(&fx.pool)
             .await
             .expect("credentials");

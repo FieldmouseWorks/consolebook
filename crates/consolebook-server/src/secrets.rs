@@ -7,7 +7,7 @@
 
 use anyhow::Result;
 use argon2::Argon2;
-use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use sha2::{Digest, Sha256};
 
 /// Minimum accepted password length, in bytes of UTF-8.
@@ -93,23 +93,22 @@ pub fn check_password_policy(
 
 /// Hashes a password with Argon2id (v19, default parameters: 19 MiB memory,
 /// 2 iterations, 1 lane) into a PHC string that records its own parameters.
+/// The 16-byte salt is drawn here, from the same entropy source as every
+/// other secret, and recorded B64-encoded in the PHC string.
 pub fn hash_password(password: &str) -> Result<String> {
-    let salt = SaltString::encode_b64(&random_bytes(16)?)
-        .map_err(|err| anyhow::anyhow!("encoding salt: {err}"))?;
+    let salt = random_bytes(16)?;
     let hash = Argon2::default()
-        .hash_password(password.as_bytes(), &salt)
+        .hash_password_with_salt(password.as_bytes(), &salt)
         .map_err(|err| anyhow::anyhow!("hashing password: {err}"))?;
     Ok(hash.to_string())
 }
 
 /// Verifies a password against a stored PHC string.
 #[must_use]
+/// A string that does not parse as a PHC hash verifies nothing.
 pub fn verify_password(password: &str, phc_string: &str) -> bool {
-    let Ok(parsed) = PasswordHash::new(phc_string) else {
-        return false;
-    };
     Argon2::default()
-        .verify_password(password.as_bytes(), &parsed)
+        .verify_password(password.as_bytes(), phc_string)
         .is_ok()
 }
 

@@ -95,7 +95,9 @@ pub fn chain_hash_hex(predecessor_content_hash: Option<&str>, canonical: &[u8]) 
     Ok(to_hex(&hasher.finalize()))
 }
 
-fn to_hex(bytes: &[u8]) -> String {
+/// Lowercase hex of a byte string: the one encoding every stored and
+/// exported SHA-256 digest uses.
+pub(crate) fn to_hex(bytes: &[u8]) -> String {
     use std::fmt::Write;
     bytes.iter().fold(String::new(), |mut out, byte| {
         let _ = write!(out, "{byte:02x}");

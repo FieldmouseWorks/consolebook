@@ -235,7 +235,7 @@ fn sha256_file(path: &Path) -> Result<String> {
         }
         hasher.update(&buffer[..read]);
     }
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(crate::canonical::to_hex(&hasher.finalize()))
 }
 
 // ------------------------------------------------------------------ health

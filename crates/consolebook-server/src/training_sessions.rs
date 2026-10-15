@@ -572,10 +572,16 @@ fn session_from_row(row: &sqlx::sqlite::SqliteRow) -> SessionRow {
 }
 
 /// The session's daily draft as a scalar subselect — fan-out safe even
-/// though the coverage schema is many-to-many.
-const DRAFT_ID_SELECT: &str = "(SELECT es.evaluation_record_id FROM evaluation_session es
+/// though the coverage schema is many-to-many. A macro, not a `const`, so
+/// each query is one `concat!` literal: a `&'static str` that `SQLx` accepts
+/// as audited SQL without a runtime-built string.
+macro_rules! draft_id_select {
+    () => {
+        "(SELECT es.evaluation_record_id FROM evaluation_session es
           WHERE es.training_session_id = s.id
-          ORDER BY es.evaluation_record_id LIMIT 1) AS draft_id";
+          ORDER BY es.evaluation_record_id LIMIT 1) AS draft_id"
+    };
+}
 
 /// The enrollment's sessions, newest first, gated like the enrollment
 /// detail (capability plus assignment scope).
@@ -596,15 +602,17 @@ pub async fn list_for_enrollment(
     if exists.is_none() {
         return Ok(Err(SessionRefusal::NoSuchEnrollment));
     }
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(concat!(
         "SELECT s.id, s.enrollment_id, s.business_date, s.timezone, s.local_start,
                 s.local_end, s.utc_start, s.utc_end, s.phase_id, p.name AS phase_name,
                 s.disposition, s.created_at, s.created_by, s.closed_at, s.closed_by,
-                {DRAFT_ID_SELECT}
+                ",
+        draft_id_select!(),
+        "
          FROM training_session s
          LEFT JOIN phase p ON p.id = s.phase_id
          WHERE s.enrollment_id = ?1
-         ORDER BY s.utc_start DESC, s.id DESC",
+         ORDER BY s.utc_start DESC, s.id DESC"
     ))
     .bind(enrollment_id)
     .fetch_all(&mut *conn)
@@ -643,20 +651,22 @@ pub async fn get(
         return Ok(Err(SessionRefusal::CapabilityRequired));
     }
     let mut conn = pool.acquire().await.context("acquiring connection")?;
-    let Some(row) = sqlx::query(&format!(
+    let Some(row) = sqlx::query(concat!(
         "SELECT s.id, s.enrollment_id, s.business_date, s.timezone, s.local_start,
                 s.local_end, s.utc_start, s.utc_end, s.phase_id, p.name AS phase_name,
                 s.disposition, s.created_at, s.created_by, s.closed_at, s.closed_by,
                 e.user_id AS trainee_user_id, u.username AS trainee_username,
                 u.display_name AS trainee_display_name,
                 pv.program_id, pv.name AS program_name, pv.version_number,
-                {DRAFT_ID_SELECT}
+                ",
+        draft_id_select!(),
+        "
          FROM training_session s
          LEFT JOIN phase p ON p.id = s.phase_id
          JOIN enrollment e ON e.id = s.enrollment_id
          JOIN user u ON u.id = e.user_id
          JOIN program_version pv ON pv.id = s.program_version_id
-         WHERE s.id = ?1",
+         WHERE s.id = ?1"
     ))
     .bind(session_id)
     .fetch_optional(&mut *conn)
@@ -689,14 +699,16 @@ pub async fn list_mine(
     if !capabilities::user_has(pool, actor_user_id, Capability::AuthorEvaluation).await? {
         return Ok(Err(SessionRefusal::CapabilityRequired));
     }
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(concat!(
         "SELECT s.id AS session_id, s.enrollment_id, s.business_date, s.timezone,
                 s.local_start, s.local_end, s.utc_start, s.disposition,
                 p.name AS phase_name,
                 e.user_id AS trainee_user_id, u.username AS trainee_username,
                 u.display_name AS trainee_display_name,
                 pv.name AS program_name, pv.version_number,
-                {DRAFT_ID_SELECT}
+                ",
+        draft_id_select!(),
+        "
          FROM session_trainer st
          JOIN training_session s ON s.id = st.session_id
          LEFT JOIN phase p ON p.id = s.phase_id
@@ -704,7 +716,7 @@ pub async fn list_mine(
          JOIN user u ON u.id = e.user_id
          JOIN program_version pv ON pv.id = s.program_version_id
          WHERE st.trainer_user_id = ?1
-         ORDER BY (s.disposition IS NULL) DESC, s.utc_start DESC, s.id DESC",
+         ORDER BY (s.disposition IS NULL) DESC, s.utc_start DESC, s.id DESC"
     ))
     .bind(actor_user_id)
     .fetch_all(pool)

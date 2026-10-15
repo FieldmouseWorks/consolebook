@@ -66,7 +66,7 @@ async fn retention_keeps_newest_and_never_the_last() {
     assert_eq!(pruned.len(), 1);
     assert_eq!(backup::snapshots(&data_dir).expect("list").len(), 1);
     let pruned = backup::prune(&data_dir, 0).expect("prune");
-    assert!(pruned.is_empty());
+    assert!(pruned.is_empty(), "{pruned:?}");
 }
 
 #[tokio::test]

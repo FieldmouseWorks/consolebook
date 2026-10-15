@@ -672,7 +672,7 @@ async fn a_version_change_keeps_prior_version_signoffs_discoverable() {
     let current = task(&read, "Processes an invented medical call.");
     assert!(current.in_current_version);
     assert_eq!(current.current_kind, None);
-    assert!(current.signoffs.is_empty());
+    assert!(current.signoffs.is_empty(), "{:?}", current.signoffs);
 
     // The history is not concealed by an enrollment without a finalized
     // version: this enrollment has none, and both tasks are still there.
