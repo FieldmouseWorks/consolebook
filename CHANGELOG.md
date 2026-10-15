@@ -23,6 +23,11 @@ not a production-readiness statement.
   and the sign-in page points browsers that arrived by another address to it
   (ADR 0025). The install guide gives a tested Caddy configuration for HTTPS.
   Turning it on signs out sessions whose cookies were not `Secure`.
+- `doctor --backup-copy-dir` reports whether off-server backup copies are
+  current, behind, unreachable, or not configured, without writing anything.
+- [ADR 0027](docs/decisions/0027-backup-copy-encryption.md): Consolebook does
+  not encrypt backup copies; the install guide states what the share must
+  provide.
 
 - [Operating a pilot installation](docs/operations.md): what to monitor and
   how, the logs and their retention, reporting a problem, and what support a

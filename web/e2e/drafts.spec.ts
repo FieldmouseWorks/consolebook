@@ -448,7 +448,11 @@ test('draft, collaborate, transfer, and submit a daily evaluation', async ({ pag
 	await expect(page.getByText('Amended — v2')).toBeVisible();
 	await page.getByRole('link', { name: 'Open' }).click();
 	await page.getByRole('button', { name: 'Record acknowledgment' }).click();
-	await expect(page.getByText('Taylor Trainee acknowledged receipt', { exact: false })).toBeVisible();
+	// This version's acknowledgment, not version 1's line in the history.
+	const acknowledgment = page.locator('section', {
+		has: page.getByRole('heading', { name: 'Acknowledgment', exact: true })
+	});
+	await expect(acknowledgment.getByText('Taylor Trainee acknowledged receipt')).toBeVisible();
 
 	// The coordinator signs off tasks on the enrollment page: the first
 	// signoff is a plain act, changing it is an override with a reason.

@@ -69,7 +69,12 @@ enum Command {
         public_url: Option<PublicUrl>,
     },
     /// Diagnose an existing installation without modifying it.
-    Doctor,
+    Doctor {
+        /// The backup copy directory the service uses, to check that
+        /// copies are current (ADR 0024). Read only.
+        #[arg(long, env = "CONSOLEBOOK_BACKUP_COPY_DIR")]
+        backup_copy_dir: Option<PathBuf>,
+    },
     /// Take a validated, consistent snapshot of the database into backups/.
     Backup {
         /// Snapshots retention keeps in backups/.
@@ -159,7 +164,9 @@ async fn main() -> ExitCode {
             };
             serve(bind, settings, public_url).await
         }
-        Command::Doctor => run_doctor(&cli.data_dir).await,
+        Command::Doctor { backup_copy_dir } => {
+            run_doctor(&cli.data_dir, backup_copy_dir.as_deref()).await
+        }
         Command::Backup {
             keep,
             backup_copy_dir,
@@ -277,9 +284,12 @@ async fn serve(
     Ok(ExitCode::SUCCESS)
 }
 
-async fn run_doctor(data_dir: &std::path::Path) -> Result<ExitCode> {
+async fn run_doctor(
+    data_dir: &std::path::Path,
+    backup_copy_dir: Option<&std::path::Path>,
+) -> Result<ExitCode> {
     let data_dir = DataDir::new(data_dir);
-    let findings = doctor::run(&data_dir).await;
+    let findings = doctor::run(&data_dir, backup_copy_dir).await;
     for finding in &findings {
         let mark = match finding.verdict {
             Verdict::Ok => "ok  ",
