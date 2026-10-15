@@ -285,7 +285,7 @@ async fn a_fresh_pre_restore_snapshot_does_not_make_old_backups_look_current() {
         consolebook_server::scheduler::backup_due(Some(latest), now, 24 * 3600),
         "the set-aside database postponed the next backup"
     );
-    let findings = doctor::run(&data_dir, None).await;
+    let findings = doctor::run(&data_dir, &doctor::Options::default()).await;
     let backups = findings
         .iter()
         .find(|finding| finding.check == "backups")
