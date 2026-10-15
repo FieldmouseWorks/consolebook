@@ -73,6 +73,9 @@ step "destroy host A: binary, data, backups, logs"
 cp "$WORK/hostA.log" "$WORK/hostA.log.kept"
 rm -rf "$WORK/hostA"
 test ! -e "$WORK/hostA" && echo "host A is gone; only the copy directory and the recorded manifest remain"
+# Host A's newest copy, recorded before host B can add anything, for the
+# diagnostic fallback if the guide's "restore the newest copy" fails.
+A_NEWEST=$(printf '%s\n' "$COPY"/consolebook-2*.db | sort | tail -1)
 
 # A real replacement starts long after the last backup; snapshot names carry
 # the second, so keep host B's first backup from sharing host A's last name.
@@ -114,7 +117,7 @@ fi
 stop $PID
 
 if [[ $RESTORED_OK == 0 ]]; then
-  PRE=$(printf '%s\n' "$COPY"/consolebook-2*.db | sort | awk '{l[NR]=$0} END{print l[NR-1]}')
+  PRE=$A_NEWEST
   step "host B: restore the newest copy from before the loss instead: $(basename "$PRE")"
   "$BIN_B" restore "$PRE"
   "$BIN_B" serve --bind 127.0.0.1:$PORT_B --backup-copy-dir "$COPY" >"$WORK/hostB-3.log" 2>&1 &
@@ -131,8 +134,6 @@ step "compare before and after"
 python3 -I - "$WORK/before/manifest.json" "$WORK/after/manifest.json" <<'EOF'
 import json, sys
 a, b = (json.load(open(p)) for p in sys.argv[1:3])
-for key in ("installation_export_bytes",):
-    a.pop(key, None); b.pop(key, None)
 added = sorted(set(b["instance"]) - set(a["instance"]))
 for key in added:  # fields a newer version adds to /api/instance
     b["instance"].pop(key)

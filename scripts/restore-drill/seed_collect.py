@@ -25,6 +25,7 @@ import json
 import sys
 import urllib.error
 import urllib.request
+import zipfile
 from pathlib import Path
 
 AGENCY = "Example County Communications"
@@ -193,6 +194,15 @@ def seed(base: str, setup_code: str) -> None:
     print(f"seeded {len(DATES)} finalized records for enrollment {enrollment['id']}")
 
 
+def declared(archive: Path) -> dict:
+    """What an export says it holds: installation, scope, and every unit's
+    record, version, and hashes. Compared before and after, it proves each
+    export came back for the same records, not just that it verifies."""
+    with zipfile.ZipFile(archive) as z:
+        manifest = json.loads(z.read("manifest.json"))
+    return {key: manifest[key] for key in ("installation_id", "scope", "units")}
+
+
 def collect(base: str, out: Path) -> None:
     out.mkdir(parents=True, exist_ok=True)
     username, _, password = ADMIN
@@ -221,17 +231,20 @@ def collect(base: str, out: Path) -> None:
         archive = admin.call("GET", f"/api/drafts/{record_id}/export", raw=True)
         path = out / f"record-{record_id}.zip"
         path.write_bytes(archive)
+        export = declared(path)
+        if export["scope"] != {"kind": "record", "record_id": record_id}:
+            raise SystemExit(f"record {record_id}'s export declares {export['scope']}")
         manifest["records"].append(
             {
                 "record_id": record_id,
                 "meta": version["meta"],
                 "acknowledgment": ack,
-                "export": path.name,
+                "export": export,
             }
         )
     everything = admin.call("GET", "/api/exports/records", raw=True)
     (out / "installation.zip").write_bytes(everything)
-    manifest["installation_export_bytes"] = len(everything)
+    manifest["installation_export"] = declared(out / "installation.zip")
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     digest = hashlib.sha256((out / "manifest.json").read_bytes()).hexdigest()
     print(f"collected {len(manifest['records'])} records; manifest sha256 {digest}")
