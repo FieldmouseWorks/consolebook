@@ -136,7 +136,9 @@ pub async fn copy_snapshot(snapshot: &Path, copy_dir: &Path, keep: usize) -> Res
 /// copy that failed (or a copy directory added later) catches up without
 /// waiting for the next backup. When the newest copy is already there, it
 /// finishes retention instead, which a prune that failed after its copy
-/// left undone. Returns `None` when no copy was made.
+/// left undone; that prune deletes nothing until the directory is known to
+/// be this installation's, since a file of the same name may be another's.
+/// Returns `None` when no copy was made.
 pub async fn catch_up(
     data_dir: &DataDir,
     copy_dir: &Path,
@@ -154,19 +156,30 @@ pub async fn catch_up(
     if let Some(problem) = shares_filesystem(copy_dir, &data_dir.backups())? {
         bail!("backup copy directory {}: {problem}", copy_dir.display());
     }
-    backup::prune_in(copy_dir, keep)?;
+    if backup::snapshots_in(copy_dir)?.len() > keep.max(1) {
+        ensure_same_installation(&newest, copy_dir).await?;
+        backup::prune_in(copy_dir, keep)?;
+    }
     Ok(None)
 }
 
-/// Refuses `snapshot` when the newest readable backup already in
-/// `copy_dir` is another installation's. Both are read from the files, so a
-/// copy directory written before this check existed is protected too. A
-/// file that cannot be read as a backup restores nothing, so it neither
-/// claims the directory nor blocks the copy that replaces it. A copy
-/// directory with no readable backup belongs to whoever copies there first.
+/// Refuses `snapshot` when the copy directory belongs to another
+/// installation: the one in its newest readable backup or, failing any,
+/// its newest readable copy of any kind (an earlier release copied
+/// pre-restore snapshots too). Both are read from the files, so a copy
+/// directory written before this check existed is protected too. A file
+/// that cannot be read as a backup restores nothing, so it neither claims
+/// the directory nor blocks the copy that replaces it. A copy directory
+/// with nothing readable belongs to whoever copies there first.
 async fn ensure_same_installation(snapshot: &Path, copy_dir: &Path) -> Result<()> {
+    let own = backup::own_backups_in(copy_dir)?;
+    let others = backup::snapshots_in(copy_dir)?
+        .into_iter()
+        .filter(|path| !own.contains(path));
+    let mut candidates: Vec<PathBuf> = own.iter().rev().cloned().collect();
+    candidates.extend(others.rev());
     let mut theirs = None;
-    for copy in backup::own_backups_in(copy_dir)?.iter().rev() {
+    for copy in &candidates {
         if let Ok(id) = backup::snapshot_installation(copy).await {
             theirs = Some(id);
             break;

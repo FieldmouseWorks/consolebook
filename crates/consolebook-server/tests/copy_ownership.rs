@@ -201,3 +201,56 @@ async fn a_copy_directory_with_this_installations_backups_keeps_taking_them() {
         .expect("the same installation's next backup");
     assert_eq!(listing(&share), [name(&first), name(&second)]);
 }
+
+#[tokio::test]
+async fn a_foreign_copy_with_the_same_name_is_never_pruned() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let (_lost, _, first) = installation(&tmp.path().join("lost")).await;
+    let (_other, share) = share(tmp.path());
+    backup_copy::copy_snapshot(&first, &share, 14)
+        .await
+        .expect("copy");
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    let (replacement, _, own) = installation(&tmp.path().join("replacement")).await;
+    // Names carry only the second: give the replacement's newest backup the
+    // name of a copy the lost installation already has there.
+    let collided = replacement.backups().join(name(&first));
+    std::fs::rename(&own, &collided).expect("rename");
+    std::fs::copy(&first, share.join("consolebook-20200101T000000Z.db")).expect("older copy");
+
+    let before = listing(&share);
+    let err = backup_copy::catch_up(&replacement, &share, 1)
+        .await
+        .expect_err("retention in another installation's copy directory");
+    assert!(
+        format!("{err:#}").contains("holds the backups of installation"),
+        "{err:#}"
+    );
+    assert_eq!(
+        listing(&share),
+        before,
+        "another installation's copy was pruned"
+    );
+}
+
+#[tokio::test]
+async fn a_copy_directory_holding_only_a_pre_restore_copy_is_still_owned() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let (_lost, lost_id, snapshot) = installation(&tmp.path().join("lost")).await;
+    let (_other, share) = share(tmp.path());
+    // An earlier release copied set-aside databases off the server too.
+    std::fs::copy(
+        &snapshot,
+        share.join("consolebook-prerestore-20200101T000000Z.db"),
+    )
+    .expect("legacy copy");
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    let (_replacement, _, own) = installation(&tmp.path().join("replacement")).await;
+
+    let before = listing(&share);
+    let err = backup_copy::copy_snapshot(&own, &share, 1)
+        .await
+        .expect_err("the directory holds another installation's copy");
+    assert!(format!("{err:#}").contains(&lost_id), "{err:#}");
+    assert_eq!(listing(&share), before);
+}
