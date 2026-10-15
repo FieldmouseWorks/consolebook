@@ -4,7 +4,7 @@ Consolebook is an early-stage training-record system for emergency communication
 
 Consolebook is a [Fieldmouse Works](https://github.com/FieldmouseWorks) project — open tools for closed systems.
 
-> **Status:** pre-alpha, version 0.1.0 ([changelog](CHANGELOG.md)), implemented
+> **Status:** pre-alpha, version 0.2.0 ([changelog](CHANGELOG.md)), implemented
 > through Milestone 5's export, trainee-packet, retention-policy, and hold
 > slices. The application is usable for development and evaluation, not
 > production. Do not put production or personnel data into this repository or
@@ -63,11 +63,14 @@ review, and assignment-scoped access from Milestone 3; immutable finalized
 records, acknowledgments, amendments, weekly summaries, task signoffs, and the
 trainee timeline from Milestone 4; and Milestone 5's file-verifiable structured
 record exports, complete trainee packets, and retention policies with record
-holds. It installs and upgrades with one command on Linux and copies verified
-backups off the server. Lawful disposition, a complete installation export,
-attachments, and Typst PDF rendering remain Milestone 5 work; the
-[restore drill](docs/restore-drill.md) records recovery from a lost server. For the live demonstration deployment, see the
-[preview runbook](docs/preview.md); local builds do not update that service.
+holds. It installs and upgrades with one command on Linux, backs up before an
+upgrade migrates, serves `Secure` cookies behind HTTPS, and copies verified
+backups off the server; the [restore drill](docs/restore-drill.md) records
+recovery from a lost server, and the [operations guide](docs/operations.md)
+covers running a pilot. Lawful disposition, a complete installation export,
+attachments, and Typst PDF rendering remain Milestone 5 work. For the live
+demonstration deployment, see the [preview runbook](docs/preview.md); local
+builds do not update that service.
 
 ## Repository map
 

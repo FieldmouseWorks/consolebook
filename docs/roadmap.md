@@ -4,8 +4,9 @@ The roadmap is ordered by risk. Dates come later; fake schedules are how softwar
 
 ## Current state and next gates
 
-Release baseline: **0.1.0** (2026-10-14, tag `v0.1.0`; see the
-[changelog](../CHANGELOG.md)). Milestones 0–4 are complete, including immutable
+Release baseline: **0.2.0** (2026-10-15, tag `v0.2.0`; see the
+[changelog](../CHANGELOG.md)). 0.1.0 (2026-10-14) was the first versioned
+release. Milestones 0–4 are complete, including immutable
 finalized records, acknowledgments, amendments, summaries, and task signoffs
 ([Milestone 4 history](https://github.com/FieldmouseWorks/consolebook/issues/32)).
 Milestone 5 has file-verifiable [record exports](https://github.com/FieldmouseWorks/consolebook/pull/46)
@@ -13,27 +14,31 @@ and [trainee packets](https://github.com/FieldmouseWorks/consolebook/pull/50),
 [retention policies and holds](https://github.com/FieldmouseWorks/consolebook/pull/66),
 and [trainee signoff history](https://github.com/FieldmouseWorks/consolebook/pull/68).
 
-Operability as of 0.1.0: versioned releases with a traceable build identity
-([ADR 0022](decisions/0022-product-versioning.md)), a one-command Linux install
-and upgrade from static release archives ([ADR 0023](decisions/0023-linux-installation-lifecycle.md),
-[install guide](install.md)), a Getting started checklist and optional guided
-setup, and verified backup copies off the server with backup health
-([ADR 0024](decisions/0024-off-server-backup-copies.md)). `scripts/proof.py`
-runs the full local gate sequence and leaves a receipt.
+Operability as of 0.2.0:
+- versioned releases with a traceable build identity
+  ([ADR 0022](decisions/0022-product-versioning.md)), installed by the installer
+  published with each release, with build provenance
+  ([ADR 0026](decisions/0026-release-distribution-and-provenance.md));
+- a one-command Linux install and upgrade
+  ([ADR 0023](decisions/0023-linux-installation-lifecycle.md),
+  [install guide](install.md)), where an upgrade that migrates takes a
+  validated backup first;
+- HTTPS behind a reverse proxy with `Secure` session cookies
+  ([ADR 0025](decisions/0025-public-url-and-secure-cookies.md));
+- verified backup copies off the server that a replacement server cannot
+  bury, checked by `doctor` ([ADR 0024](decisions/0024-off-server-backup-copies.md),
+  [ADR 0027](decisions/0027-backup-copy-encryption.md));
+- a recorded [restore drill](restore-drill.md) and an
+  [operations guide](operations.md).
+
+`scripts/proof.py` runs the full local gate sequence and leaves a receipt.
 
 Material limits: confirmed disposition, tombstones, portable policy-boundary
 evidence, a complete installation export ([#98](https://github.com/FieldmouseWorks/consolebook/issues/98)),
-and deterministic PDFs remain Milestone 5 work. A scripted clean-room restore
-drill from the v0.1.0 release is recorded in the
-[restore drill](restore-drill.md) (#97); a drill on real hosts with a network
-share has not been run. Pre-alpha status still applies.
-
-Before any pilot, beyond Milestone 5: a supported HTTPS front end and the
-`Secure` session cookie ([#93](https://github.com/FieldmouseWorks/consolebook/issues/93)),
-a backup taken before an upgrade migrates ([#94](https://github.com/FieldmouseWorks/consolebook/issues/94)),
-a release-pinned installer and an archive-signing decision ([#95](https://github.com/FieldmouseWorks/consolebook/issues/95)),
-encrypted backup copies with `doctor` inspection ([#99](https://github.com/FieldmouseWorks/consolebook/issues/99)),
-and a pilot operations guide ([#100](https://github.com/FieldmouseWorks/consolebook/issues/100)).
+and deterministic PDFs remain Milestone 5 work. The restore drill has run
+scripted on one machine, not yet on real hosts with a network share, and does
+not yet run on every release ([#119](https://github.com/FieldmouseWorks/consolebook/issues/119)).
+Pre-alpha status still applies.
 
 Work follows the [evidence-driven workflow](workflow.md): one primary issue
 owns each outcome's task graph, permission and effort record, next action,

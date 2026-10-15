@@ -93,7 +93,7 @@ by any other address makes the sign-in page point to the right one: with
 signs out everyone who signed in before it, since their cookies could still
 travel over plain HTTP; they sign in again at the public address.
 
-Other options: `--version 0.1.0` installs a specific release, `--listen
+Other options: `--version 0.2.0` installs a specific release, `--listen
 ADDRESS:PORT` picks your own address, and `--from FILE` installs from a
 downloaded archive (useful without internet access; keep the `.sha256` file
 beside it).

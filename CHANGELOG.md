@@ -10,6 +10,14 @@ not a production-readiness statement.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-15
+
+Safer upgrades and recovery for a pilot: a backup before every migration,
+`Secure` cookies behind HTTPS, backup copies that cannot be buried by a
+replacement server, a rehearsed restore drill, and an operations guide.
+**Upgrading from 0.1.0 runs a migration**, so the first start of 0.2.0 takes
+a validated backup before it changes the database.
+
 ### Added
 
 - Before a new version migrates the database, it takes a validated backup
