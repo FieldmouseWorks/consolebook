@@ -165,48 +165,42 @@ async fn check_invariants(pool: &SqlitePool, findings: &mut Vec<Finding>) {
     }
 }
 
+/// Reports each recorded migration `serve` would refuse to start on, using
+/// the same judgment as startup's own check ([`storage::migration_history`]).
 async fn check_migrations(pool: &SqlitePool, findings: &mut Vec<Finding>) {
-    let applied: Result<Vec<i64>, sqlx::Error> =
-        sqlx::query_scalar("SELECT version FROM _sqlx_migrations ORDER BY version")
-            .fetch_all(pool)
-            .await;
-    match applied {
-        Err(err) => findings.push(Finding::fail(
-            "migrations",
-            format!("cannot read migration history: {err}"),
-        )),
-        Ok(applied) => {
-            let expected: Vec<i64> = storage::MIGRATOR.iter().map(|m| m.version).collect();
-            let missing: Vec<String> = expected
-                .iter()
-                .filter(|v| !applied.contains(v))
-                .map(ToString::to_string)
-                .collect();
-            let unknown: Vec<String> = applied
-                .iter()
-                .filter(|v| !expected.contains(v))
-                .map(ToString::to_string)
-                .collect();
-            if missing.is_empty() && unknown.is_empty() {
-                findings.push(Finding::ok(
-                    "migrations",
-                    format!("{} applied, up to date", applied.len()),
-                ));
-            } else if !missing.is_empty() {
-                findings.push(Finding::fail(
-                    "migrations",
-                    format!("pending: {}", missing.join(", ")),
-                ));
-            } else {
-                findings.push(Finding::fail(
-                    "migrations",
-                    format!(
-                        "database has migrations this build does not know: {}",
-                        unknown.join(", ")
-                    ),
-                ));
-            }
+    const CHECK: &str = "migrations";
+    let history = match storage::migration_history(pool).await {
+        Err(err) => {
+            findings.push(Finding::fail(
+                CHECK,
+                format!("cannot read migration history: {err:#}"),
+            ));
+            return;
         }
+        Ok(None) => {
+            findings.push(Finding::fail(
+                CHECK,
+                "cannot read migration history: the database has no _sqlx_migrations table",
+            ));
+            return;
+        }
+        Ok(Some(history)) => history,
+    };
+    for refusal in &history.refusals {
+        findings.push(Finding::fail(CHECK, refusal.to_string()));
+    }
+    if !history.unapplied.is_empty() {
+        let pending: Vec<String> = history.unapplied.iter().map(ToString::to_string).collect();
+        findings.push(Finding::fail(
+            CHECK,
+            format!("pending: {}", pending.join(", ")),
+        ));
+    }
+    if history.refusals.is_empty() && history.unapplied.is_empty() {
+        findings.push(Finding::ok(
+            CHECK,
+            format!("{} applied, up to date", history.recorded),
+        ));
     }
 }
 

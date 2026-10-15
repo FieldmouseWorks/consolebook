@@ -86,10 +86,8 @@ pub async fn open(db_path: &Path) -> Result<SqlitePool> {
     let pool = connect(db_path, true).await?;
 
     let newer = newer_migrations(&pool).await?;
-    if let Some(version) = newer.first() {
-        bail!(
-            "this database was upgraded by a newer Consolebook (it has migration {version}, which this version does not know); install that release again, or restore the snapshot taken before the upgrade (docs/install.md, \"Upgrading\")"
-        );
+    if let Some(&version) = newer.first() {
+        bail!("{}", RefusedHistory::Newer(version));
     }
 
     MIGRATOR
@@ -119,7 +117,14 @@ pub async fn open(db_path: &Path) -> Result<SqlitePool> {
 /// Empty for a database that is up to date, and for one that has never been
 /// migrated (a new installation), which has nothing to lose. Reads only.
 pub async fn pending_migrations(pool: &SqlitePool) -> Result<Vec<i64>> {
-    let applied = applied_migrations(pool).await?;
+    let Some(recorded) = recorded_history(pool).await? else {
+        return Ok(Vec::new());
+    };
+    let applied: Vec<i64> = recorded
+        .iter()
+        .filter(|row| row.success)
+        .map(|row| row.version)
+        .collect();
     if applied.is_empty() {
         return Ok(Vec::new());
     }
@@ -134,16 +139,112 @@ pub async fn pending_migrations(pool: &SqlitePool) -> Result<Vec<i64>> {
 /// Applied migrations this executable does not know: the database was
 /// upgraded by a newer release. Reads only.
 pub async fn newer_migrations(pool: &SqlitePool) -> Result<Vec<i64>> {
-    Ok(applied_migrations(pool)
-        .await?
+    let recorded = recorded_history(pool).await?.unwrap_or_default();
+    Ok(refusals(&recorded)
         .into_iter()
-        .filter(|version| MIGRATOR.iter().all(|known| known.version != *version))
+        .filter_map(|refusal| match refusal {
+            RefusedHistory::Newer(version) => Some(version),
+            _ => None,
+        })
         .collect())
 }
 
-/// Successfully applied migration versions, in order; empty when the
-/// database has never been migrated.
-async fn applied_migrations(pool: &SqlitePool) -> Result<Vec<i64>> {
+/// A recorded migration this executable refuses to start on. [`open`]
+/// refuses each of these, through its own check or `SQLx`'s migrator
+/// (`sqlx-core` 0.9 `Migrator::run_direct`): a version it does not embed
+/// (`ignore_missing` is off), a row recorded as unsuccessful, or a stored
+/// checksum that differs from the embedded migration's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefusedHistory {
+    /// A newer release applied a migration this build does not embed.
+    Newer(i64),
+    /// The migration started but is recorded as not successful.
+    Unfinished(i64),
+    /// The stored checksum differs from this build's migration.
+    Changed(i64),
+}
+
+impl std::fmt::Display for RefusedHistory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Newer(version) => write!(
+                f,
+                "this database was upgraded by a newer Consolebook (it has migration {version}, which this version does not know); install that release again, or restore the snapshot taken before the upgrade (docs/install.md, \"Upgrading\")"
+            ),
+            Self::Unfinished(version) => write!(
+                f,
+                "migration {version} did not finish (it is recorded as failed), and the service refuses to start on it; restore the snapshot taken before the upgrade (docs/install.md, \"Upgrading\")"
+            ),
+            Self::Changed(version) => write!(
+                f,
+                "migration {version} was applied by a different build's version of it (its recorded checksum differs from this build's), and the service refuses to start on it; restore a backup made by this build, or run the build that applied it"
+            ),
+        }
+    }
+}
+
+/// The recorded migration history, judged against this build. Reads only.
+#[derive(Debug)]
+pub struct MigrationHistory {
+    /// Rows recorded in `_sqlx_migrations`, successful or not.
+    pub recorded: usize,
+    /// Every recorded migration startup would refuse, in version order.
+    pub refusals: Vec<RefusedHistory>,
+    /// Embedded migrations with no recorded row, which startup applies.
+    pub unapplied: Vec<i64>,
+}
+
+/// Judges the recorded history; `None` when the database has no migration
+/// table. Reads only, so `doctor` can use it (ADR 0016).
+pub async fn migration_history(pool: &SqlitePool) -> Result<Option<MigrationHistory>> {
+    let Some(recorded) = recorded_history(pool).await? else {
+        return Ok(None);
+    };
+    let unapplied = MIGRATOR
+        .iter()
+        .filter(|migration| migration.migration_type.is_up_migration())
+        .map(|migration| migration.version)
+        .filter(|version| recorded.iter().all(|row| row.version != *version))
+        .collect();
+    Ok(Some(MigrationHistory {
+        recorded: recorded.len(),
+        refusals: refusals(&recorded),
+        unapplied,
+    }))
+}
+
+/// One row of `_sqlx_migrations`.
+struct RecordedMigration {
+    version: i64,
+    checksum: Vec<u8>,
+    success: bool,
+}
+
+/// Each row's refusal, in the order `SQLx` checks: unsuccessful rows, then
+/// versions this build does not embed, then checksums of up migrations.
+fn refusals(recorded: &[RecordedMigration]) -> Vec<RefusedHistory> {
+    recorded
+        .iter()
+        .filter_map(|row| {
+            if !row.success {
+                return Some(RefusedHistory::Unfinished(row.version));
+            }
+            if !MIGRATOR.version_exists(row.version) {
+                return Some(RefusedHistory::Newer(row.version));
+            }
+            MIGRATOR
+                .iter()
+                .filter(|migration| migration.migration_type.is_up_migration())
+                .find(|migration| migration.version == row.version)
+                .filter(|migration| *migration.checksum != *row.checksum)
+                .map(|_| RefusedHistory::Changed(row.version))
+        })
+        .collect()
+}
+
+/// Every recorded migration row, in version order; `None` when the database
+/// has never been migrated.
+async fn recorded_history(pool: &SqlitePool) -> Result<Option<Vec<RecordedMigration>>> {
     let tracked: Option<String> = sqlx::query_scalar(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations'",
     )
@@ -151,12 +252,22 @@ async fn applied_migrations(pool: &SqlitePool) -> Result<Vec<i64>> {
     .await
     .context("looking for the migrations table")?;
     if tracked.is_none() {
-        return Ok(Vec::new());
+        return Ok(None);
     }
-    sqlx::query_scalar("SELECT version FROM _sqlx_migrations WHERE success = 1 ORDER BY version")
-        .fetch_all(pool)
-        .await
-        .context("reading applied migrations")
+    let rows: Vec<(i64, Vec<u8>, bool)> =
+        sqlx::query_as("SELECT version, checksum, success FROM _sqlx_migrations ORDER BY version")
+            .fetch_all(pool)
+            .await
+            .context("reading applied migrations")?;
+    Ok(Some(
+        rows.into_iter()
+            .map(|(version, checksum, success)| RecordedMigration {
+                version,
+                checksum,
+                success,
+            })
+            .collect(),
+    ))
 }
 
 /// Opens an existing database without creating one and without migrating.

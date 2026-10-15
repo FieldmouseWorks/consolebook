@@ -40,6 +40,12 @@ not a production-readiness statement.
   and passwords are byte-for-byte compatible, and a test pins the released
   migration checksums and the export container's bytes.
 
+### Fixed
+
+- `doctor` reports a migration history `serve` would refuse (a changed
+  checksum or a failed migration), instead of `ok`
+  ([#138](https://github.com/FieldmouseWorks/consolebook/issues/138)).
+
 ## [0.2.0] - 2026-10-15
 
 Safer upgrades and recovery for a pilot: a backup before every migration,

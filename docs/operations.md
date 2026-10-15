@@ -60,6 +60,12 @@ only on `FAIL`. Look at two lines:
 you set `CONSOLEBOOK_BACKUP_INTERVAL_HOURS` to something else, pass the same
 value: `--backup-interval-hours 6`.
 
+Every other line should be `ok`. The `migrations` line compares each
+migration the database records with this version's: its number, its
+checksum, and whether it finished. A `FAIL` there names the migration and
+means the service will refuse to start on this database; the line says what
+to do next.
+
 An administrator also sees backup health on their home page, and gets a
 notice when a copy fails.
 
