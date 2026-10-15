@@ -24,6 +24,11 @@ not a production-readiness statement.
   (ADR 0025). The install guide gives a tested Caddy configuration for HTTPS.
   Turning it on signs out sessions whose cookies were not `Secure`.
 
+- [Operating a pilot installation](docs/operations.md): what to monitor and
+  how, the logs and their retention, reporting a problem, and what support a
+  pre-alpha pilot can expect. The release workflow runs its commands against
+  a real install.
+
 ### Fixed
 
 - A phase change that waited behind another write is no longer refused as

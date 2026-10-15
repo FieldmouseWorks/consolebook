@@ -161,6 +161,30 @@ jobs:
           sudo install/install.sh --from "dist/consolebook-linux-${{ matrix.arch }}.tar.gz" \
             --no-service | tee no-service.log
           grep -q 'CONSOLEBOOK_PUBLIC_URL=https://consolebook.example.invalid .* serve --bind' no-service.log
+      # Every command in docs/operations.md, run once against this real
+      # install (#100). The service listens on 127.0.0.2:7771 here, and the
+      # copy share was unmounted above, so doctor reports it unreachable.
+      - name: Operations guide commands
+        run: |
+          curl -fsS http://127.0.0.2:7771/api/health
+          systemctl is-active consolebook
+          sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook \
+            consolebook doctor --backup-copy-dir /srv/consolebook-copies | tee ops-doctor.log
+          grep -Eq '^(ok|warn) +backups ' ops-doctor.log
+          grep -Eq '^warn +backup copy +unreachable:' ops-doctor.log
+          df -h /var/lib/consolebook
+          sudo du -sh /var/lib/consolebook/backups
+          sudo journalctl -u consolebook --since today --no-pager | tail -n 5
+          sudo journalctl -u consolebook -p warning --no-pager | tail -n 5
+          timeout 3 sudo journalctl -u consolebook -f --no-pager || test $? -eq 124
+          sudo journalctl --disk-usage
+          sudo mkdir -p /etc/systemd/journald.conf.d
+          printf '[Journal]\nStorage=persistent\nSystemMaxUse=1G\nMaxRetentionSec=1year\n' | \
+            sudo tee /etc/systemd/journald.conf.d/retention.conf
+          sudo systemctl restart systemd-journald
+          sudo journalctl -u consolebook --no-pager | grep 'starting Consolebook' | tail -n 2
+          sudo journalctl -u consolebook --since "$(date -d '-1 hour' '+%Y-%m-%d %H:%M')" --until "$(date '+%Y-%m-%d %H:%M')" --no-pager | tail -n 3
+          consolebook --version
       # Jobs share archives through a draft release, published once all pass.
       - name: Upload to the draft release
         if: startsWith(github.ref, 'refs/tags/v')
