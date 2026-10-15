@@ -64,8 +64,13 @@ Follow the install guide's recovery steps ("If the server's disk is gone"):
    (`ls -lt`).
 2. Stop the service, restore the newest copy, and start the service again.
    The restore prints host A's installation id.
-3. Run `doctor --backup-copy-dir`. Every line must be `ok`, and the backup
-   copy line must become `current`, naming the backup the restore took.
+3. Run `doctor` with the copy directory. Every line must be `ok`, and the
+   backup copy line must become `current`, naming the backup the restore
+   took:
+
+   ```sh
+   sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook consolebook doctor --backup-copy-dir /mnt/backups/consolebook
+   ```
 
 ### 4. Check the records
 
