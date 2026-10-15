@@ -244,7 +244,14 @@ def collect(base: str, out: Path) -> None:
         )
     everything = admin.call("GET", "/api/exports/records", raw=True)
     (out / "installation.zip").write_bytes(everything)
-    manifest["installation_export"] = declared(out / "installation.zip")
+    installation = declared(out / "installation.zip")
+    if installation["scope"] != {"kind": "installation"}:
+        raise SystemExit(f"the installation export declares {installation['scope']}")
+    every_record = [unit for r in manifest["records"] for unit in r["export"]["units"]]
+    key = lambda unit: (unit["record_id"], unit["version_number"])  # noqa: E731
+    if sorted(installation["units"], key=key) != sorted(every_record, key=key):
+        raise SystemExit("the installation export does not hold exactly every record's versions")
+    manifest["installation_export"] = installation
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     digest = hashlib.sha256((out / "manifest.json").read_bytes()).hexdigest()
     print(f"collected {len(manifest['records'])} records; manifest sha256 {digest}")
