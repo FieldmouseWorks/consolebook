@@ -4,15 +4,15 @@
 	// overrides, revokes, or contests anything: recording stays on the
 	// enrollment page under its own authority. Every row is the stored act,
 	// with the signer's recorded name and instant.
-	import { ApiError } from '$lib/api/transport';
+	import { ApiError } from '#lib/api/transport.js';
 	import {
 		ownSignoffHistory,
 		signoffStateLabel,
 		type SignoffHistory,
 		type SignoffKind,
 		type SignoffTaskRow
-	} from '$lib/api/signoffs';
-	import { instant } from '$lib/format';
+	} from '#lib/api/signoffs.js';
+	import { instant } from '#lib/format.js';
 
 	let { enrollmentId }: { enrollmentId: number } = $props();
 

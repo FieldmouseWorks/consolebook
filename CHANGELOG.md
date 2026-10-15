@@ -25,6 +25,15 @@ not a production-readiness statement.
 
 ### Changed
 
+- The interface now needs Chrome or Edge 111+, Firefox 114+, or Safari
+  16.4+ (iOS 16.4+). Firefox ESR 102 and earlier and Chrome or Edge before
+  111 no longer load it; see the [install guide](docs/install.md).
+- The web interface is built with SvelteKit 3, Vite 8, Svelte 5.57, and
+  TypeScript 6 (from SvelteKit 2 and Vite 7), which also drops a
+  vulnerable `cookie` dependency from the build
+  ([#54](https://github.com/FieldmouseWorks/consolebook/issues/54)). Building
+  it needs Node.js `^22.17 || >=24`; the installed server still needs no
+  Node.js.
 - Building from source needs Rust 1.99 (`rust-toolchain.toml`), and the
   bundled SQLite is now 3.51.3 (was 3.46.0) with sqlx 0.9. Existing data
   directories open unchanged: their recorded migrations, records, exports,

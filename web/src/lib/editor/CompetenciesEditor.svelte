@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { CompetencyDef } from '$lib/api';
+	import type { CompetencyDef } from '#lib/api.js';
 	import CitationsEditor from './CitationsEditor.svelte';
 
 	let {

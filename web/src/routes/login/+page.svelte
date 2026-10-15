@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { goto, invalidateAll } from '$app/navigation';
+	import { goto, refreshAll } from '$app/navigation';
 	import { page } from '$app/state';
-	import { ApiError, login } from '$lib/api';
+	import { ApiError, login } from '#lib/api.js';
 
 	// Reached by another address than the one the operator published: with
 	// an https:// public URL the browser drops the Secure session cookie on
@@ -22,7 +22,7 @@
 		busy = true;
 		try {
 			await login(username, password);
-			await invalidateAll();
+			await refreshAll();
 			await goto('/');
 		} catch (err) {
 			error = err instanceof ApiError ? err.message : 'the server could not be reached';

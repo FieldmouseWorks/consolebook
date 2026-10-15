@@ -35,9 +35,9 @@
 		type TrainingSession,
 		type UserSummary,
 		type VersionSummary
-	} from '$lib/api';
-	import { instant, localSpan } from '$lib/format';
-	import ProblemState from '$lib/ui/ProblemState.svelte';
+	} from '#lib/api.js';
+	import { instant, localSpan } from '#lib/format.js';
+	import ProblemState from '#lib/ui/ProblemState.svelte';
 	import type { ShellData } from '../../+layout';
 
 	let { data }: { data: ShellData } = $props();

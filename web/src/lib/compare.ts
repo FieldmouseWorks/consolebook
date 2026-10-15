@@ -3,7 +3,7 @@
 // identity within the document (names, codes, prompts, endpoints) — the
 // same keys the format spec makes unique.
 
-import type { CitationDef, CompetencyDef, FormDef, ScaleDef, VersionContent } from '$lib/api';
+import type { CitationDef, CompetencyDef, FormDef, ScaleDef, VersionContent } from '#lib/api.js';
 
 export interface SectionDiff {
 	title: string;

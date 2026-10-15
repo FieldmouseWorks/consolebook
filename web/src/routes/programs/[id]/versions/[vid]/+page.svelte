@@ -15,13 +15,13 @@
 		type UserSummary,
 		type VersionContent,
 		type VersionSummary
-	} from '$lib/api';
-	import CitationsEditor from '$lib/editor/CitationsEditor.svelte';
-	import CompetenciesEditor from '$lib/editor/CompetenciesEditor.svelte';
-	import FormsEditor from '$lib/editor/FormsEditor.svelte';
-	import PhasesEditor from '$lib/editor/PhasesEditor.svelte';
-	import ScalesEditor from '$lib/editor/ScalesEditor.svelte';
-	import { instant } from '$lib/format';
+	} from '#lib/api.js';
+	import CitationsEditor from '#lib/editor/CitationsEditor.svelte';
+	import CompetenciesEditor from '#lib/editor/CompetenciesEditor.svelte';
+	import FormsEditor from '#lib/editor/FormsEditor.svelte';
+	import PhasesEditor from '#lib/editor/PhasesEditor.svelte';
+	import ScalesEditor from '#lib/editor/ScalesEditor.svelte';
+	import { instant } from '#lib/format.js';
 	import type { ShellData } from '../../../../+layout';
 
 	let { data }: { data: ShellData } = $props();

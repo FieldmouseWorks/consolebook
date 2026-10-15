@@ -5,6 +5,10 @@ first program, people, and training session. You need a Linux machine with
 systemd (Ubuntu, Debian, RHEL, Rocky, Alma, Fedora, and similar), x86_64 or
 arm64, and an administrator account that can use `sudo`.
 
+**Browsers:** people use Consolebook in Chrome or Edge 111 or later, Firefox
+114 or later, or Safari 16.4 or later (iOS 16.4 or later). Older browsers,
+including Firefox ESR 102 and earlier, do not load the interface.
+
 Consolebook is pre-alpha. Use invented data until your agency has decided it is
 ready for real records. [ADR 0023](decisions/0023-linux-installation-lifecycle.md)
 records the locations, service account, and upgrade behavior this page relies on.

@@ -11,10 +11,10 @@
 		type CreatedUser,
 		type ImportedBody,
 		type Role
-	} from '$lib/api';
-	import { instant } from '$lib/format';
-	import BackupHealth from '$lib/backups/BackupHealth.svelte';
-	import example from '$lib/setup/example-program.json';
+	} from '#lib/api.js';
+	import { instant } from '#lib/format.js';
+	import BackupHealth from '#lib/backups/BackupHealth.svelte';
+	import example from '#lib/setup/example-program.json';
 	import type { ShellData } from '../+layout';
 
 	let { data }: { data: ShellData } = $props();

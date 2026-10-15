@@ -13,8 +13,8 @@
 		versionExportPath,
 		type ProgramSummary,
 		type VersionSummary
-	} from '$lib/api';
-	import { instant } from '$lib/format';
+	} from '#lib/api.js';
+	import { instant } from '#lib/format.js';
 	import type { ShellData } from '../../+layout';
 
 	let { data }: { data: ShellData } = $props();

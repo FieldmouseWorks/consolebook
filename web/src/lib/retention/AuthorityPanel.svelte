@@ -1,9 +1,9 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { invalidateAll } from '$app/navigation';
-    import { ApiError, listUsers, type UserSummary } from '$lib/api';
-    import { authorityHistory, setAuthority, type AuthorityEvent } from '$lib/api/retention';
-    import { instant } from '$lib/format';
+    import { refreshAll } from '$app/navigation';
+    import { ApiError, listUsers, type UserSummary } from '#lib/api.js';
+    import { authorityHistory, setAuthority, type AuthorityEvent } from '#lib/api/retention.js';
+    import { instant } from '#lib/format.js';
     let users: UserSummary[] = $state([]);
     let events: AuthorityEvent[] = $state([]);
     let userId = $state(0);
@@ -17,7 +17,7 @@
     function name(id: number) { return users.find(u => u.id === id)?.display_name ?? `User ${id}`; }
     async function save(event: SubmitEvent) {
         event.preventDefault(); busy = true; error = ''; message = '';
-        try { await setAuthority(userId, granted, reason); await reload(); await invalidateAll(); reason = ''; message = granted ? 'Retention authority granted.' : 'Retention authority revoked.'; }
+        try { await setAuthority(userId, granted, reason); await reload(); await refreshAll(); reason = ''; message = granted ? 'Retention authority granted.' : 'Retention authority revoked.'; }
         catch (err) { error = err instanceof ApiError ? [err.message, ...err.problems].join('. ') : 'The server could not be reached.'; }
         finally { busy = false; }
     }

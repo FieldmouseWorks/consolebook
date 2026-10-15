@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { ApiError, getVersion, type VersionBody } from '$lib/api';
-	import { compareContent, type SectionDiff } from '$lib/compare';
+	import { ApiError, getVersion, type VersionBody } from '#lib/api.js';
+	import { compareContent, type SectionDiff } from '#lib/compare.js';
 
 	let programId = $derived(Number(page.params.id));
 	let fromId = $derived(Number(page.url.searchParams.get('a')));

@@ -3251,7 +3251,6 @@ test('overlapping SPA navigation keeps the draft locked until the current route 
 		await expect(author.getByLabel(MOST)).toBeEnabled();
 		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}$`));
 		expect(await author.evaluate(() => history.length)).toBe(entryCount);
-		await expect(author.getByRole('button', { name: 'Resume editing this draft' })).toHaveCount(0);
 		await expectSpaAlive(author);
 	} finally {
 		firstLayout.release();
@@ -3259,7 +3258,7 @@ test('overlapping SPA navigation keeps the draft locked until the current route 
 	}
 });
 
-test('a stranded router state requires an explicit same-entry resume', async ({
+test('a shallow traversal that aborts a held departure leaves the draft editable in place', async ({
 	page,
 	setupCode,
 	browser
@@ -3274,16 +3273,25 @@ test('a stranded router state requires an explicit same-entry resume', async ({
 		await markSpa(author);
 		await homeSessions(author);
 		await openDraftFromHome(author, '2026-06-02', seeded.draftId);
-		const originalState = await author.evaluate(() => history.state);
-		// Recreate a shallow popstate that resets the router token while
-		// the destination GET is held. Native hash entries need the active
-		// SvelteKit state copied onto them for this synthetic boundary.
-		await author.evaluate(() => { location.hash = 'earlier'; });
+		// Two in-app hash links give this draft shallow history entries that
+		// SvelteKit itself records. A shallow popstate while the destination
+		// GET is held resets the router token and aborts that departure.
+		// SvelteKit 2 left `navigating` published after that abort, stranding
+		// the editor frozen; SvelteKit 3 clears it (sveltejs/kit#17118), so the
+		// editor must come back on its own, on the same entry.
+		await author.evaluate(() => {
+			for (const name of ['earlier', 'current']) {
+				const link = document.createElement('a');
+				link.href = `#${name}`;
+				link.id = `hash-${name}`;
+				link.textContent = name;
+				document.body.append(link);
+			}
+		});
+		await author.locator('#hash-earlier').click();
 		await expect(author).toHaveURL(/#earlier$/);
-		await author.evaluate((state) => history.replaceState(state, '', location.href), originalState);
-		await author.evaluate(() => { location.hash = 'current'; });
+		await author.locator('#hash-current').click();
 		await expect(author).toHaveURL(/#current$/);
-		await author.evaluate((state) => history.replaceState(state, '', location.href), originalState);
 		const entryCount = await author.evaluate(() => history.length);
 		await author.route('**/api/instance', async (route) => {
 			const response = await route.fetch();
@@ -3298,16 +3306,18 @@ test('a stranded router state requires an explicit same-entry resume', async ({
 		await expect(author).toHaveURL(/#earlier$/);
 		await author.evaluate(() => history.forward());
 		await expect(author).toHaveURL(/#current$/);
+		await expect(author.getByLabel(MOST)).toBeEnabled();
+		// Edit and save while the abandoned departure's layout load is still
+		// held: its late answer must not carry the page away from the draft.
+		const typed = 'Invented text typed during the held window.';
+		await author.getByLabel(MOST).fill(typed);
+		await expectSaved(author);
 		layout.release();
 		await author.waitForLoadState('networkidle');
-		await expect(author.getByLabel(MOST)).toBeDisabled();
-		await expect(author.getByRole('button', { name: 'Resume editing this draft' })).toBeVisible();
-		await author.getByRole('button', { name: 'Resume editing this draft' }).click();
-		await expect(author.getByLabel(MOST)).toBeEnabled();
 		await expect(author).toHaveURL(new RegExp(`${seeded.draftUrl}#current$`));
+		await expect(author.getByLabel(MOST)).toBeEnabled();
+		await expect(author.getByLabel(MOST)).toHaveValue(typed);
 		expect(await author.evaluate(() => history.length)).toBe(entryCount);
-		expect(await author.evaluate(() => history.state['sveltekit:states']))
-			.toEqual(originalState['sveltekit:states']);
 		const unsaved = 'Invented post-abort note.';
 		await author.route(`**/api/drafts/${seeded.draftId}/content`, async (route) => {
 			await route.abort('failed');

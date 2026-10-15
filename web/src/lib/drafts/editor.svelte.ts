@@ -21,8 +21,8 @@
 //   localStorage, sessionStorage, IndexedDB, URL state, log, or server
 //   call — because the refusal is a concurrency answer, not record content
 //   (issue #34).
-import { getDraft, saveDraftContent, type DraftContent, type DraftView } from '$lib/api';
-import { ApiError } from '$lib/api/transport';
+import { getDraft, saveDraftContent, type DraftContent, type DraftView } from '#lib/api.js';
+import { ApiError } from '#lib/api/transport.js';
 
 /** The debounced autosave's delay once an edit lands. */
 const AUTOSAVE_DELAY_MS = 600;

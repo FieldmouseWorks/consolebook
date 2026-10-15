@@ -1,6 +1,6 @@
 <script lang="ts">
-    import { ApiError } from '$lib/api/transport';
-    import { savePolicy, classLabels, triggerLabels, type Policy, type RecordClass, type RetentionTrigger, type RetentionAction } from '$lib/api/retention';
+    import { ApiError } from '#lib/api/transport.js';
+    import { savePolicy, classLabels, triggerLabels, type Policy, type RecordClass, type RetentionTrigger, type RetentionAction } from '#lib/api/retention.js';
     let { policies, onSaved }: { policies: Policy[]; onSaved: () => Promise<void> } = $props();
     let recordClass = $state<RecordClass>('daily_report');
     let expected = $state<number | null>(null);

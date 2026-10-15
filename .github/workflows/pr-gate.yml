@@ -49,6 +49,10 @@ jobs:
         with:
           path: ~/.npm
           key: pr-gate-npm-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
       # The web app builds first so the Rust build embeds real interface
       # assets and the asset-serving tests exercise the strict branch.
       - name: Web install

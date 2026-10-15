@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { beforeNavigate, goto } from '$app/navigation';
-	import ProblemState from '$lib/ui/ProblemState.svelte';
+	import { beforeNavigate } from '$app/navigation';
+	import ProblemState from '#lib/ui/ProblemState.svelte';
 	import { navigating, page } from '$app/state';
 	import { untrack } from 'svelte';
 	import {
@@ -38,16 +38,16 @@
 		type TraineeAckKind,
 		type Verification,
 		type VersionHistoryRow
-	} from '$lib/api';
+	} from '#lib/api.js';
 	import {
 		DraftEditorController,
 		divergentBuffer,
 		openForEditing,
 		type EditorSnapshot,
 		type SaveResult
-	} from '$lib/drafts/editor.svelte';
-	import RefusedTextPanel from '$lib/drafts/RefusedTextPanel.svelte';
-	import { instant } from '$lib/format';
+	} from '#lib/drafts/editor.svelte.js';
+	import RefusedTextPanel from '#lib/drafts/RefusedTextPanel.svelte';
+	import { instant } from '#lib/format.js';
 	import type { ShellData } from '../../+layout';
 
 	let { data }: { data: ShellData } = $props();
@@ -113,43 +113,10 @@
 		)
 	);
 	// An accepted SPA navigation publishes before its route loads. Freeze
-	// fields until the router clears that state. A rejected navigation can
-	// leave its promise published while the router still skips navigation
-	// callbacks, so rejection alone cannot make the fields editable.
-	let rejectedNavigation: Promise<void> | null = $state.raw(null);
+	// fields until the router clears that state. SvelteKit >=3.1 cannot strand
+	// it here (kit#17118); e2e/draft-recovery.spec.ts "a shallow traversal that
+	// aborts a held departure..." fails if a future SvelteKit reintroduces it.
 	let routeLeaving = $derived(navigating.to !== null);
-	$effect(() => {
-		const complete = navigating.complete;
-		if (complete === null) return;
-		// Reattach if the route reuses this component for a different
-		// editor while a navigation remains published.
-		const origin = editor;
-		void complete.catch(() => {
-			// Offer a deliberate same-entry resettlement only for the exact
-			// rejected navigation still published on this editor's page.
-			if (editor === origin && navigating.complete === complete) {
-				rejectedNavigation = complete;
-			}
-		});
-	});
-
-	async function resumeEditing(): Promise<void> {
-		const rejected = rejectedNavigation;
-		if (rejected === null || navigating.complete !== rejected || !routeLeaving) return;
-		// Replacing the current entry leaves the URL, page state, and history
-		// depth intact. Only a real router settlement unlocks the editor.
-		try {
-			await goto(page.url.href, {
-				replaceState: true,
-				keepFocus: true,
-				noScroll: true,
-				state: page.state
-			});
-		} catch {
-			// The current navigation's rejection is observed above; its
-			// still-current promise keeps the retry available on this editor.
-		}
-	}
 
 	// A full document unload cannot wait for fetch to finish. SvelteKit
 	// supplies the native confirmation for refresh/tab close; an outside
@@ -323,7 +290,6 @@
 			busy = false;
 			retryingLatest = false;
 			workflowRequest = false;
-			rejectedNavigation = null;
 			editor = new DraftEditorController(
 				() => view,
 				() => !workflowRequest && !routeLeaving && (canAssign || canAuthor)
@@ -928,13 +894,6 @@
 			buffers={editor.refused}
 			onDiscard={(index) => editor.discardRefused(index)}
 		/>
-	</section>
-{/if}
-
-{#if routeLeaving && navigating.complete === rejectedNavigation}
-	<section class="panel">
-		<p class="quiet">Navigation was interrupted. Resume editing to continue working on this draft.</p>
-		<button type="button" class="secondary" onclick={resumeEditing}>Resume editing this draft</button>
 	</section>
 {/if}
 

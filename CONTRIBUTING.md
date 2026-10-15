@@ -92,8 +92,9 @@ together, with versioning governed by that format's contract.
 ## Build and verification
 
 Use the Rust toolchain pinned in `rust-toolchain.toml` and npm's committed
-lockfile. The Vite 7 dependency declares Node.js `^20.19.0 || >=22.12.0`;
-use a compatible supported Node.js release. Node.js is build-time only.
+lockfile. `web/package.json` declares Node.js `^22.17 || >=24` (SvelteKit 3
+requires 22.17; vite-plugin-svelte 7 excludes 23.x); CI builds with Node.js 24.
+Node.js is build-time only.
 
 From the repository root, run in this order:
 
