@@ -58,7 +58,9 @@ step "host A: seed invented records and collect the 'before' manifest"
 python3 -I "$HERE/seed_collect.py" seed "http://127.0.0.1:$PORT_A" "$CODE" "$WORK/before"
 
 step "host A: take a backup now (copied off the server)"
-"$BIN_A" backup --backup-copy-dir "$COPY"
+# 0.1.0 refuses a second snapshot within the same second as the scheduler's
+# first one (fixed in #115); try again in the next second.
+"$BIN_A" backup --backup-copy-dir "$COPY" || { sleep 1; "$BIN_A" backup --backup-copy-dir "$COPY"; }
 stop $PID
 sha256sum "$WORK/hostA/data/consolebook.db"
 ls -l --time-style=+%H:%M:%S "$COPY"
