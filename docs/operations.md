@@ -50,8 +50,13 @@ only on `FAIL`. Look at two lines:
 
 | Line | Healthy | Act on |
 | --- | --- | --- |
-| `backups` | `ok`: snapshots exist and the newest is younger than the backup interval | `warn` that the newest is too old: automatic backups have stopped; check the logs |
+| `backups` | `ok`: snapshots exist and the newest is less than 24 hours old | `warn` that the newest is too old: automatic backups have stopped; check the logs |
 | `backup copy` | `ok  ... current:` the copy directory holds the newest backup | `not_configured`, `unreachable` (share not mounted or not writable), or `behind` for more than an hour |
+
+`doctor` judges the `backups` line against the default 24-hour interval
+([#117](https://github.com/FieldmouseWorks/consolebook/issues/117)). If you
+set `CONSOLEBOOK_BACKUP_INTERVAL_HOURS` to something else, compare the time
+in the newest snapshot's name with your interval instead.
 
 An administrator also sees backup health on their home page, and gets a
 notice when a copy fails.
