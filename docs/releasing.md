@@ -29,7 +29,9 @@ tag runs [the release workflow](../.github/workflows/release.yml): it checks
 the tag against the Cargo version, builds static x86_64 and arm64 archives,
 installs and upgrades each with `install/install.sh` on a systemd runner, and
 only then publishes the GitHub release with this version's changelog section
-as its notes.
+as its notes. The release carries the archives, `install.sh` (which the
+documented one-line install fetches), their checksums, and build provenance
+for each (ADR 0026).
 
 ```sh
 git fetch origin main

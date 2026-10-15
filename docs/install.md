@@ -18,7 +18,7 @@ itself up automatically, but a backup on the same disk as the records dies with
 that disk. Then run one command on the server:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/FieldmouseWorks/consolebook/main/install/install.sh | sudo sh -s -- --backup-dir /mnt/backups/consolebook
+curl -fsSL https://github.com/FieldmouseWorks/consolebook/releases/latest/download/install.sh | sudo sh -s -- --backup-dir /mnt/backups/consolebook
 ```
 
 Leaving out `--backup-dir` still installs, but the installer ends with a
@@ -53,7 +53,7 @@ By default Consolebook listens on the server itself only. To let browsers on
 your network reach it, install with `--lan`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/FieldmouseWorks/consolebook/main/install/install.sh | sudo sh -s -- --lan
+curl -fsSL https://github.com/FieldmouseWorks/consolebook/releases/latest/download/install.sh | sudo sh -s -- --lan
 ```
 
 That serves plain HTTP on port 7770. That is fine for a trial on a trusted
@@ -67,7 +67,7 @@ the address people use, so it marks sign-in cookies `Secure` (a browser then
 never sends them over plain HTTP; ADR 0025):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/FieldmouseWorks/consolebook/main/install/install.sh | sudo sh -s -- --public-url https://consolebook.example.org
+curl -fsSL https://github.com/FieldmouseWorks/consolebook/releases/latest/download/install.sh | sudo sh -s -- --public-url https://consolebook.example.org
 ```
 
 With [Caddy](https://caddyserver.com/docs/install), the whole proxy is this
@@ -166,7 +166,7 @@ Then, with that version in place of `<previous>`:
 
 ```sh
 sudo systemctl stop consolebook
-curl -fsSL https://raw.githubusercontent.com/FieldmouseWorks/consolebook/main/install/install.sh | sudo sh -s -- --version <previous> --no-service
+curl -fsSL https://github.com/FieldmouseWorks/consolebook/releases/latest/download/install.sh | sudo sh -s -- --version <previous> --no-service
 sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook consolebook restore /var/lib/consolebook/backups/consolebook-premigration-<stamp>.db
 sudo systemctl start consolebook
 ```
@@ -180,7 +180,7 @@ records would seem to vanish. Move them deliberately instead:
 ```sh
 sudo systemctl stop consolebook
 sudo mv /var/lib/consolebook /srv/consolebook        # keeps backups/ with it
-curl -fsSL https://raw.githubusercontent.com/FieldmouseWorks/consolebook/main/install/install.sh | sudo sh -s -- --data-dir /srv/consolebook
+curl -fsSL https://github.com/FieldmouseWorks/consolebook/releases/latest/download/install.sh | sudo sh -s -- --data-dir /srv/consolebook
 ```
 
 The rerun records the new location, grants the service access to it, and
@@ -198,7 +198,7 @@ when the newest backup ran and whether the copy is current.
 To add or change the copy directory later, mount it and rerun the installer:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/FieldmouseWorks/consolebook/main/install/install.sh | sudo sh -s -- --backup-dir /mnt/backups/consolebook
+curl -fsSL https://github.com/FieldmouseWorks/consolebook/releases/latest/download/install.sh | sudo sh -s -- --backup-dir /mnt/backups/consolebook
 ```
 
 On a network share, make sure the `consolebook` account can write it (for
