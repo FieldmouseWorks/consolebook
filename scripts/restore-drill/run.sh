@@ -20,10 +20,13 @@ stop() { kill -TERM "$1"; wait "$1" || true; }
 # server on its first scheduler pass, so give that a few seconds. 0.1.0's
 # doctor has no --backup-copy-dir.
 doctor() {
-  local args=() out
-  if "$1" doctor --help | grep -q backup-copy-dir; then args=(--backup-copy-dir "$COPY"); fi
+  local args=() out copy_line='^ok '
+  if "$1" doctor --help | grep -q backup-copy-dir; then
+    args=(--backup-copy-dir "$COPY")
+    copy_line='^ok +backup copy +current:'  # the restored backup is off the server
+  fi
   for _ in $(seq 20); do
-    if out=$("$1" doctor "${args[@]}") && ! grep -qv '^ok ' <<<"$out"; then
+    if out=$("$1" doctor "${args[@]}") && ! grep -qv '^ok ' <<<"$out" && grep -qE "$copy_line" <<<"$out"; then
       echo "$out"; return 0
     fi
     sleep 0.5
