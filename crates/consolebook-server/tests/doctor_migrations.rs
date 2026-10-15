@@ -384,6 +384,106 @@ async fn a_database_without_migration_history_warns_and_the_service_creates_it()
     assert_eq!(after[0].verdict, Verdict::Ok, "{after:?}");
 }
 
+/// An empty WAL database, optionally with an empty migrations table: what
+/// the service finds before its very first start.
+async fn pristine_installation(with_empty_history: bool) -> (tempfile::TempDir, DataDir) {
+    let tmp = tempfile::tempdir().expect("scratch directory");
+    let data = DataDir::new(tmp.path().join("data"));
+    data.ensure_layout().expect("layout");
+    let pool = sqlx::SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(data.database())
+            .create_if_missing(true)
+            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal),
+    )
+    .await
+    .expect("empty database");
+    if with_empty_history {
+        // The table `SQLx` 0.9 creates, with no rows.
+        sqlx::query(
+            "CREATE TABLE _sqlx_migrations (
+                version BIGINT PRIMARY KEY,
+                description TEXT NOT NULL,
+                installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                success BOOLEAN NOT NULL,
+                checksum BLOB NOT NULL,
+                execution_time BIGINT NOT NULL
+            )",
+        )
+        .execute(&pool)
+        .await
+        .expect("empty migrations table");
+    }
+    pool.close().await;
+    (tmp, data)
+}
+
+#[tokio::test]
+async fn an_empty_migrations_table_on_an_empty_database_warns_and_the_service_starts() {
+    let (_tmp, data) = pristine_installation(true).await;
+
+    let findings = migration_findings(&data).await;
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0].verdict, Verdict::Warn, "{findings:?}");
+    assert!(
+        findings[0].detail.contains("no migration history yet"),
+        "{findings:?}"
+    );
+
+    let served = run_serve(&data);
+    assert!(
+        matches!(served, Served::Listening),
+        "serve must apply every migration and start: {served:?}"
+    );
+}
+
+/// A populated installation whose migration history was then lost.
+async fn populated_without_history(statement: &'static str) -> (tempfile::TempDir, DataDir) {
+    let (tmp, data) = installation().await;
+    let pool = storage::open_existing(&data.database())
+        .await
+        .expect("open for the fixture");
+    sqlx::query(statement)
+        .execute(&pool)
+        .await
+        .expect("lose the migration history");
+    pool.close().await;
+    (tmp, data)
+}
+
+const MISSING_HISTORY: &str = "migration history is missing";
+
+async fn assert_missing_history_refused(data: &DataDir) {
+    let findings = migration_findings(data).await;
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0].verdict, Verdict::Fail, "{findings:?}");
+    assert!(findings[0].detail.contains(MISSING_HISTORY), "{findings:?}");
+
+    let output = run_doctor(data);
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout
+            .lines()
+            .any(|line| line.starts_with("FAIL") && line.contains(MISSING_HISTORY)),
+        "{stdout}"
+    );
+
+    assert_serve_refuses(data, MISSING_HISTORY);
+}
+
+#[tokio::test]
+async fn a_populated_database_with_its_migrations_table_dropped_fails_and_serve_refuses() {
+    let (_tmp, data) = populated_without_history("DROP TABLE _sqlx_migrations").await;
+    assert_missing_history_refused(&data).await;
+}
+
+#[tokio::test]
+async fn a_populated_database_with_its_migrations_table_emptied_fails_and_serve_refuses() {
+    let (_tmp, data) = populated_without_history("DELETE FROM _sqlx_migrations").await;
+    assert_missing_history_refused(&data).await;
+}
+
 /// `storage::migration_history` mirrors what `SQLx`'s migrator refuses under
 /// this configuration. If it changes (missing versions ignored, or another
 /// table), the mirror and these tests must change with it.

@@ -62,11 +62,14 @@ value: `--backup-interval-hours 6`.
 
 Every other line should be `ok`. The `migrations` line compares each
 migration the database records with this version's: its number, its
-checksum, and whether it is recorded as successful. A `FAIL` there names the
-migration and means the service will refuse to start on this database; the
-line says what to do next. A `warn` that migrations are `pending` is
+checksum, and whether it is recorded as successful. A `FAIL` there means
+the service will refuse to start on this database: it names the migration,
+or says the migration history is missing from a database that already holds
+data, and what to do next. A `warn` that migrations are `pending` is
 expected between installing a new version and restarting: the service
-applies them on its next start, after taking a validated backup.
+applies them on its next start, after taking a validated backup. A `warn`
+that there is no migration history yet appears only for an empty database,
+before the service's first start.
 
 An administrator also sees backup health on their home page, and gets a
 notice when a copy fails.

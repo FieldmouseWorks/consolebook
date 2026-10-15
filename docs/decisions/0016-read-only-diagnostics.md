@@ -4,6 +4,8 @@
 - **Date:** 2026-09-05
 - **Issue:** [#56](https://github.com/FieldmouseWorks/consolebook/issues/56)
 - **Amends:** [ADR 0003](0003-sqlite-connection-invariants.md)
+- **Amended by:** [ADR 0029](0029-doctor-migration-verdict.md) (the migration
+  verdict matches what `serve` will do)
 
 ## Context
 

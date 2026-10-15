@@ -181,11 +181,7 @@ async fn check_migrations(pool: &SqlitePool, findings: &mut Vec<Finding>) {
             ));
             return;
         }
-        Ok(None) => {
-            findings.push(Finding::warn(CHECK, NO_HISTORY));
-            return;
-        }
-        Ok(Some(history)) => history,
+        Ok(history) => history,
     };
     if !history.refusals.is_empty() {
         // The service will not start, so nothing pending would be applied.
@@ -195,6 +191,7 @@ async fn check_migrations(pool: &SqlitePool, findings: &mut Vec<Finding>) {
         return;
     }
     if history.recorded == 0 {
+        // Pristine: anything else is a `MissingHistory` refusal above.
         findings.push(Finding::warn(CHECK, NO_HISTORY));
         return;
     }

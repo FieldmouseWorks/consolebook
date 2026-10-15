@@ -85,9 +85,16 @@ async fn connect(db_path: &Path, create: bool) -> Result<SqlitePool> {
 pub async fn open(db_path: &Path) -> Result<SqlitePool> {
     let pool = connect(db_path, true).await?;
 
-    let newer = newer_migrations(&pool).await?;
-    if let Some(&version) = newer.first() {
-        bail!("{}", RefusedHistory::Newer(version));
+    // Refusals `SQLx` would not word plainly, or would reach only after
+    // trying to migrate. It words the others itself.
+    let history = migration_history(&pool).await?;
+    if let Some(refusal) = history.refusals.iter().find(|refusal| {
+        matches!(
+            refusal,
+            RefusedHistory::Newer(_) | RefusedHistory::MissingHistory
+        )
+    }) {
+        bail!("{refusal}");
     }
 
     MIGRATOR
@@ -136,26 +143,18 @@ pub async fn pending_migrations(pool: &SqlitePool) -> Result<Vec<i64>> {
         .collect())
 }
 
-/// Applied migrations this executable does not know: the database was
-/// upgraded by a newer release. Reads only.
-pub async fn newer_migrations(pool: &SqlitePool) -> Result<Vec<i64>> {
-    let recorded = recorded_history(pool).await?.unwrap_or_default();
-    Ok(refusals(&recorded)
-        .into_iter()
-        .filter_map(|refusal| match refusal {
-            RefusedHistory::Newer(version) => Some(version),
-            _ => None,
-        })
-        .collect())
-}
-
-/// A recorded migration this executable refuses to start on. [`open`]
+/// A migration history this executable refuses to start on. [`open`]
 /// refuses each of these, through its own check or `SQLx`'s migrator
 /// (`sqlx-core` 0.9 `Migrator::run_direct`): a version it does not embed
-/// (`ignore_missing` is off), a row recorded as unsuccessful, or a stored
-/// checksum that differs from the embedded migration's.
+/// (`ignore_missing` is off), a row recorded as unsuccessful, a stored
+/// checksum that differs from the embedded migration's, or no recorded
+/// history in a database that already holds a schema (migration 1 cannot
+/// run over existing tables).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RefusedHistory {
+    /// No migration is recorded (the table is missing or empty), yet the
+    /// database already holds schema objects of its own.
+    MissingHistory,
     /// A newer release applied a migration this build does not embed.
     Newer(i64),
     /// The row is recorded as not successful. `SQLx` 0.9 records only
@@ -168,6 +167,10 @@ pub enum RefusedHistory {
 impl std::fmt::Display for RefusedHistory {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::MissingHistory => write!(
+                f,
+                "this database's migration history is missing (no migration is recorded) while it already holds data, and the service refuses to start on it: migration 1 cannot run over the existing tables; restore the snapshot taken before the upgrade, or the newest backup of this installation (docs/install.md, \"Upgrading\")"
+            ),
             Self::Newer(version) => write!(
                 f,
                 "this database was upgraded by a newer Consolebook (it has migration {version}, which this version does not know); install that release again, or restore the snapshot taken before the upgrade (docs/install.md, \"Upgrading\")"
@@ -187,7 +190,8 @@ impl std::fmt::Display for RefusedHistory {
 /// The recorded migration history, judged against this build. Reads only.
 #[derive(Debug)]
 pub struct MigrationHistory {
-    /// Rows recorded in `_sqlx_migrations`, successful or not.
+    /// Rows recorded in `_sqlx_migrations`, successful or not; zero when the
+    /// table is missing.
     pub recorded: usize,
     /// Every recorded migration startup would refuse, in version order.
     pub refusals: Vec<RefusedHistory>,
@@ -195,11 +199,30 @@ pub struct MigrationHistory {
     pub unapplied: Vec<i64>,
 }
 
-/// Judges the recorded history; `None` when the database has no migration
-/// table. Reads only, so `doctor` can use it (ADR 0016).
-pub async fn migration_history(pool: &SqlitePool) -> Result<Option<MigrationHistory>> {
-    let Some(recorded) = recorded_history(pool).await? else {
-        return Ok(None);
+/// Judges the recorded history against this build. Startup ([`open`])
+/// refuses on its refusals and `doctor` reports them. Reads only, so
+/// `doctor` can use it (ADR 0016).
+///
+/// With no recorded migration, a database is pristine only when it holds no
+/// schema objects besides `SQLite`'s own and the migrations table; anything
+/// else is [`RefusedHistory::MissingHistory`].
+pub async fn migration_history(pool: &SqlitePool) -> Result<MigrationHistory> {
+    let recorded = recorded_history(pool).await?.unwrap_or_default();
+    let refusals = if recorded.is_empty() {
+        let objects: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name != '_sqlx_migrations'",
+        )
+        .fetch_one(pool)
+        .await
+        .context("looking for an existing schema")?;
+        if objects == 0 {
+            Vec::new()
+        } else {
+            vec![RefusedHistory::MissingHistory]
+        }
+    } else {
+        refusals(&recorded)
     };
     let unapplied = MIGRATOR
         .iter()
@@ -207,11 +230,11 @@ pub async fn migration_history(pool: &SqlitePool) -> Result<Option<MigrationHist
         .map(|migration| migration.version)
         .filter(|version| recorded.iter().all(|row| row.version != *version))
         .collect();
-    Ok(Some(MigrationHistory {
+    Ok(MigrationHistory {
         recorded: recorded.len(),
-        refusals: refusals(&recorded),
+        refusals,
         unapplied,
-    }))
+    })
 }
 
 /// One row of `_sqlx_migrations`.
