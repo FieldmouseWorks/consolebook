@@ -174,7 +174,7 @@ jobs:
       # copy share was unmounted above, so doctor reports it unreachable.
       - name: Operations guide commands
         run: |
-          curl -fsS http://127.0.0.2:7771/api/health
+          curl -fsS --max-time 10 http://127.0.0.2:7771/api/health
           systemctl is-active consolebook
           sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook \
             consolebook doctor --backup-copy-dir /srv/consolebook-copies | tee ops-doctor.log

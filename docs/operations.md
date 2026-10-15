@@ -18,12 +18,13 @@ your monitoring system do it.
 ### Is it up?
 
 ```sh
-curl -fsS http://127.0.0.1:7770/api/health
+curl -fsS --max-time 10 http://127.0.0.1:7770/api/health
 ```
 
 A healthy service answers in well under a second with
 `{"status":"ok", ..., "database":"ok"}`. `curl -f` exits non-zero on anything
-else, including no answer, so a monitoring check can use the exit status
+else, and `--max-time 10` turns a server that stops answering into a failure
+instead of a check that hangs, so a monitoring check can use the exit status
 alone. The health endpoint needs no sign-in and reveals only the version,
 build, and whether the database answers.
 Behind a reverse proxy, check the public address too: the service can be up
@@ -64,9 +65,12 @@ notice when a copy fails.
 ### Is the disk filling?
 
 ```sh
-df -h /var/lib/consolebook /mnt/backups/consolebook
+df -h /var/lib/consolebook
 sudo du -sh /var/lib/consolebook/backups
 ```
+
+With a backup copy directory, check its disk too:
+`df -h /mnt/backups/consolebook`, with your directory in its place.
 
 Backups need room for about `CONSOLEBOOK_BACKUP_KEEP` (14 by default) copies
 of the database, both in `backups/` and in the copy directory. Keep at least
