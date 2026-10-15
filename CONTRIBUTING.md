@@ -19,6 +19,22 @@ pull request. Never push repository changes directly to `main`.
   `storage(backup): validate snapshot before fsync`.
 - Security reports use private advisories per [SECURITY.md](SECURITY.md).
 
+GitHub enforces the following; the `main` ruleset is the rung-2 guard for
+"never push directly to `main`":
+
+- `main` changes only by squash-merged pull request with linear history, every
+  review conversation resolved, and no force push or deletion. Administrators
+  bypass only by merging a pull request, never by pushing.
+- Required checks, on a branch up to date with `main`: `fmt-clippy-test`
+  (`pr-gate.yml`), `build-x86_64` and `build-aarch64` (release build jobs).
+  Renaming or removing these jobs, or changing the build matrix, leaves merges
+  waiting on a check that never reports; update the ruleset in the same change.
+- Tags `v*` cannot be deleted, updated, or moved, and published releases are
+  immutable, so the release draft-upload-then-publish order is load-bearing.
+- Actions must be GitHub-owned and pinned to a full commit SHA; any other
+  `uses:` fails before it runs. Secret scanning with push protection and CodeQL
+  code scanning are enabled.
+
 Use [the evidence-driven workflow](docs/workflow.md) for outcome definition,
 roles and ownership, task graphs, evidence-driven continuation, and authorization.
 The primary issue body owns the live graph; issue comments archive completed
