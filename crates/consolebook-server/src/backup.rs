@@ -213,10 +213,13 @@ fn snapshot_order(path: &Path) -> (String, String) {
     (stamp, name)
 }
 
-/// Unix mtime of the newest snapshot, for scheduling and diagnostics.
+/// Unix mtime of the newest of this installation's own backups, for
+/// scheduling and diagnostics. A database a restore set aside is no backup
+/// of this installation, so it neither postpones the next backup nor makes
+/// old ones look fresh.
 pub fn latest_snapshot_mtime(data_dir: &DataDir) -> Result<Option<i64>> {
     let mut latest: Option<i64> = None;
-    for snapshot in snapshots(data_dir)? {
+    for snapshot in own_backups_in(&data_dir.backups())? {
         let modified = std::fs::metadata(&snapshot)
             .and_then(|m| m.modified())
             .with_context(|| format!("reading snapshot mtime {}", snapshot.display()))?;

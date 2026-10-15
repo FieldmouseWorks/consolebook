@@ -253,7 +253,8 @@ pub struct BackupStatus {
 pub struct LocalStatus {
     pub directory: String,
     pub count: usize,
-    /// File name of the newest snapshot, which carries its UTC timestamp.
+    /// File name of the newest backup of this installation (never a database
+    /// a restore set aside), which carries its UTC timestamp.
     pub newest: Option<String>,
     /// Unix time the newest snapshot was written.
     pub newest_at: Option<i64>,
@@ -303,14 +304,11 @@ pub async fn status_for(
 pub fn status(settings: &BackupSettings) -> Result<BackupStatus> {
     let local_dir = settings.data_dir.backups();
     let local = backup::snapshots(&settings.data_dir)?;
-    let newest_local = local
-        .last()
-        .and_then(|path| path.file_name())
-        .map(|name| name.to_string_lossy().into_owned());
+    let newest_local = newest_own_backup(&settings.data_dir)?;
     let copy = copy_status_of(
         settings.copy_dir.as_deref(),
         &local_dir,
-        newest_own_backup(&settings.data_dir)?.as_deref(),
+        newest_local.as_deref(),
     );
     Ok(BackupStatus {
         interval_hours: settings.interval_hours,
