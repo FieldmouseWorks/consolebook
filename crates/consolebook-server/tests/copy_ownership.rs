@@ -292,3 +292,26 @@ async fn a_fresh_pre_restore_snapshot_does_not_make_old_backups_look_current() {
         .expect("doctor reports backups");
     assert_eq!(backups.verdict, doctor::Verdict::Warn, "{backups:?}");
 }
+
+#[tokio::test]
+async fn only_a_set_aside_database_is_no_backup() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let (data_dir, _, snapshot) = installation(&tmp.path().join("data")).await;
+    std::fs::rename(
+        &snapshot,
+        data_dir
+            .backups()
+            .join("consolebook-prerestore-20261014T000000Z.db"),
+    )
+    .expect("only a set-aside database remains");
+    let findings = doctor::run(&data_dir, &doctor::Options::default()).await;
+    let backups = findings
+        .iter()
+        .find(|finding| finding.check == "backups")
+        .expect("doctor reports backups");
+    assert_eq!(backups.verdict, doctor::Verdict::Warn, "{backups:?}");
+    assert!(
+        backups.detail.starts_with("no backup of this installation"),
+        "{backups:?}"
+    );
+}

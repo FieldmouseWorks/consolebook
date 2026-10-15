@@ -263,6 +263,7 @@ If the server's disk is gone, recover on a new machine:
 | Is it running? | `systemctl status consolebook` |
 | Logs | `journalctl -u consolebook` |
 | Which version? | `consolebook --version`, or the footer of any page |
+| What to monitor, logs, reporting a problem | [Operating a pilot installation](operations.md) |
 | Locked out administrator | `sudo -u consolebook CONSOLEBOOK_DATA_DIR=/var/lib/consolebook consolebook recover --username NAME` |
 | Change the listen address | edit `CONSOLEBOOK_BIND` in `/etc/consolebook/consolebook.env`, then `sudo systemctl restart consolebook` |
 
