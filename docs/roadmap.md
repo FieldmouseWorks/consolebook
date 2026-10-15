@@ -12,7 +12,10 @@ finalized records, acknowledgments, amendments, summaries, and task signoffs
 Milestone 5 has file-verifiable [record exports](https://github.com/FieldmouseWorks/consolebook/pull/46)
 and [trainee packets](https://github.com/FieldmouseWorks/consolebook/pull/50),
 [retention policies and holds](https://github.com/FieldmouseWorks/consolebook/pull/66),
-and [trainee signoff history](https://github.com/FieldmouseWorks/consolebook/pull/68).
+[trainee signoff history](https://github.com/FieldmouseWorks/consolebook/pull/68),
+and a [complete installation export](formats/installation-export.md)
+([ADR 0028](decisions/0028-installation-export.md)) that carries everything but
+credentials.
 
 Operability as of 0.2.0:
 - versioned releases with a traceable build identity
@@ -34,8 +37,7 @@ Operability as of 0.2.0:
 `scripts/proof.py` runs the full local gate sequence and leaves a receipt.
 
 Material limits: confirmed disposition, tombstones, portable policy-boundary
-evidence, a complete installation export ([#98](https://github.com/FieldmouseWorks/consolebook/issues/98)),
-and deterministic PDFs remain Milestone 5 work. The restore drill has run
+evidence, and deterministic PDFs remain Milestone 5 work. The restore drill has run
 scripted on one machine, not yet on real hosts with a network share, and does
 not yet run on every release ([#119](https://github.com/FieldmouseWorks/consolebook/issues/119)).
 Pre-alpha status still applies.

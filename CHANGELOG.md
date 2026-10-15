@@ -10,6 +10,19 @@ not a production-readiness statement.
 
 ## [Unreleased]
 
+### Added
+
+- A complete installation export: everything the installation holds except
+  credentials (finalized records as their stored bytes, plus people,
+  programs, enrollments, sessions, drafts and their reviews, retention
+  policies and holds, notices, and the audit trail) as one archive. A
+  manifest ledger names every carried table and every exclusion. Holders of
+  `export_records` download it from the home page, even before any record is
+  finalized, and `consolebook-server export verify` checks it from the file
+  alone ([ADR 0028](docs/decisions/0028-installation-export.md),
+  [format](docs/formats/installation-export.md)). The archive is not
+  encrypted.
+
 ## [0.2.0] - 2026-10-15
 
 Safer upgrades and recovery for a pilot: a backup before every migration,
