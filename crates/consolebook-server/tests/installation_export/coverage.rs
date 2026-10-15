@@ -359,6 +359,9 @@ fn check_lists_are_read_however_they_are_spelled() {
         "kind TEXT CHECK (kind\nIN ('a', 'b'))",
         "kind TEXT CHECK (kind\tin('a', 'b'))",
         "kind TEXT CHECK (kind in (\n'a', 'b'))",
+        "kind TEXT CHECK (\"kind\" IN ('a', 'b'))",
+        "kind TEXT CHECK ((kind) IN ('a', 'b'))",
+        "kind TEXT CHECK (( \"kind\" ) in('a', 'b'))",
     ] {
         let lists = table_spec::in_lists(sql);
         assert_eq!(lists.len(), 1, "{sql:?}: {lists:?}");
@@ -368,6 +371,7 @@ fn check_lists_are_read_however_they_are_spelled() {
         "kind TEXT CHECK (kind NOT IN ('a'))",
         "kind TEXT CHECK (kind = 'in') -- kind IN ('a')",
         "id INTEGER, inside INTEGER, CHECK (main (1))",
+        "kind TEXT CHECK (length(kind) IN (1, 2))",
     ] {
         assert!(table_spec::in_lists(sql).is_empty(), "{sql:?}");
     }

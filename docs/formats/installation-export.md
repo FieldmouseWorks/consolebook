@@ -535,8 +535,14 @@ Every vocabulary is closed and is shared with the module that owns it. The
 producer parses each stored value on the way out. The verifier parses it on
 the way in. A value outside the vocabulary is refused at production, as a
 stored value the build does not understand, and is a finding at verification.
-It is never passed through as text. Kinds are only ever added, never removed,
-because an older installation's history must keep exporting.
+It is never passed through as text.
+
+Vocabularies grow within a format version, and values are never removed,
+because an older installation's history must keep exporting and an older
+archive must keep verifying. A reader that meets a value it does not know
+reports it, as this verifier does, rather than guessing at its meaning. The
+values each vocabulary held when version 1 was defined are recorded as a
+floor in the tests, and every one must still be in the vocabulary.
 
 ## What the export does not carry
 
@@ -659,12 +665,33 @@ The format's table and column lists are enforced, not just written down:
 - A second test reads the column tables in this document and compares them
   with the same specification, so the document cannot drift from the
   producer.
-- A third test pins a fingerprint of the specification (every table, key,
-  column rule, exclusion, and column carried as units) to each
-  `format_version`. A changed specification fails it until `format_version`
-  is bumped and the new version's fingerprint is recorded beside the earlier
-  ones; a recorded fingerprint is never edited. This test is what enforces
-  the bump.
+- A third test pins a fingerprint of the structure the specification holds
+  to each `format_version`: tables, keys, columns with their types,
+  nullability, references, and agreements, which columns are vocabularies
+  (and which vocabulary), exclusions, and columns carried as units. It does
+  not cover vocabulary members, which grow within a version (see
+  Vocabularies). A changed structure fails it until `format_version` is
+  bumped and the new version's fingerprint is recorded beside the earlier
+  ones; a recorded fingerprint is never edited.
+- A golden version-1 archive, produced once from an invented installation
+  with a row in every carried table, is committed with the tests and must
+  verify on every build. It pins the manifest shape and the verifier's rules,
+  so a change that would need a version bump fails there when the bump is
+  skipped. A failure means a new `format_version`, whose ADR decides how
+  version-1 archives keep verifying; the version-1 file is never regenerated
+  to make the test pass.
+
+Loosening a verifier rule is caught by that rule's negative control, not by
+either pin: the fingerprint and the golden archive only notice changes that
+make a version-1 archive read differently.
+
+The coverage guard has limits, and states them. It reads vocabularies from
+stored `CHECK ... IN (...)` lists, so a vocabulary enforced only by a trigger,
+a flag column without a stored `CHECK` (`draft_rating.not_observed`, which a
+trigger holds to `0` or `1`), and text forms checked with `GLOB` (the
+`evaluation_version` hashes) are not compared with the specification. In
+those cases the guard under-verifies, and the producer's and verifier's rules
+still apply. It never lets a table or column leave unaccounted for.
 
 Changing what the format carries changes the format: a new `format_version`,
 this document, the producer, the verifier, and the fixtures move together

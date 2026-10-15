@@ -38,6 +38,10 @@ use zip::write::{SimpleFileOptions, ZipWriter};
 mod coverage;
 #[path = "installation_export/document.rs"]
 mod document;
+#[path = "installation_export/floor.rs"]
+mod floor;
+#[path = "installation_export/golden.rs"]
+mod golden;
 #[path = "installation_export/negative.rs"]
 mod negative;
 #[path = "installation_export/properties.rs"]

@@ -354,11 +354,39 @@ fn compare_table(
     findings
 }
 
+/// The column an `IN` keyword applies to, from the code before it: a
+/// bare identifier, a double-quoted one, or either in parentheses. A
+/// function call (`length(x) IN`), `NOT IN`, and anything else are not a
+/// column.
+fn column_before(before: &str) -> Option<&str> {
+    let is_word = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_';
+    let mut before = before.trim_end();
+    if let Some(inner) = before.strip_suffix(')') {
+        let open = inner.rfind('(')?;
+        if inner[..open].bytes().next_back().is_some_and(is_word) {
+            return None;
+        }
+        before = inner[open + 1..].trim();
+    }
+    let column = if let Some(inner) = before.strip_suffix('"') {
+        &inner[inner.rfind('"')? + 1..]
+    } else {
+        let start = before
+            .bytes()
+            .rposition(|byte| !is_word(byte))
+            .map_or(0, |index| index + 1);
+        &before[start..]
+    };
+    let plain = !column.is_empty() && column.bytes().all(is_word);
+    (plain && !column.eq_ignore_ascii_case("NOT")).then_some(column)
+}
+
 /// Every `column IN (...)` literal list in a table's SQL, by column,
 /// merged and sorted: a column constrained in more than one place (a
 /// column check and a table check naming a subset) has the union. The
 /// keyword matches in any case and after any whitespace, with or without
-/// space before its parenthesis. String literals lose their quotes;
+/// space before its parenthesis; the column may be quoted or in
+/// parentheses. String literals lose their quotes;
 /// integers stay as written. Comments are skipped; `NOT IN` is not a
 /// vocabulary.
 #[must_use]
@@ -386,16 +414,9 @@ pub fn in_lists(sql: &str) -> BTreeMap<String, Vec<String>> {
         if !rest.starts_with('(') {
             continue;
         }
-        // The identifier immediately before the keyword.
-        let before = code[..start].trim_end();
-        let ident_start = before
-            .bytes()
-            .rposition(|byte| !is_word(byte))
-            .map_or(0, |index| index + 1);
-        let column = &before[ident_start..];
-        if column.is_empty() || column.eq_ignore_ascii_case("NOT") {
+        let Some(column) = column_before(&code[..start]) else {
             continue;
-        }
+        };
         let open = code.len() - rest.len();
         let Some(close) = code[open..].find(')') else {
             break;

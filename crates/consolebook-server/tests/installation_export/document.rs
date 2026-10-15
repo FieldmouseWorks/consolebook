@@ -256,10 +256,12 @@ fn exclusion_differences(doc: &str) -> Vec<String> {
 /// recorded when that version was defined. A changed specification is a
 /// new `format_version` with its own recorded fingerprint, appended here:
 /// never an edit to an existing entry, because archives of that version
-/// already exist and keep their meaning (ADR 0028).
+/// already exist and keep their meaning (ADR 0028). The fingerprint
+/// pins spec-held structure; vocabulary members grow within a version and
+/// are held by the vocabulary floor (`floor.rs`) instead.
 const RECORDED_FINGERPRINTS: &[(i64, &str)] = &[(
     1,
-    "db1cbc0241687db05396f16a3b3db6ee9157c0cd625cd82cd6ffa30b9cc6dd47",
+    "5d4b236558b3769d42629ecd6ed5e8608027fbce68e0aa09deb245cbbc36cde5",
 )];
 
 #[test]

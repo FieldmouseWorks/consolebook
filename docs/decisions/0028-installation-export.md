@@ -142,10 +142,15 @@ download; one pull request.
 - A schema change and this format now move together. Any migration that adds
   or changes a table or column bumps `format_version` and updates the format
   document, producer, verifier, and fixtures (CONTRIBUTING.md). The coverage
-  test makes a schema change impossible to forget, and a test that pins the
-  specification's fingerprint to each `format_version` makes the bump
-  impossible to skip: a changed specification fails it until a new version
-  is recorded beside the old ones. A build refuses an unknown
+  test fails a table or column the format has not decided on. Vocabularies
+  grow within a format version and never lose a value; a reader meeting an
+  unknown value reports it, as this verifier does. A recorded fingerprint
+  pins the structure the specification holds (tables, keys, columns,
+  references, agreements, which columns are vocabularies, exclusions, and
+  columns carried as units) per `format_version`. A golden version-1 archive
+  pins the manifest shape and the verifier's rules and makes skipping a
+  version bump fail. Loosening a verifier rule is caught by its negative
+  control, not by either pin. A build refuses an unknown
   format version by name. The ADR for a later version decides how earlier
   archives keep verifying.
 - The format exposes the storage schema's names and shapes to whoever reads an

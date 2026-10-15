@@ -302,11 +302,15 @@ pub fn exclusion(name: &str) -> Option<&'static Exclusion> {
     EXCLUSIONS.iter().find(|exclusion| exclusion.name == name)
 }
 
-/// The specification as one deterministic text: every table with its key
-/// and every column's type, nullability, reference, agreement, vocabulary
-/// (module vocabularies by their values), and text form; every exclusion
-/// with its reason; every column carried as units. Anything the format
-/// carries or checks changes this text.
+/// The specification's structure as one deterministic text: every table
+/// with its key and every column's type, nullability, reference,
+/// agreement, which vocabulary it carries (a stored `CHECK` list, or a
+/// module vocabulary by name), and text form; every exclusion with its
+/// reason; every column carried as units.
+///
+/// Vocabulary members are deliberately not part of it: vocabularies grow
+/// within a format version and never lose a value, which a recorded
+/// floor of the version's values checks instead.
 #[must_use]
 pub fn describe(
     tables: &[Table],
@@ -318,16 +322,9 @@ pub fn describe(
     for table in tables {
         let _ = writeln!(out, "table {} key {}", table.name, table.key.join(","));
         for column in table.columns {
-            let vocabulary = column.vocabulary.map_or_else(
-                || "-".to_owned(),
-                |vocabulary| {
-                    format!(
-                        "{}[{}]",
-                        vocabulary.module_name().unwrap_or("check"),
-                        vocabulary.values().join(",")
-                    )
-                },
-            );
+            let vocabulary = column.vocabulary.map_or("-", |vocabulary| {
+                vocabulary.module_name().unwrap_or("check")
+            });
             let _ = writeln!(
                 out,
                 "  column {} {} null={} ref={} agrees={} vocabulary={} form={}",
