@@ -25,6 +25,21 @@ pub enum Capability {
 }
 
 impl Capability {
+    /// Every value, once. Values are only ever added, never removed:
+    /// an older installation's stored rows must keep exporting.
+    pub const ALL: [Self; 10] = [
+        Self::ManageUsers,
+        Self::ManageRetention,
+        Self::ManagePrograms,
+        Self::AssignTraining,
+        Self::ExportRecords,
+        Self::AuthorEvaluation,
+        Self::ReviewEvaluation,
+        Self::ViewAssignedRecords,
+        Self::ViewOwnRecords,
+        Self::AcknowledgeOwnRecord,
+    ];
+
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -39,6 +54,13 @@ impl Capability {
             Self::ViewOwnRecords => "view_own_records",
             Self::AcknowledgeOwnRecord => "acknowledge_own_record",
         }
+    }
+
+    /// The stored value as this build knows it, or `None` for one it does
+    /// not (docs/formats/installation-export.md, Vocabularies).
+    #[must_use]
+    pub fn parse(stored: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|value| value.as_str() == stored)
     }
 }
 
@@ -155,4 +177,23 @@ pub async fn list_for_user(pool: &SqlitePool, user_id: i64) -> Result<Vec<String
     .fetch_all(pool)
     .await
     .context("listing capabilities")
+}
+
+#[cfg(test)]
+mod vocabulary_tests {
+    use super::*;
+
+    /// The closed vocabulary names every value once, and parsing a stored
+    /// name gives back the value that wrote it.
+    #[test]
+    fn the_vocabulary_is_closed_and_round_trips() {
+        let mut names: Vec<&str> = Capability::ALL.iter().map(|value| value.as_str()).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), Capability::ALL.len());
+        for value in Capability::ALL {
+            assert_eq!(Capability::parse(value.as_str()), Some(value));
+        }
+        assert_eq!(Capability::parse("invented_unknown_value"), None);
+    }
 }

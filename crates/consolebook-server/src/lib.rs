@@ -25,6 +25,8 @@ pub mod exports_http;
 pub mod finalization;
 pub mod getting_started;
 pub mod http;
+pub mod installation_export;
+pub mod installation_verify;
 pub mod lifecycle;
 pub mod notices;
 pub mod packet_verify;

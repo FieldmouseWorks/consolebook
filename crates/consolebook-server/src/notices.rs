@@ -33,6 +33,25 @@ pub enum NoticeKind {
 }
 
 impl NoticeKind {
+    /// Every value, once. Values are only ever added, never removed:
+    /// an older installation's stored rows must keep exporting.
+    pub const ALL: [Self; 14] = [
+        Self::BackupFailed,
+        Self::BackupCopyFailed,
+        Self::AssignmentCreated,
+        Self::DraftOwnershipReceived,
+        Self::DraftSubmittedForReview,
+        Self::DraftApproved,
+        Self::DraftChangesRequested,
+        Self::DraftReturned,
+        Self::DraftFinalized,
+        Self::RecordAwaitsAcknowledgment,
+        Self::AcknowledgmentResponse,
+        Self::AcknowledgmentRefused,
+        Self::AcknowledgmentAttested,
+        Self::AmendmentOpened,
+    ];
+
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -51,6 +70,13 @@ impl NoticeKind {
             Self::AcknowledgmentAttested => "acknowledgment_attested",
             Self::AmendmentOpened => "amendment_opened",
         }
+    }
+
+    /// The stored value as this build knows it, or `None` for one it does
+    /// not (docs/formats/installation-export.md, Vocabularies).
+    #[must_use]
+    pub fn parse(stored: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|value| value.as_str() == stored)
     }
 }
 
@@ -165,4 +191,23 @@ pub async fn mark_read(pool: &SqlitePool, user_id: i64, notice_id: i64) -> Resul
     .await
     .context("marking notice read")?;
     Ok(result.rows_affected() == 1)
+}
+
+#[cfg(test)]
+mod vocabulary_tests {
+    use super::*;
+
+    /// The closed vocabulary names every value once, and parsing a stored
+    /// name gives back the value that wrote it.
+    #[test]
+    fn the_vocabulary_is_closed_and_round_trips() {
+        let mut names: Vec<&str> = NoticeKind::ALL.iter().map(|value| value.as_str()).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), NoticeKind::ALL.len());
+        for value in NoticeKind::ALL {
+            assert_eq!(NoticeKind::parse(value.as_str()), Some(value));
+        }
+        assert_eq!(NoticeKind::parse("invented_unknown_value"), None);
+    }
 }

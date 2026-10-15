@@ -451,8 +451,12 @@ Each table's columns are listed in stored order, with these meanings:
 A column marked → holds the `id` of a row in the named table (for
 `capability_grant.user_id`, a `user` id). A non-null reference must name a row
 the archive carries; one that does not resolve is a finding. These are the
-installation's stored foreign keys. One committed snapshot of the database
-satisfies every one of them, so a reference that fails to resolve means the
+installation's stored foreign keys. Three columns, `draft_narrative`,
+`draft_rating`, and `draft_rating_modifier`'s `program_version_id`, have no
+single-column foreign key of their own. Composite keys pin them to the row they
+agree with (see Agreements), and they are checked as references into
+`program_version` like the rest. One committed snapshot of the database
+satisfies every one of these, so a reference that fails to resolve means the
 archive is not the snapshot it claims to be.
 
 `audit_event.subject_kind` and `audit_event.subject_id` are deliberately *not*
@@ -555,8 +559,12 @@ it is not encrypted. Store and transfer it as the installation's own data.
 
 ## Determinism and consistency
 
-An export is a pure function of the stored rows and the export instant. The
-same installation exported at the same instant is byte-identical.
+An export is a pure function of the stored rows it reads and the export
+instant. The same rows exported at the same instant produce identical bytes.
+Exporting changes the installation, though: each export records its own
+`installation_exported` audit event before it reads (see Authorization), so the
+archive carries the event of its own production. Two successive exports
+therefore always differ, at least by that row and its table's ledger entry.
 
 The producing installation reads the unit list, every table document, and the
 ledger counts inside one read transaction, so every document describes one
@@ -622,8 +630,10 @@ the capability that already exports every finalized record installation-wide
 (ADR 0010, ADR 0014). This export also carries people, drafts, and the audit
 trail, so no narrower read rule could produce it. The interface offers it on
 the home page beside the installation record export, at
-`GET /api/exports/installation`. Every export is audited as
+`GET /api/exports/installation`, as
+`consolebook-installation-export-{stamp}.zip`. Every export is audited as
 `installation_exported`, with the actor and never with content. The audit
+event is committed before the snapshot is read, so the archive includes it. The audit
 event records the export the installation produced from its state at the
 recorded instant. As with the record export, it is not a receipt for a
 completed download.

@@ -7,10 +7,10 @@
 //! reader collapses by name), and the normative check list of the
 //! format document. The verdict is consistency with the stated
 //! fingerprints, never tamper-proofing (ADR 0010, ADR 0011). The
-//! container's raw reading lives in `zip_container` and the trainee
-//! packet's document checks in `packet_verify`; this module owns the
-//! findings, the reports, the format dispatch, and the unit checks every
-//! format shares.
+//! container's raw reading lives in `zip_container`, the trainee
+//! packet's document checks in `packet_verify`, and the installation
+//! export's in `installation_verify`; this module owns the findings, the
+//! reports, the format dispatch, and the unit checks every format shares.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -22,6 +22,8 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use crate::canonical;
+use crate::installation_export::{INSTALLATION_FORMAT, INSTALLATION_FORMAT_VERSION};
+use crate::installation_verify::InstallationFinding;
 use crate::record_envelope;
 use crate::record_export::{
     ARCHIVE_FORMAT, ARCHIVE_MANIFEST_PATH, ArchiveManifest, FORMAT_VERSION, RECORD_FILE, Scope,
@@ -175,6 +177,11 @@ pub enum Finding {
     ManifestEnrollmentInvalid {
         detail: String,
     },
+    /// What only an installation export can get wrong: its ledger, its
+    /// table documents' rows, and their agreement with the units.
+    Installation {
+        finding: InstallationFinding,
+    },
 }
 
 impl fmt::Display for Finding {
@@ -277,8 +284,9 @@ impl fmt::Display for Finding {
                 f.write_str("a predecessor hash is present exactly for versions after the first")
             }
             Self::PredecessorNotCarried => f.write_str(
-                "the predecessor this version names is not carried; a packet carries every retained version",
+                "the predecessor this version names is not carried; this archive carries every retained version",
             ),
+            Self::Installation { finding } => finding.fmt(f),
             Self::DocumentLineage { path, detail } => {
                 write!(f, "{path} disagrees with the carried lineage: {detail}")
             }
@@ -342,6 +350,7 @@ impl UnitReport {
 pub enum ArchiveKind {
     RecordExport,
     TraineePacket,
+    InstallationExport,
 }
 
 impl fmt::Display for ArchiveKind {
@@ -349,6 +358,7 @@ impl fmt::Display for ArchiveKind {
         f.write_str(match self {
             Self::RecordExport => "record export",
             Self::TraineePacket => "trainee packet",
+            Self::InstallationExport => "installation export",
         })
     }
 }
@@ -362,6 +372,23 @@ pub struct DocumentReport {
 }
 
 impl DocumentReport {
+    #[must_use]
+    pub fn verified(&self) -> bool {
+        self.findings.is_empty()
+    }
+}
+
+/// One installation-export table document's verification.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TableReport {
+    pub path: String,
+    pub table: String,
+    /// The rows the document carries, when it reads as an array.
+    pub rows: Option<usize>,
+    pub findings: Vec<Finding>,
+}
+
+impl TableReport {
     #[must_use]
     pub fn verified(&self) -> bool {
         self.findings.is_empty()
@@ -382,6 +409,8 @@ pub struct ArchiveReport {
     pub enrollment_id: Option<i64>,
     pub units: Vec<UnitReport>,
     pub documents: Vec<DocumentReport>,
+    /// An installation export's table documents.
+    pub tables: Vec<TableReport>,
     pub findings: Vec<Finding>,
 }
 
@@ -391,6 +420,7 @@ impl ArchiveReport {
         self.findings.is_empty()
             && self.units.iter().all(UnitReport::verified)
             && self.documents.iter().all(DocumentReport::verified)
+            && self.tables.iter().all(TableReport::verified)
     }
 
     /// The export instant as RFC 3339, for presentation.
@@ -417,6 +447,7 @@ pub fn verify_archive(bytes: &[u8]) -> ArchiveReport {
         enrollment_id: None,
         units: Vec::new(),
         documents: Vec::new(),
+        tables: Vec::new(),
         findings: Vec::new(),
     };
     let mut archive = match zip::ZipArchive::new(Cursor::new(bytes)) {
@@ -461,6 +492,14 @@ pub fn verify_archive(bytes: &[u8]) -> ArchiveReport {
         }
         (PACKET_FORMAT, PACKET_FORMAT_VERSION) => {
             crate::packet_verify::verify_packet(&mut archive, &names, &manifest_bytes, &mut report);
+        }
+        (INSTALLATION_FORMAT, INSTALLATION_FORMAT_VERSION) => {
+            crate::installation_verify::verify_installation(
+                &mut archive,
+                &names,
+                &manifest_bytes,
+                &mut report,
+            );
         }
         _ => report.findings.push(Finding::UnsupportedFormat {
             format: probe.format,
