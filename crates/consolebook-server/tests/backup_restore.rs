@@ -5,6 +5,8 @@ use consolebook_server::data_dir::DataDir;
 use consolebook_server::serve_lock::ServeLock;
 use consolebook_server::{backup, restore, scheduler, setup, storage};
 
+mod support;
+
 fn temp_data_dir() -> (tempfile::TempDir, DataDir) {
     let tmp = tempfile::tempdir().expect("create temp dir");
     let data_dir = DataDir::new(tmp.path().join("data"));
@@ -25,7 +27,7 @@ async fn initialized_db(data_dir: &DataDir) -> String {
         "Example County Communications",
         "avery.admin",
         "Avery Admin",
-        "invented-passphrase-1",
+        support::password(),
     )
     .await
     .expect("initialize")

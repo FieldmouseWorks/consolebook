@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use axum::body::Body;
-use axum::http::header::{CONTENT_TYPE, COOKIE};
+use axum::http::header::COOKIE;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
@@ -15,7 +15,7 @@ use consolebook_server::capabilities::{self, TRAINER_BUNDLE};
 use consolebook_server::data_dir::DataDir;
 use consolebook_server::{http, secrets, setup, storage, users};
 
-const PASSWORD: &str = "invented-passphrase-1";
+mod support;
 
 struct Fixture {
     tmp: tempfile::TempDir,
@@ -43,7 +43,7 @@ impl Fixture {
             "Example County Communications",
             "avery.admin",
             "Avery Admin",
-            PASSWORD,
+            support::password(),
         )
         .await
         .expect("initialize")
@@ -278,7 +278,7 @@ async fn status_reports_unconfigured_behind_current_and_unreachable() {
 #[tokio::test]
 async fn only_administrators_read_backup_health() {
     let fx = Fixture::new().await;
-    let hash = secrets::hash_password(PASSWORD).expect("hash");
+    let hash = secrets::hash_password(support::password()).expect("hash");
     let mut conn = fx.pool.acquire().await.expect("conn");
     let trainer = users::create(&mut conn, "jordan.trainer", "Jordan Trainer", "", "", &hash)
         .await
@@ -297,31 +297,8 @@ async fn only_administrators_read_backup_health() {
     );
 
     let app = http::router(http::AppState::new(fx.pool.clone()).with_backups(settings));
-    let login = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/auth/login")
-                .header(CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    serde_json::json!({ "username": "avery.admin", "password": PASSWORD })
-                        .to_string(),
-                ))
-                .expect("request"),
-        )
-        .await
-        .expect("login");
-    let cookie = login
-        .headers()
-        .get("set-cookie")
-        .expect("cookie")
-        .to_str()
-        .expect("ascii")
-        .split(';')
-        .next()
-        .expect("pair")
-        .to_owned();
+    let session = support::login(app.clone(), "avery.admin", support::password()).await;
+    let cookie = format!("{}={session}", http::SESSION_COOKIE);
     let response = app
         .oneshot(
             Request::builder()

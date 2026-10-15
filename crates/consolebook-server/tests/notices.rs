@@ -13,7 +13,7 @@ use consolebook_server::data_dir::DataDir;
 use consolebook_server::notices::{self, NoticeKind};
 use consolebook_server::{http, secrets, setup, storage, users};
 
-const PASSWORD: &str = "invented-passphrase-1";
+mod support;
 
 struct Fixture {
     _tmp: tempfile::TempDir,
@@ -41,12 +41,12 @@ impl Fixture {
             "Example County Communications",
             "avery.admin",
             "Avery Admin",
-            PASSWORD,
+            support::password(),
         )
         .await
         .expect("initialize")
         .expect("accepted");
-        let hash = secrets::hash_password(PASSWORD).expect("hash");
+        let hash = secrets::hash_password(support::password()).expect("hash");
         let mut conn = pool.acquire().await.expect("conn");
         let trainee_id =
             users::create(&mut conn, "taylor.trainee", "Taylor Trainee", "", "", &hash)
@@ -66,30 +66,7 @@ impl Fixture {
     }
 
     async fn login(&self, username: &str) -> String {
-        let response = self
-            .app()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/auth/login")
-                    .header(CONTENT_TYPE, "application/json")
-                    .body(Body::from(
-                        serde_json::json!({ "username": username, "password": PASSWORD })
-                            .to_string(),
-                    ))
-                    .expect("request"),
-            )
-            .await
-            .expect("response");
-        assert_eq!(response.status(), StatusCode::OK);
-        let cookie = response
-            .headers()
-            .get(axum::http::header::SET_COOKIE)
-            .expect("cookie")
-            .to_str()
-            .expect("ascii");
-        let (pair, _) = cookie.split_once(';').expect("attrs");
-        pair.split_once('=').expect("pair").1.to_string()
+        support::login(self.app(), username, support::password()).await
     }
 }
 

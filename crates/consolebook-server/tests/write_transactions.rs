@@ -17,7 +17,7 @@ const ACTOR: i64 = 1;
 const TRAINEE: i64 = 2;
 const TRAINER: i64 = 3;
 const OTHER_TRAINER: i64 = 4;
-const PASSWORD: &str = "invented-passphrase-1";
+mod support;
 
 struct Fixture {
     tmp: tempfile::TempDir,

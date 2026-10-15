@@ -7,9 +7,9 @@
 //! archives would differ — in the local header, in a data descriptor, or in
 //! the central directory — so the comparison is the contract.
 
-use std::io::Write;
-
+mod support;
 use consolebook_server::export_stream::EntryBuffer;
+use std::io::Write;
 
 fn options() -> zip::write::SimpleFileOptions {
     zip::write::SimpleFileOptions::default()
@@ -478,7 +478,7 @@ async fn installed() -> (tempfile::TempDir, SqlitePool, i64, i64) {
         "Example County Communications",
         "avery.admin",
         "Avery Admin",
-        "invented-passphrase-1",
+        support::password(),
     )
     .await
     .expect("initialize")
@@ -1585,10 +1585,10 @@ fn archive_instant(bytes: &[u8]) -> i64 {
 /// Signs in over the live listener and returns the session cookie value.
 async fn live_login(addr: &std::net::SocketAddr, username: &str) -> String {
     let mut client = tokio::net::TcpStream::connect(addr).await.expect("connect");
-    let body = format!("{{\"username\":\"{username}\",\"password\":\"invented-passphrase-1\"}}");
+    let body = serde_json::json!({ "username": username, "password": support::password() });
     let request = format!(
         "POST /api/auth/login HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
+        body.to_string().len()
     );
     tokio::io::AsyncWriteExt::write_all(&mut client, request.as_bytes())
         .await

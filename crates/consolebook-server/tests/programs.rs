@@ -11,7 +11,7 @@ use consolebook_server::programs::{
 };
 use consolebook_server::{setup, storage, users};
 
-const PASSWORD: &str = "invented-passphrase-1";
+mod support;
 
 struct Fixture {
     _tmp: tempfile::TempDir,
@@ -36,7 +36,7 @@ impl Fixture {
             "Example County Communications",
             "avery.admin",
             "Avery Admin",
-            PASSWORD,
+            support::password(),
         )
         .await
         .expect("initialize")

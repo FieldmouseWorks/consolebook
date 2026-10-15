@@ -4,7 +4,7 @@
 //! invented.
 
 use axum::body::Body;
-use axum::http::header::{CONTENT_TYPE, COOKIE, SET_COOKIE};
+use axum::http::header::{CONTENT_TYPE, COOKIE};
 use axum::http::{Request, StatusCode};
 use consolebook_server::capabilities::RoleBundle;
 use consolebook_server::data_dir::DataDir;
@@ -18,8 +18,7 @@ use consolebook_server::{enrollments, setup, storage, users};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 
-const PASSWORD: &str = "invented-passphrase-1";
-const TRAINEE_PASSWORD: &str = "trainee-passphrase-3";
+mod support;
 
 struct Fixture {
     _tmp: tempfile::TempDir,
@@ -44,7 +43,7 @@ impl Fixture {
             "Example County Communications",
             "avery.admin",
             "Avery Admin",
-            PASSWORD,
+            support::password(),
         )
         .await
         .expect("initialize")
@@ -61,30 +60,7 @@ impl Fixture {
     }
 
     async fn login(&self, username: &str, password: &str) -> String {
-        let response = self
-            .app()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/auth/login")
-                    .header(CONTENT_TYPE, "application/json")
-                    .body(Body::from(
-                        serde_json::json!({ "username": username, "password": password })
-                            .to_string(),
-                    ))
-                    .expect("request"),
-            )
-            .await
-            .expect("response");
-        assert_eq!(response.status(), StatusCode::OK, "login {username}");
-        let cookie = response
-            .headers()
-            .get(SET_COOKIE)
-            .expect("cookie")
-            .to_str()
-            .expect("ascii");
-        let (pair, _) = cookie.split_once(';').expect("attrs");
-        pair.split_once('=').expect("pair").1.to_string()
+        support::login(self.app(), username, password).await
     }
 
     /// Creates a program with one published version of `content`; returns
@@ -276,7 +252,8 @@ fn complete_content() -> VersionContent {
 #[tokio::test]
 async fn a_created_user_signs_in_through_the_reset_flow() {
     let fx = Fixture::new().await;
-    let admin = fx.login("avery.admin", PASSWORD).await;
+    let trainee_password = support::fresh_password();
+    let admin = fx.login("avery.admin", support::password()).await;
 
     let (status, body) = request(
         fx.app(),
@@ -295,7 +272,7 @@ async fn a_created_user_signs_in_through_the_reset_flow() {
         "POST",
         "/api/auth/login",
         None,
-        Some(serde_json::json!({"username": "jordan.trainee", "password": ""})),
+        Some(serde_json::json!({"username": "jordan.trainee", "password": String::new()})),
     )
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -309,18 +286,19 @@ async fn a_created_user_signs_in_through_the_reset_flow() {
         Some(serde_json::json!({
             "username": "jordan.trainee",
             "reset_code": reset_code,
-            "new_password": TRAINEE_PASSWORD,
+            "new_password": &trainee_password,
         })),
     )
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT, "reset: {body}");
-    let _trainee_cookie = fx.login("jordan.trainee", TRAINEE_PASSWORD).await;
+    let _trainee_cookie = fx.login("jordan.trainee", &trainee_password).await;
 }
 
 #[tokio::test]
 async fn user_creation_refusals_and_roster_gates() {
     let fx = Fixture::new().await;
-    let admin = fx.login("avery.admin", PASSWORD).await;
+    let trainee_password = support::fresh_password();
+    let admin = fx.login("avery.admin", support::password()).await;
     users::create_with_reset_code(
         &fx.pool,
         fx.admin_id,
@@ -350,7 +328,7 @@ async fn user_creation_refusals_and_roster_gates() {
             &fx.pool,
             "jordan.trainee",
             &issued.code.raw,
-            TRAINEE_PASSWORD
+            &trainee_password
         )
         .await
         .expect("reset"),
@@ -382,7 +360,7 @@ async fn user_creation_refusals_and_roster_gates() {
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(body["error"], "username_invalid");
-    let trainee = fx.login("jordan.trainee", TRAINEE_PASSWORD).await;
+    let trainee = fx.login("jordan.trainee", &trainee_password).await;
     let (status, body) = request(
         fx.app(),
         "POST",
@@ -404,7 +382,7 @@ async fn user_creation_refusals_and_roster_gates() {
 #[tokio::test]
 async fn enrollment_pins_published_versions_only() {
     let fx = Fixture::new().await;
-    let admin = fx.login("avery.admin", PASSWORD).await;
+    let admin = fx.login("avery.admin", support::password()).await;
     let trainee = users::create_with_reset_code(
         &fx.pool,
         fx.admin_id,
@@ -496,7 +474,7 @@ async fn enrollment_pins_published_versions_only() {
 #[tokio::test]
 async fn enrollment_refusals_and_pin_protection() {
     let fx = Fixture::new().await;
-    let admin = fx.login("avery.admin", PASSWORD).await;
+    let admin = fx.login("avery.admin", support::password()).await;
     let (program_id, version_id) = fx.published_program(&complete_content()).await;
     let trainee = users::create_with_reset_code(
         &fx.pool,

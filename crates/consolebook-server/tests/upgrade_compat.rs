@@ -10,6 +10,8 @@
 use consolebook_server::secrets;
 use consolebook_server::storage::{self, MIGRATOR};
 
+mod support;
+
 /// The rows the released v0.2.0 binary wrote; see the file's header.
 const RELEASED_MIGRATIONS: &str = include_str!("fixtures/migrations-v0.2.0.txt");
 
@@ -133,7 +135,7 @@ async fn a_database_holding_the_released_rows_opens_and_a_modified_one_does_not(
 fn a_password_hashed_by_the_earlier_build_still_verifies() {
     assert!(secrets::verify_password(PHC_PASSWORD, PHC_FROM_ARGON2_0_5));
     assert!(!secrets::verify_password(
-        "invented-compat-passphrase-137",
+        support::wrong_password(),
         PHC_FROM_ARGON2_0_5
     ));
 }

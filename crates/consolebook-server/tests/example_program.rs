@@ -10,7 +10,7 @@ use consolebook_server::data_dir::DataDir;
 use consolebook_server::program_export::{self, ImportRefusal, ImportTarget};
 use consolebook_server::{programs, setup, storage};
 
-const PASSWORD: &str = "invented-passphrase-1";
+mod support;
 
 fn template() -> String {
     let path =
@@ -34,7 +34,7 @@ async fn installation() -> (tempfile::TempDir, sqlx::SqlitePool, i64) {
         "Example County Communications",
         "avery.admin",
         "Avery Admin",
-        PASSWORD,
+        support::password(),
     )
     .await
     .expect("initialize")
