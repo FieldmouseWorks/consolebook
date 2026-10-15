@@ -35,6 +35,11 @@ GitHub enforces the following; the `main` ruleset is the rung-2 guard for
   `uses:` fails before it runs. Secret scanning with push protection and CodeQL
   code scanning are enabled.
 
+Dependencies move to their latest stable release where it makes sense; any
+hold is written down with its reason, as the `.github/dependabot.yml` ignore
+rules are. Dependabot proposes grouped weekly version updates after a 7-day
+cooldown, and security updates as advisories appear.
+
 Use [the evidence-driven workflow](docs/workflow.md) for outcome definition,
 roles and ownership, task graphs, evidence-driven continuation, and authorization.
 The primary issue body owns the live graph; issue comments archive completed
