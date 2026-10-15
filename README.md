@@ -15,7 +15,7 @@ Consolebook is a [Fieldmouse Works](https://github.com/FieldmouseWorks) project 
 On a Linux server with systemd (x86_64 or arm64):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/FieldmouseWorks/consolebook/main/install/install.sh | sudo sh
+curl -fsSL https://github.com/FieldmouseWorks/consolebook/releases/latest/download/install.sh | sudo sh
 ```
 
 It prints the address and a setup code; finish in the browser, and the home

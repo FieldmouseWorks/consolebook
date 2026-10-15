@@ -375,7 +375,7 @@ export function getBackupStatus(): Promise<BackupStatus> {
 
 /** The installer command that adds an off-server copy directory. */
 export const BACKUP_DIR_COMMAND =
-	'curl -fsSL https://raw.githubusercontent.com/FieldmouseWorks/consolebook/main/install/install.sh | sudo sh -s -- --backup-dir /path/to/second/disk';
+	'curl -fsSL https://github.com/FieldmouseWorks/consolebook/releases/latest/download/install.sh | sudo sh -s -- --backup-dir /path/to/second/disk';
 
 export interface CreatedUser {
 	id: number;

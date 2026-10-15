@@ -31,11 +31,16 @@ not a production-readiness statement.
 - A [restore drill](docs/restore-drill.md) from a lost server to verified
   records, with a scripted version (`scripts/restore-drill/`) and a recorded
   run from the v0.1.0 release.
-
 - [Operating a pilot installation](docs/operations.md): what to monitor and
   how, the logs and their retention, reporting a problem, and what support a
   pre-alpha pilot can expect. The release workflow runs its commands against
   a real install.
+
+### Changed
+
+- The one-line install fetches the installer published with the latest
+  release instead of the `main` branch, and every release asset carries
+  build provenance (`gh attestation verify`; ADR 0026).
 
 ### Fixed
 
