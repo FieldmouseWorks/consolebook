@@ -101,7 +101,9 @@ async fn a_validated_snapshot_is_copied_byte_for_byte_and_pruned_there() {
     }
     let report = backup::run(&fx.data_dir, 2).await.expect("backup");
 
-    let copy = backup_copy::copy_snapshot(&report.snapshot, &copy_dir, 2).expect("copy");
+    let copy = backup_copy::copy_snapshot(&report.snapshot, &copy_dir, 2)
+        .await
+        .expect("copy");
 
     assert_eq!(copy.copy.file_name(), report.snapshot.file_name());
     assert_eq!(
@@ -125,7 +127,11 @@ async fn a_validated_snapshot_is_copied_byte_for_byte_and_pruned_there() {
         "no partial file is left behind"
     );
     // Copying the same snapshot again is refused rather than overwritten.
-    assert!(backup_copy::copy_snapshot(&report.snapshot, &copy_dir, 2).is_err());
+    assert!(
+        backup_copy::copy_snapshot(&report.snapshot, &copy_dir, 2)
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]
@@ -135,12 +141,16 @@ async fn a_copy_that_cannot_be_made_leaves_the_local_snapshot_intact() {
     let before = std::fs::read(&report.snapshot).expect("snapshot bytes");
 
     let missing = fx.tmp.path().join("not-mounted");
-    let err = backup_copy::copy_snapshot(&report.snapshot, &missing, 2).expect_err("missing");
+    let err = backup_copy::copy_snapshot(&report.snapshot, &missing, 2)
+        .await
+        .expect_err("missing");
     assert!(format!("{err:#}").contains("not reachable"), "{err:#}");
 
     let not_a_dir = fx.tmp.path().join("a-file");
     std::fs::write(&not_a_dir, b"invented").expect("write");
-    let err = backup_copy::copy_snapshot(&report.snapshot, &not_a_dir, 2).expect_err("file");
+    let err = backup_copy::copy_snapshot(&report.snapshot, &not_a_dir, 2)
+        .await
+        .expect_err("file");
     assert!(format!("{err:#}").contains("not a directory"), "{err:#}");
 
     assert_eq!(std::fs::read(&report.snapshot).expect("after"), before);
@@ -157,10 +167,14 @@ async fn a_copy_directory_on_the_local_filesystem_is_never_used_or_counted() {
     let mount_point = fx.tmp.path().join("share-not-mounted");
     std::fs::create_dir_all(&mount_point).expect("mount point");
 
-    let err = backup_copy::copy_snapshot(&report.snapshot, &mount_point, 2).expect_err("local");
+    let err = backup_copy::copy_snapshot(&report.snapshot, &mount_point, 2)
+        .await
+        .expect_err("local");
     assert!(format!("{err:#}").contains("same filesystem"), "{err:#}");
     assert!(
-        backup_copy::catch_up(&fx.data_dir, &mount_point, 2).is_err(),
+        backup_copy::catch_up(&fx.data_dir, &mount_point, 2)
+            .await
+            .is_err(),
         "the retry refuses it too"
     );
     assert_eq!(
@@ -184,6 +198,7 @@ async fn catch_up_copies_only_what_the_copy_directory_lacks() {
     let copy_dir = fx.copy_dir();
     assert!(
         backup_copy::catch_up(&fx.data_dir, &copy_dir, 2)
+            .await
             .expect("nothing yet")
             .is_none(),
         "no local snapshot, nothing to copy"
@@ -191,11 +206,13 @@ async fn catch_up_copies_only_what_the_copy_directory_lacks() {
     backup::run(&fx.data_dir, 2).await.expect("backup");
     assert!(
         backup_copy::catch_up(&fx.data_dir, &copy_dir, 2)
+            .await
             .expect("copy")
             .is_some()
     );
     assert!(
         backup_copy::catch_up(&fx.data_dir, &copy_dir, 2)
+            .await
             .expect("current")
             .is_none(),
         "a current copy directory is not copied to again"
@@ -211,6 +228,7 @@ async fn catch_up_copies_only_what_the_copy_directory_lacks() {
     }
     assert!(
         backup_copy::catch_up(&fx.data_dir, &copy_dir, 2)
+            .await
             .expect("retention")
             .is_none()
     );
@@ -240,7 +258,9 @@ async fn status_reports_unconfigured_behind_current_and_unreachable() {
         "{status:?}"
     );
 
-    backup_copy::catch_up(&fx.data_dir, &copy_dir, 2).expect("copy");
+    backup_copy::catch_up(&fx.data_dir, &copy_dir, 2)
+        .await
+        .expect("copy");
     let status = backup_copy::status(&fx.settings(Some(&copy_dir))).expect("status");
     assert!(
         matches!(status.copy, CopyStatus::Current { count: 1, .. }),

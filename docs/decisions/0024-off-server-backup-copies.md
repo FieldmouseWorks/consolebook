@@ -69,6 +69,27 @@ filesystem**. Snapshot names carry their UTC
 timestamp, so the check needs no stored state and does not depend on clocks
 or modification times on the share.
 
+### A copy directory holds one installation's backups
+
+Amended for [#115](https://github.com/FieldmouseWorks/consolebook/issues/115),
+found by the clean-room restore drill (#97). Copies go only where they keep
+an installation recoverable:
+
+- Before copying, the snapshot's installation id is compared with that of the
+  newest backup already in the copy directory, both read from the files
+  (read-only, `immutable`, so nothing is written to the share). A different
+  installation's backups there refuse the copy, and the refusal says to
+  restore. Without this, a new server set up to replace a lost one copies
+  its own empty database there as the newest backup, a restore of "the
+  newest copy" brings back nothing, and retention prunes the real copies
+  within one retention period. Reading the id from the files protects copy
+  directories written before the check existed.
+- Only the installation's own backups are copied and counted: scheduled and
+  pre-migration snapshots, never the database a restore set aside, which
+  may be another installation's.
+- A restore ends with a backup of the restored database. It is the newest
+  backup, so copies resume from the restored installation at once.
+
 ### The product presses for a copy
 
 The installer takes `--backup-dir`, which must already be mounted (it
@@ -96,3 +117,5 @@ would be a second incident, not a safeguard.
   the server is stopped too.
 - Restoring from a copy is the existing `restore <snapshot>` path, which
   accepts any snapshot file.
+- Two installations cannot share one copy directory: the second is refused
+  and told why, instead of each pruning the other's copies.

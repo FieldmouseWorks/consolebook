@@ -41,6 +41,29 @@ pub struct BackupReport {
 /// the retention count. Fails without leaving a snapshot behind if
 /// validation fails.
 pub async fn run(data_dir: &DataDir, keep: usize) -> Result<BackupReport> {
+    run_keeping(data_dir, Some(keep)).await
+}
+
+/// A backup of the database a restore just put in place, pruning nothing.
+/// It becomes the newest backup, so off-server copies resume from the
+/// restored installation at once, and the backup schedule restarts from it.
+pub async fn run_after_restore(data_dir: &DataDir) -> Result<BackupReport> {
+    run_keeping(data_dir, None).await
+}
+
+/// A validated snapshot of the current database under a `prerestore` name,
+/// so a mistaken restore is itself recoverable. Writes nothing to the
+/// database it sets aside.
+pub async fn set_aside_before_restore(data_dir: &DataDir) -> Result<PathBuf> {
+    let pool = storage::open_existing(&data_dir.database())
+        .await
+        .context("opening current database for the pre-restore snapshot")?;
+    let snapshot = take_snapshot(&pool, data_dir, PRE_RESTORE_PREFIX).await;
+    pool.close().await;
+    snapshot
+}
+
+async fn run_keeping(data_dir: &DataDir, keep: Option<usize>) -> Result<BackupReport> {
     let pool = storage::open_existing(&data_dir.database()).await?;
     let snapshot = match take_snapshot(&pool, data_dir, SCHEDULED_PREFIX).await {
         Ok(snapshot) => snapshot,
@@ -51,17 +74,31 @@ pub async fn run(data_dir: &DataDir, keep: usize) -> Result<BackupReport> {
     };
     audit::record(&pool, EventKind::BackupCompleted, None, None).await?;
     pool.close().await;
-    finish(data_dir, snapshot, Some(keep))
+    finish(data_dir, snapshot, keep)
 }
 
 /// VACUUM INTO a new snapshot, validate it, and make it durable. Writes
 /// nothing to the live database, so it works on a schema this build has
 /// not migrated yet.
 async fn take_snapshot(pool: &SqlitePool, data_dir: &DataDir, prefix: &str) -> Result<PathBuf> {
-    let stamp = OffsetDateTime::now_utc()
-        .format(SNAPSHOT_STAMP)
-        .context("formatting snapshot timestamp")?;
-    let snapshot = data_dir.backups().join(format!("{prefix}{stamp}.db"));
+    let named_now = || -> Result<PathBuf> {
+        let stamp = OffsetDateTime::now_utc()
+            .format(SNAPSHOT_STAMP)
+            .context("formatting snapshot timestamp")?;
+        Ok(data_dir.backups().join(format!("{prefix}{stamp}.db")))
+    };
+    let mut snapshot = named_now()?;
+    if snapshot.exists() {
+        // Names carry the second. One taken within a second of the last
+        // (a restore's backups, a manual backup beside the scheduler's)
+        // waits for the next name instead of failing.
+        let into_second = OffsetDateTime::now_utc().nanosecond();
+        tokio::time::sleep(std::time::Duration::from_nanos(u64::from(
+            1_000_000_000_u32.saturating_sub(into_second),
+        )))
+        .await;
+        snapshot = named_now()?;
+    }
     if snapshot.exists() {
         bail!(
             "snapshot {} already exists; refusing to overwrite a backup",
@@ -136,6 +173,33 @@ pub fn snapshots_in(dir: &Path) -> Result<Vec<PathBuf>> {
     // "newest" for good after a restore (#105).
     found.sort_by_key(|path| snapshot_order(path));
     Ok(found)
+}
+
+/// Snapshots a restore set aside: `consolebook-prerestore-<stamp>.db`.
+const PRE_RESTORE_PREFIX: &str = "consolebook-prerestore-";
+
+/// This installation's own backups in `dir`, oldest first: scheduled and
+/// pre-migration snapshots. A pre-restore snapshot is the database a restore
+/// replaced, which may be another installation's (a new server's empty one,
+/// say), so it is never copied off the server or counted as the newest
+/// backup there (#115).
+pub fn own_backups_in(dir: &Path) -> Result<Vec<PathBuf>> {
+    let mut found = snapshots_in(dir)?;
+    found.retain(|path| {
+        !path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with(PRE_RESTORE_PREFIX))
+    });
+    Ok(found)
+}
+
+/// The installation a snapshot belongs to, read from the file without
+/// writing anything beside it.
+pub async fn snapshot_installation(snapshot: &Path) -> Result<String> {
+    let pool = storage::open_snapshot(snapshot).await?;
+    let id = storage::installation_id(&pool).await;
+    pool.close().await;
+    id.with_context(|| format!("reading the installation of {}", snapshot.display()))
 }
 
 /// The UTC stamp a snapshot name ends with, then the whole name.
@@ -327,7 +391,7 @@ pub async fn open_migrated(
              (to go back: stop the service, install the previous release, and restore this snapshot)"
         );
         if let Some(copy) = copy {
-            match crate::backup_copy::copy_snapshot(backup.snapshot(), copy.dir, copy.keep) {
+            match crate::backup_copy::copy_snapshot(backup.snapshot(), copy.dir, copy.keep).await {
                 Ok(report) => tracing::info!(
                     copy = %report.copy.display(),
                     sha256 = report.sha256,

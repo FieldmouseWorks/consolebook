@@ -80,7 +80,7 @@ pub async fn run(settings: BackupSettings, pool: SqlitePool) {
         if let Some(copy_dir) = &settings.copy_dir
             && Instant::now() >= next_copy_attempt
         {
-            match backup_copy::catch_up(data_dir, copy_dir, keep) {
+            match backup_copy::catch_up(data_dir, copy_dir, keep).await {
                 Ok(Some(copy)) => tracing::info!(
                     copy = %copy.copy.display(),
                     sha256 = copy.sha256,
