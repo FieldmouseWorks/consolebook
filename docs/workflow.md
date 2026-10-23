@@ -38,8 +38,8 @@ unrelated-cleanup authority was granted by it. Every task records its own
 current authorization the same way.
 
 Merging needs no grant: since 2026-10-23 (the owner's call) the autoland
-steward merges a PR once Codex finds nothing on its exact head, every review
-thread is resolved and the required checks are green. Leave the PR as a draft
+steward merges a PR once the review bot finds nothing on its exact head, every
+review thread is resolved and the required checks are green. Leave the PR as a draft
 and the merge to it ([AGENTS.md](../AGENTS.md#pull-requests)). A PR touching an
 ADR, `PRINCIPLES.md`, `migrations/` or `.github/` is settled the same way and
 then waits for the owner's merge. After the merge, verify the exact merged main

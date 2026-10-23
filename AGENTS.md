@@ -127,9 +127,9 @@ role — and session handoffs out of this file; they belong in ignored local fil
 
 ## Pull requests
 
-Open PRs as drafts and leave them to the steward: it asks Codex for a review,
-and once Codex finds nothing on your head, every review thread is resolved and
-CI is green, it marks the PR ready and merges it. Fix or answer every finding:
+Open PRs as drafts and leave them to the steward: it asks the review bot for a
+review, and once the bot finds nothing on your head, every review thread is
+resolved and CI is green, it marks the PR ready and merges it. Fix or answer every finding:
 push the fix and reply with the commit, or reply with why it's wrong, then
 resolve the thread. Don't merge or mark ready yourself. A PR touching an ADR,
 `PRINCIPLES.md`, `migrations/` or `.github/` is settled the same way and then
@@ -137,7 +137,7 @@ waits for the owner's merge.
 
 ## Code Review Rules
 
-For reviewers, Codex included. Flag as P1:
+For reviewers, the review bot included. Flag as P1:
 
 - a change that makes a check pass without fixing the thing it checks
 - tests or checks weakened, skipped or deleted to get green
