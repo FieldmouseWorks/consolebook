@@ -15,8 +15,7 @@ pull request. Never push repository changes directly to `main`.
 - Discuss broad domain or architecture changes before writing a large patch.
 - `Closes #...` means the PR satisfies the issue's acceptance criteria; use
   `Refs #...` for a slice that leaves the issue open.
-- Use short imperative Conventional Commit subjects, such as
-  `storage(backup): validate snapshot before fsync`.
+- Commit subjects follow the house style in [AGENTS.md](AGENTS.md#commits).
 - Security reports use private advisories per [SECURITY.md](SECURITY.md).
 
 GitHub enforces the following; the `main` ruleset is the rung-2 guard for
