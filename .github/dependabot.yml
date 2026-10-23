@@ -23,9 +23,6 @@ updates:
       # Revisit when svelte-check supports 7 (hold recorded in #140).
       - dependency-name: typescript
         versions: [">=7"]
-      # Tracks the Node 22 floor in web/package.json `engines`.
-      - dependency-name: "@types/node"
-        versions: [">=23"]
 
   - package-ecosystem: cargo
     directory: /

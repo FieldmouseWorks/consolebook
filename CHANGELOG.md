@@ -10,6 +10,11 @@ not a production-readiness statement.
 
 ## [Unreleased]
 
+### Changed
+
+- Building the web interface needs Node.js 24 or later (was `^22.17 || >=24`);
+  the installed server still needs no Node.js.
+
 ## [0.3.0] - 2026-10-15
 
 An agency can now leave with everything: a complete installation export
