@@ -37,11 +37,14 @@ records that grant. No merge, deployment, non-PR publication, paid-service, or
 unrelated-cleanup authority was granted by it. Every task records its own
 current authorization the same way.
 
-For an authorized merge, verify the exact merged main revision, archive and
-read back the issue evidence, then clean up owned branches, worktrees, and
-processes. Deploy only when explicitly authorized. Without merge authority,
-finish the reviewable work and leave one concrete decision: a PR ready for
-the maintainer, with owned work preserved until approval arrives.
+Merging needs no grant: since 2026-10-23 (the owner's call) the autoland
+steward merges a PR once Codex finds nothing on its exact head, every review
+thread is resolved and the required checks are green. Leave the PR as a draft
+and the merge to it ([AGENTS.md](../AGENTS.md#pull-requests)). A PR touching an
+ADR, `PRINCIPLES.md`, `migrations/` or `.github/` is settled the same way and
+then waits for the owner's merge. After the merge, verify the exact merged main
+revision, archive and read back the issue evidence, then clean up owned
+branches, worktrees, and processes. Deploy only when explicitly authorized.
 
 Use invented agencies, people, incidents, identifiers, and narratives. Keep
 operational records, personal data, and credentials out of issues, commits,
