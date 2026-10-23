@@ -144,7 +144,10 @@ filesystem permissions deny writes, which a privileged runner can bypass.
 The [pr-gate workflow](.github/workflows/pr-gate.yml) runs the web, Rust, and
 browser checks and the proof runner's self-test on pull requests, and the [release workflow](.github/workflows/release.yml)
 builds the static Linux archives and installs and upgrades them on a systemd
-runner. Focused local tests help development but do
+runner. The [flake workflow](.github/workflows/flake.yml) runs `nix flake check`
+([flake.nix](flake.nix)): format, clippy, Rust tests without embedded web
+assets, Python syntax, the guidance guard, and the proof runner's self-test,
+each in the Nix sandbox. Focused local tests help development but do
 not replace required gates. Preserve exact failure evidence and report only
 commands actually run; an unexplained failure is not a reason to retry.
 
