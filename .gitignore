@@ -27,3 +27,6 @@ CLAUDE.local.md
 
 # Python bytecode caches
 __pycache__/
+
+# Nix build output
+/result
