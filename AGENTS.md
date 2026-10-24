@@ -185,11 +185,21 @@ For reviewers, the review bot included. Flag as P1:
   persisted constraints without saying so
 - a durable behavior change with no ADR, or a `PRINCIPLES.md` change without one
 - `unsafe`, or new sensitive content in logs
-- a non-GitHub-owned action, or one not pinned to a full commit SHA
+- an action outside the allowlist in CONTRIBUTING.md, or one not pinned to a
+  full commit SHA
 - release order broken: tags and published releases are immutable, so the
   draft-upload-then-publish sequence is load-bearing
 - new behavior added to a Rust module over the size limits in CONTRIBUTING.md
   without the reorganization they require
+- a finalized record changed or deleted in place instead of through a
+  successor version or amendment, or a finalized record that no longer pins
+  its configuration and presentation snapshots
+- capability or scope decided in an HTTP handler, the UI or a heuristic
+  instead of the domain service that owns it
+- startup storage checks that fail open, or `doctor` creating, migrating or
+  changing state
+- operational dates taken from UTC instead of the agency's local date, or
+  durations and ordering computed from local times
 
 ## Private
 
