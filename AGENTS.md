@@ -168,8 +168,8 @@ review, and once the bot finds nothing on your head, every review thread is
 resolved and CI is green, it marks the PR ready and merges it. Fix or answer every finding:
 push the fix and reply with the commit, or reply with why it's wrong, then
 resolve the thread. Don't merge or mark ready yourself. A PR touching an ADR,
-`PRINCIPLES.md`, `migrations/` or `.github/` is settled the same way and then
-waits for the owner's merge.
+`PRINCIPLES.md` or `migrations/` is settled the same way and then waits for
+the owner's merge.
 
 ## Code Review Rules
 
