@@ -78,43 +78,40 @@ means training periods.
   require typed contracts and tests; heuristics cannot establish them.
 - Startup verifies storage invariants and fails closed. `doctor` must diagnose
   without creating, migrating, or changing state (ADR 0003).
-- Use invented agencies, people, incidents, identifiers, and narratives. Real
-  records, operational material, personal data, and credentials never enter the
-  repository, tests, logs, or issues. Security reports follow `SECURITY.md` privately.
+- Use invented agencies, people, incidents, identifiers, and narratives (see
+  [Private](#private)). Security reports follow `SECURITY.md` privately.
 
 ## Work and verification
 
 Non-trivial work requires one primary issue, an issue-linked branch, and a PR.
-Search existing issues first; never push directly to `main`. `Closes #...` means
-all acceptance criteria are satisfied; otherwise use `Refs #...`.
+Search existing issues first; never push directly to `main`.
 
-Define an observable outcome and acceptance check before editing. Keep one
-canonical task graph in the primary issue for substantive dependent work;
-simple changes need only a short plan. Record ownership, dependencies, inputs,
-effort policy, state, exact-revision evidence, and one next action. Verified
-results unlock dependencies; failures trigger investigation and scoped repairs,
-with the approach changed when evidence calls for it.
+Stricter than the house planning rule: keep one canonical task graph in the
+primary issue for substantive dependent work; simple changes need only a short
+plan. Record ownership, dependencies, inputs, effort policy, state,
+exact-revision evidence, and one next action. Verified results unlock
+dependencies; failures trigger investigation and scoped repairs, with the
+approach changed when evidence calls for it.
 
-Guidance names roles, never models or vendors (tool entrypoint file names
-excepted): the **integrator** owns the graph, scope, selection, review of every
-delegated result, integration, and remote writes; an **implementer** makes a
-judgment-heavy change from a fixed brief; a **reviewer** reads an exact candidate
-independently and edits nothing; a **worker** does bounded work a command can
-accept; a **verifier** runs named proof and produces receipts; a **scout** answers
-read-only questions of fact. Route by how acceptance is decided, not by how hard
-the task looks. Which model or effort fills a role is each contributor's
-machine-local preference and stays out of tracked files; record roles in
-evidence, report an unavailable route instead of substituting, and never claim
-an observed model the host does not show. Delegate only useful work with
+Stricter than the house model rule: guidance names roles, never models or
+vendors (tool entrypoint file names excepted), and
+`scripts/check-guidance-names.sh` enforces it. The **integrator** owns the
+graph, scope, selection, review of every delegated result, integration, and
+remote writes; an **implementer** makes a judgment-heavy change from a fixed
+brief; a **reviewer** reads an exact candidate independently and edits nothing;
+a **worker** does bounded work a command can accept; a **verifier** runs named
+proof and produces receipts; a **scout** answers read-only questions of fact.
+Route by how acceptance is decided, not by how hard the task looks. Record roles
+in evidence, report an unavailable route instead of substituting, and never
+claim an observed model the host does not show. Delegate only useful work with
 explicit ownership, then verify the artifacts yourself.
 
-Carry task authorization forward without asking again. Record its source and
-any owner-set effort budget in the issue; preserve that budget across children
-and resumes. Credentials and graph edits grant no authority. There is no
-default repair-cycle cap. Without an owner-set budget, continue in scope until
-acceptance or a concrete blocker; revise the approach when failures repeat,
-preserve evidence, and finish independent work before asking for a decision.
-See `docs/workflow.md`.
+Record the source of a task's authorization and any owner-set effort budget in
+the issue; preserve that budget across children and resumes. Credentials and
+graph edits grant no authority. There is no default repair-cycle cap. Without an
+owner-set budget, continue in scope until acceptance or a concrete blocker;
+revise the approach when failures repeat, preserve evidence, and finish
+independent work before asking for a decision. See `docs/workflow.md`.
 
 Build `web/` before Rust when UI or embedding matters. The command sequence and
 browser prerequisites are in `CONTRIBUTING.md`. Required checks: `npm ci`,
@@ -124,21 +121,24 @@ browser prerequisites are in `CONTRIBUTING.md`. Required checks: `npm ci`,
 `npm run e2e` in `web/` with the documented Chromium prerequisite.
 `scripts/proof.py` runs that sequence and leaves a receipt
 (`.agents/skills/consolebook-proof/`).
-Keep the pinned Rust toolchain in `rust-toolchain.toml`.
+Keep the pinned Rust toolchain in `rust-toolchain.toml`. `nix develop` gives the
+toolchains and `nix flake check` runs the hermetic part of the gate (format,
+clippy, Rust tests without embedded web assets, the guidance guard, and the
+proof runner's self-test); it does not replace the sequence above.
 
-Report only verification actually run, with exact failures. Investigate
-intermittent failures. Design documents are not runtime proof; unit tests are
-not recovery drills. Fix causes and in-scope defects; file exact-evidence
-issues for separate work.
+On top of the house reporting rule: give exact failures and investigate
+intermittent ones. Design documents are not runtime proof; unit tests are not
+recovery drills. Fix causes and in-scope defects; file exact-evidence issues for
+separate work.
 
-Follow `CONTRIBUTING.md` before adding behavior to large Rust modules: over
-1,000 lines requires an ownership-based reorganization, over 1,500 requires
-naming the boundary first, and over 2,500 requires a reviewed decomposition
-path before major feature work unless urgent. Refactors state the new owner,
-persisted/public impact, and focused proof.
+Large Rust modules follow `CONTRIBUTING.md`, which adds tiers to the house split
+rule: over 1,000 lines requires an ownership-based reorganization, over 1,500
+requires naming the boundary first, and over 2,500 requires a reviewed
+decomposition path before major feature work unless urgent. Refactors state the
+new owner, persisted/public impact, and focused proof.
 
-**The codebase is memory.** Agents extend the patterns they read, so a
-workaround, a duplicate path, or a comment that justifies one is copied until
+Stricter than the house memory rule: agents extend the patterns they read, so
+a workaround, a duplicate path, or a comment that justifies one is copied until
 it is the pattern. Correct a recurring class at the strongest rung that applies:
 (1) make it unrepresentable with types and one owning API; (2) enforce it with
 the compiler, clippy, a test, or a guard; (3) write guidance; (4) rely on review
@@ -150,7 +150,7 @@ in [CONTRIBUTING.md](CONTRIBUTING.md#correct-the-class-not-the-instance).
 Durable behavior changes require an ADR; changes to `PRINCIPLES.md` require one.
 Use forward migrations, standard Rust formatting, `thiserror` for library
 errors as they emerge, `anyhow` at application boundaries, and no `unsafe`.
-Use short imperative Conventional Commit subjects. Logs exclude sensitive
+Logs exclude sensitive
 content; existing first-run setup-code output is the documented exception
 (ADR 0004), not permission for additional secret logging.
 
@@ -185,7 +185,8 @@ For reviewers, the review bot included. Flag as P1:
   persisted constraints without saying so
 - a durable behavior change with no ADR, or a `PRINCIPLES.md` change without one
 - `unsafe`, or new sensitive content in logs
-- a non-GitHub-owned action, or one not pinned to a full commit SHA
+- an action outside the allowlist in CONTRIBUTING.md, or one not pinned to a
+  full commit SHA
 - release order broken: tags and published releases are immutable, so the
   draft-upload-then-publish sequence is load-bearing
 - new behavior added to a Rust module over the size limits in CONTRIBUTING.md
@@ -199,3 +200,16 @@ For reviewers, the review bot included. Flag as P1:
   changing state
 - operational dates taken from UTC instead of the agency's local date, or
   durations and ordering computed from local times
+
+## Private
+
+Never committed, logged, or put in issues (stricter than the house rule: tests
+and logs included):
+
+- Real records, operational material, and anything from a real agency,
+  person, or incident. Fixtures, examples, and seed data are invented.
+- Personal data and credentials, including first-run setup codes beyond the
+  documented ADR 0004 output.
+- Security reports, which go through `SECURITY.md` privately.
+- Machine-local agent preferences and session handoffs, kept in the files
+  `.gitignore` lists for them.

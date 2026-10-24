@@ -1,12 +1,8 @@
-# The gate is the flake: CI runs `nix flake check`. Jobs the flake can't hold
-# (the web build, browsers) stay in pr-gate.yml.
-#
-# This repo allows only GitHub-owned actions (CONTRIBUTING.md), so this job
-# can't call burrow's shared flake-check workflow or a Nix install action. It
-# installs Nix from the official release instead, pinned by version and by the
-# installer's SHA-256 (published next to it as install.sha256); the installer
-# then checks the tarball's own hash. Dependabot can't see the version, so a
-# Nix bump is an edit to the two lines below.
+# The gate is the flake: CI only runs `nix flake check`, through burrow's
+# shared workflow. Jobs the flake can't hold (the web build, browsers, the
+# installer replays) stay in pr-gate.yml and release.yml. The shared workflow
+# and the Nix install action it uses are allowlisted, and like every `uses:`
+# here it is pinned to a commit (burrow main, 2026-10-24).
 name: flake
 on:
   pull_request:
@@ -16,20 +12,7 @@ permissions:
   contents: read
 jobs:
   check:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    env:
-      NIX_VERSION: 2.35.4
-      NIX_INSTALL_SHA256: 118c3dfa04bdc946b3f577365b9a295607142c9b920e2c07b184e266d62b1ee1
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Install Nix
-        run: |
-          curl -sSfL -o "$RUNNER_TEMP/install" "https://releases.nixos.org/nix/nix-$NIX_VERSION/install"
-          echo "$NIX_INSTALL_SHA256  $RUNNER_TEMP/install" | sha256sum -c -
-          echo 'experimental-features = nix-command flakes' > "$RUNNER_TEMP/nix.conf"
-          sh "$RUNNER_TEMP/install" --daemon --yes --nix-extra-conf-file "$RUNNER_TEMP/nix.conf"
-          echo /nix/var/nix/profiles/default/bin >> "$GITHUB_PATH"
-      - run: nix flake check -L --keep-going
+    uses: FieldmouseWorks/burrow/.github/workflows/flake-check.yml@21174eaf96a3d89a514d5869ba65cab8a30e4e76 # main
+    with:
+      runner: ubuntu-latest
+      install-nix: true

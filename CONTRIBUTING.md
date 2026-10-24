@@ -15,8 +15,7 @@ pull request. Never push repository changes directly to `main`.
 - Discuss broad domain or architecture changes before writing a large patch.
 - `Closes #...` means the PR satisfies the issue's acceptance criteria; use
   `Refs #...` for a slice that leaves the issue open.
-- Use short imperative Conventional Commit subjects, such as
-  `storage(backup): validate snapshot before fsync`.
+- Commit subjects follow the house style in [AGENTS.md](AGENTS.md#commits).
 - Security reports use private advisories per [SECURITY.md](SECURITY.md).
 
 GitHub enforces the following; the `main` ruleset is the rung-2 guard for
@@ -25,14 +24,18 @@ GitHub enforces the following; the `main` ruleset is the rung-2 guard for
 - `main` changes only by squash-merged pull request with linear history, every
   review conversation resolved, and no force push or deletion. Administrators
   bypass only by merging a pull request, never by pushing.
-- Required checks, on a branch up to date with `main`: `fmt-clippy-test`
-  (`pr-gate.yml`), `build-x86_64` and `build-aarch64` (release build jobs).
+- Required checks, on a branch up to date with `main`: `check / check`
+  (`flake.yml`, `nix flake check`), `fmt-clippy-test` (`pr-gate.yml`; the name
+  is kept although fmt and clippy now run in the flake), and `build-x86_64` and
+  `build-aarch64` (release build jobs).
   Renaming or removing these jobs, or changing the build matrix, leaves merges
   waiting on a check that never reports; update the ruleset in the same change.
 - Tags `v*` cannot be deleted, updated, or moved, and published releases are
   immutable, so the release draft-upload-then-publish order is load-bearing.
-- Actions must be GitHub-owned and pinned to a full commit SHA; any other
-  `uses:` fails before it runs. Secret scanning with push protection and CodeQL
+- Actions must be GitHub-owned, or one of the two allowlisted for the flake
+  gate (burrow's shared `flake-check.yml` and `cachix/install-nix-action`), and
+  every `uses:` is pinned to a full commit SHA; anything else fails before it
+  runs. Secret scanning with push protection and CodeQL
   code scanning are enabled.
 
 Dependencies move to their latest stable release where it makes sense; any
@@ -142,10 +145,14 @@ Linux browser dependencies can be installed with
 `npx playwright install --with-deps chromium` from `web/`.
 Run Unix diagnostic permission tests as an unprivileged user; they assert that
 filesystem permissions deny writes, which a privileged runner can bypass.
-The [pr-gate workflow](.github/workflows/pr-gate.yml) runs the web, Rust, and
-browser checks and the proof runner's self-test on pull requests, and the [release workflow](.github/workflows/release.yml)
+The [pr-gate workflow](.github/workflows/pr-gate.yml) runs the web build and
+check, the Rust tests against the embedded interface, and the browser suite on
+pull requests, and the [release workflow](.github/workflows/release.yml)
 builds the static Linux archives and installs and upgrades them on a systemd
-runner. Focused local tests help development but do
+runner. The [flake workflow](.github/workflows/flake.yml) runs `nix flake check`
+([flake.nix](flake.nix)): format, clippy, Rust tests without embedded web
+assets, Python syntax, the guidance guard, and the proof runner's self-test,
+each in the Nix sandbox. Focused local tests help development but do
 not replace required gates. Preserve exact failure evidence and report only
 commands actually run; an unexplained failure is not a reason to retry.
 
