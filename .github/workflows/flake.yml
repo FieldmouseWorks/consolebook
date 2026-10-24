@@ -7,4 +7,4 @@ on:
     branches: [main]
 jobs:
   check:
-    uses: FieldmouseWorks/burrow/.github/workflows/flake-check.yml@main
+    uses: FieldmouseWorks/burrow/.github/workflows/flake-check.yml@23a17d32114f9e9e4091d652a410ae0ce967b351 # main
