@@ -124,3 +124,33 @@ rules and gates, `docs/workflow.md` owns execution procedure,
 entrypoints (`CLAUDE.md`, `.agents/rules/`, `.github/copilot-instructions.md`)
 only point here. Keep machine preferences — including which model fills which
 role — and session handoffs out of this file; they belong in ignored local files.
+
+## Pull requests
+
+Open PRs as drafts and leave them to the steward: it asks the review bot for a
+review, and once the bot finds nothing on your head, every review thread is
+resolved and CI is green, it marks the PR ready and merges it. Fix or answer every finding:
+push the fix and reply with the commit, or reply with why it's wrong, then
+resolve the thread. Don't merge or mark ready yourself. A PR touching an ADR,
+`PRINCIPLES.md`, `migrations/` or `.github/` is settled the same way and then
+waits for the owner's merge.
+
+## Code Review Rules
+
+For reviewers, the review bot included. Flag as P1:
+
+- a change that makes a check pass without fixing the thing it checks
+- tests or checks weakened, skipped or deleted to get green
+- secrets, tokens or personal data in the diff or the logs it adds
+- behavior changed beyond what the PR says it does
+- real agencies, people, incidents or operational records in fixtures, docs or
+  logs (only invented ones belong here)
+- a migration that edits an existing one instead of moving forward, or changes
+  persisted constraints without saying so
+- a durable behavior change with no ADR, or a `PRINCIPLES.md` change without one
+- `unsafe`, or new sensitive content in logs
+- a non-GitHub-owned action, or one not pinned to a full commit SHA
+- release order broken: tags and published releases are immutable, so the
+  draft-upload-then-publish sequence is load-bearing
+- new behavior added to a Rust module over the size limits in CONTRIBUTING.md
+  without the reorganization they require
