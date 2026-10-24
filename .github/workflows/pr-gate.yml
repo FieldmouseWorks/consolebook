@@ -16,6 +16,12 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
+# The hermetic part of the gate (rustfmt, clippy, the Rust tests without
+# embedded web assets, the guidance guard, the proof runner's self-test) runs
+# in the flake job (flake.yml, `nix flake check`). This job keeps what the
+# flake can't hold: the web build, the Rust tests against the embedded
+# interface, and the browser suite. Its name is a required check in the `main`
+# ruleset, so it stays even though fmt and clippy moved to the flake.
 jobs:
   gate:
     name: fmt-clippy-test
@@ -25,13 +31,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Cheap repository guards run first so they fail in seconds.
-      - name: Guidance names
-        run: scripts/check-guidance-names.sh
-      # The local gate runner's own controls (parsing, browser-suite evidence,
-      # candidate hashing, interruption); a broken runner must not merge.
-      - name: Proof runner self-test
-        run: python3 scripts/proof.py --self-test
       - name: Install pinned toolchain
         run: |
           rustup toolchain install
@@ -64,10 +63,6 @@ jobs:
       - name: Web build
         run: npm run build
         working-directory: web
-      - name: Format
-        run: cargo fmt --check
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
       # Playwright starts the binary itself, using invented scratch installations.
