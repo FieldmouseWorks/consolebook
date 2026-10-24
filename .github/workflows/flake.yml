@@ -1,6 +1,12 @@
-# The gate is the flake: CI only runs `nix flake check`, through burrow's
-# shared workflow. Jobs the flake can't hold (browsers, VMs) go alongside.
-# Pinned to a commit like every other `uses:` here (main, 2026-10-23).
+# The gate is the flake: this job only runs `nix flake check`. Jobs the flake
+# can't hold (web, browsers, installer replays) stay in pr-gate and release.
+#
+# burrow's shared flake-check workflow is the house default, but it is not
+# GitHub-owned and installs Nix with a third-party action, and this
+# repository allows only GitHub-owned actions pinned to a commit
+# (CONTRIBUTING.md). So Nix comes from the official release tarball, pinned by
+# version and SHA-256, and the only action is actions/checkout. Switch to the
+# shared workflow if the owner allowlists it.
 name: flake
 on:
   pull_request:
@@ -8,6 +14,30 @@ on:
     branches: [main]
 permissions:
   contents: read
+concurrency:
+  group: flake-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+env:
+  NIX_VERSION: 2.34.9
+  NIX_SHA256: e8912e087582b3799e0e5a6b06f9d63386c54821f77ad4de3b9b748736ad364e
 jobs:
   check:
-    uses: FieldmouseWorks/burrow/.github/workflows/flake-check.yml@9dd4bc5fc7716525b0f0148d7bc3311db0084803 # main
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Nix (pinned release, checksum verified)
+        run: |
+          tarball="nix-${NIX_VERSION}-x86_64-linux.tar.xz"
+          curl -fsSL -o "$RUNNER_TEMP/$tarball" \
+            "https://releases.nixos.org/nix/nix-${NIX_VERSION}/$tarball"
+          echo "${NIX_SHA256}  $RUNNER_TEMP/$tarball" | sha256sum -c -
+          tar -xf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP"
+          printf 'experimental-features = nix-command flakes\n' > "$RUNNER_TEMP/nix.conf"
+          "$RUNNER_TEMP/nix-${NIX_VERSION}-x86_64-linux/install" --daemon --yes \
+            --no-channel-add --nix-extra-conf-file "$RUNNER_TEMP/nix.conf"
+          echo /nix/var/nix/profiles/default/bin >> "$GITHUB_PATH"
+      - name: nix flake check
+        run: nix flake check -L --keep-going
