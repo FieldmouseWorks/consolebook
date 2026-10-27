@@ -139,9 +139,9 @@ The published preview already occupies port 7770 on its host; choose another
 
 To look around without entering data, build both halves as above
 (`cargo build -p consolebook-server`) and run `npm run demo` in `web/`. It
-serves a scratch installation full of invented records on port 7770 (set
-`CONSOLEBOOK_DEMO_BIND` for another address), prints the accounts, and deletes
-everything on Ctrl-C.
+serves a scratch installation full of invented records on 127.0.0.1:7770 (set
+`CONSOLEBOOK_DEMO_PORT` for another port, 0 for any free one), prints the
+accounts, and deletes everything on Ctrl-C.
 
 For live UI editing, run `npm run dev` in `web/` with a local Rust server.
 `vite.config.ts` proxies `/api` to port 7770; adjust the target when using a

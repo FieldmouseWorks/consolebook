@@ -295,15 +295,46 @@ interface DraftView {
 	};
 }
 
-/** The agency-local calendar date `daysAgo` days before today. */
-function businessDate(daysAgo: number): string {
-	const day = new Date(Date.now() - daysAgo * 86_400_000);
-	return new Intl.DateTimeFormat('en-CA', { timeZone: TIMEZONE }).format(day);
-}
-
-/** A backdated instant for phase history: the morning of `daysAgo`. */
-function secondsAgo(daysAgo: number): number {
-	return Math.floor(Date.now() / 1000) - daysAgo * 86_400;
+/**
+ * Days counted back from one agency-local date, read once when seeding starts,
+ * so a run that crosses midnight or a daylight-saving change still gives every
+ * shift its own distinct date.
+ */
+export function agencyCalendar(now: Date) {
+	const today = new Intl.DateTimeFormat('en-CA', { timeZone: TIMEZONE }).format(now);
+	const [year, month, day] = today.split('-').map(Number);
+	/** The agency-local date `daysAgo` days before today, by the calendar. */
+	function date(daysAgo: number): string {
+		return new Date(Date.UTC(year, month - 1, day - daysAgo)).toISOString().slice(0, 10);
+	}
+	/** The instant the agency-local day `daysAgo` began, in seconds. */
+	function dayStart(daysAgo: number): number {
+		// Wall-clock midnight read as UTC, moved back by the offset in force
+		// at the instant that guess lands on.
+		const midnightUtc = Date.parse(`${date(daysAgo)}T00:00Z`);
+		const guess = midnightUtc - offsetAt(midnightUtc);
+		return (midnightUtc - offsetAt(guess)) / 1000;
+	}
+	/** How far agency-local wall time runs ahead of UTC at an instant. */
+	function offsetAt(instant: number): number {
+		const parts = Object.fromEntries(
+			new Intl.DateTimeFormat('en-US', {
+				timeZone: TIMEZONE,
+				hourCycle: 'h23',
+				year: 'numeric',
+				month: 'numeric',
+				day: 'numeric',
+				hour: 'numeric',
+				minute: 'numeric',
+				second: 'numeric'
+			})
+				.formatToParts(instant)
+				.map((part) => [part.type, Number(part.value)])
+		);
+		const wall = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+		return wall - instant;
+	}
+	return { date, dayStart };
 }
 
 export interface SeededDemo {
@@ -317,6 +348,7 @@ export interface SeededDemo {
 }
 
 export async function seedDemo(base: string, setupCode: string): Promise<SeededDemo> {
+	const calendar = agencyCalendar(new Date());
 	const anonymous = new Client(base);
 	await anonymous.post('/api/setup', {
 		setup_code: setupCode,
@@ -374,7 +406,7 @@ export async function seedDemo(base: string, setupCode: string): Promise<SeededD
 		await casey.post(`/api/enrollments/${enrollment.id}/phase-events`, {
 			kind: 'advance',
 			to_phase_id: detail.phases[0].id,
-			effective_at: secondsAgo(startDaysAgo),
+			effective_at: calendar.dayStart(startDaysAgo),
 			reason: ''
 		});
 		return { id: enrollment.id, phases: detail.phases };
@@ -382,7 +414,7 @@ export async function seedDemo(base: string, setupCode: string): Promise<SeededD
 
 	/** Records the shift, then the trainer drafts its daily report. */
 	async function shift(enrollmentId: number, trainer: Person, entry: Shift, phaseId: number) {
-		const date = businessDate(entry.daysAgo);
+		const date = calendar.date(entry.daysAgo);
 		const session = await casey.post<{ id: number }>(`/api/enrollments/${enrollmentId}/sessions`, {
 			business_date: date,
 			timezone: TIMEZONE,
@@ -432,7 +464,7 @@ export async function seedDemo(base: string, setupCode: string): Promise<SeededD
 			await casey.post(`/api/enrollments/${taylor.id}/phase-events`, {
 				kind: 'advance',
 				to_phase_id: taylor.phases[1].id,
-				effective_at: secondsAgo(entry.daysAgo),
+				effective_at: calendar.dayStart(entry.daysAgo),
 				reason: 'Ratings at or above standard for a full set; ready for law dispatch.'
 			});
 		}

@@ -6,6 +6,7 @@
 import { join } from 'node:path';
 import { chromium, type Browser, type Page } from '@playwright/test';
 import { startServer } from '../e2e/server.ts';
+import { lifecycle } from './lifecycle.ts';
 import { DEMO_PASSWORD, PEOPLE, seedDemo } from './seed.ts';
 
 const OUT = join(import.meta.dirname, '../../docs/screenshots');
@@ -39,10 +40,15 @@ async function shoot(page: Page, path: string, name: string, heading: string, pa
 	console.log(`docs/screenshots/${name}.png`);
 }
 
-const server = await startServer();
-const executablePath = process.env.CONSOLEBOOK_E2E_CHROMIUM;
-const browser = await chromium.launch(executablePath ? { executablePath } : {});
-try {
+const shots = lifecycle({ signalExitCode: 130 });
+
+await shots.run(async () => {
+	const server = await shots.own(startServer(), (s) => s.stop());
+	const executablePath = process.env.CONSOLEBOOK_E2E_CHROMIUM;
+	const browser = await shots.own(
+		chromium.launch(executablePath ? { executablePath } : {}),
+		(b) => b.close()
+	);
 	const seeded = await seedDemo(server.url, await server.setupCode());
 
 	const jordan = await signedIn(browser, server.url, 'jordan');
@@ -54,7 +60,5 @@ try {
 
 	const taylor = await signedIn(browser, server.url, 'taylor');
 	await shoot(taylor, '/records', 'trainee-records', 'My records');
-} finally {
-	await browser.close();
-	await server.stop();
-}
+});
+await shots.end(0);
