@@ -87,6 +87,11 @@
 	:global(*) {
 		box-sizing: border-box;
 	}
+	/* The CSS build lowers light-dark() to variables that only a declared
+	   color-scheme defines; the meta tag in app.html does not count. */
+	:global(:root) {
+		color-scheme: light dark;
+	}
 	:global(body) {
 		margin: 0;
 		font-family:

@@ -10,6 +10,20 @@ not a production-readiness statement.
 
 ## [Unreleased]
 
+### Added
+
+- `npm run demo` in `web/` serves a throwaway installation filled with an
+  invented training center: two trainees, a few weeks of daily reports, a
+  weekly summary, an amendment, acknowledgments, and task signoffs.
+- Screenshots in the README, regenerated from the same demo data by
+  `npm run screenshots`.
+
+### Fixed
+
+- The page background and the header bar render again. Since 0.3.0 the
+  production CSS build turned their colors into variables nothing defined,
+  so every page showed a white background and a near-invisible header.
+
 ### Changed
 
 - Building the web interface needs Node.js 24 or later (was `^22.17 || >=24`);

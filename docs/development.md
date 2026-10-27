@@ -106,6 +106,12 @@ refused-save recovery buffer (#34; ownership boundary of #59).
 checks startup failures, listener ownership, and shutdown. Keep scenario data
 and assertions in their own specs.
 
+`web/demo/seed.ts` fills a fresh installation with an invented training
+center through the HTTP API, acting as each person would, so the demo holds
+nothing the product would refuse. `demo/run.ts` (`npm run demo`) serves it;
+`demo/screenshots.ts` (`npm run screenshots`) regenerates
+`docs/screenshots/` from it.
+
 | Route | Ownership |
 | --- | --- |
 | `/setup`, `/login`, `/reset` | Installation and authentication entry |
@@ -130,6 +136,12 @@ use the setup code printed by the server, create invented agency/admin data,
 then sign in. Use a separate empty data directory for a disposable preview.
 The published preview already occupies port 7770 on its host; choose another
 `serve --bind 127.0.0.1:PORT` there.
+
+To look around without entering data, build both halves as above
+(`cargo build -p consolebook-server`) and run `npm run demo` in `web/`. It
+serves a scratch installation full of invented records on 127.0.0.1:7770 (set
+`CONSOLEBOOK_DEMO_PORT` for another port, 0 for any free one), prints the
+accounts, and deletes everything on Ctrl-C.
 
 For live UI editing, run `npm run dev` in `web/` with a local Rust server.
 `vite.config.ts` proxies `/api` to port 7770; adjust the target when using a

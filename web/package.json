@@ -11,7 +11,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && tsc --project tsconfig.e2e.json",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "demo": "node demo/run.ts",
+    "screenshots": "node demo/screenshots.ts"
   },
   "imports": {
     "#lib/*": "./src/lib/*"

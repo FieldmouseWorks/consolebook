@@ -1,14 +1,101 @@
 # Consolebook
 
-Consolebook is an early-stage training-record system for emergency communications centers. The initial focus is structured training programs, Daily Observation Reports, weekly summaries, task signoffs, acknowledgments, amendments, and defensible exports.
+Training records for 911 centers: daily observation reports, weekly summaries,
+task signoffs, and each trainee's complete file, in one program a center runs
+on its own server. Free and open source under the AGPL.
 
 Consolebook is a [Fieldmouse Works](https://github.com/FieldmouseWorks) project — open tools for closed systems.
 
-> **Status:** pre-alpha, version 0.3.0 ([changelog](CHANGELOG.md)), implemented
-> through Milestone 5's export, trainee-packet, retention-policy, and hold
-> slices. The application is usable for development and evaluation, not
-> production. Do not put production or personnel data into this repository or
-> any current build.
+![A trainer writing a daily observation report](docs/screenshots/daily-report.png)
+
+> **Status:** pre-alpha, version 0.3.0 ([changelog](CHANGELOG.md)). The
+> application is usable for development and evaluation, not production. Do not
+> put production or personnel data into this repository or any current build.
+> What is done and what is next: [roadmap](docs/roadmap.md).
+
+## Why it exists
+
+A new 911 dispatcher spends months in a training program, and every shift of
+it produces a daily observation report from their trainer. Those reports
+decide whether the trainee is released to work alone, and they come back years
+later in grievances, decertifications, and lawsuits. Most centers keep them on
+paper, in spreadsheets, or in a hosted product they rent.
+
+Consolebook is written by a working 911 dispatcher to keep those records the way
+they need to be kept: a finalized report never changes, a correction is a new
+version with its reason, every version stays readable and verifiable, and the
+agency can take everything with it in an open format.
+
+## What it does
+
+- **Programs are configuration.** Phases, competencies, tasks, rating scales,
+  and forms are versioned per agency; a record stays pinned to the exact
+  program version it was written under.
+- **Daily observation reports.** Trainers draft together with autosave and
+  per-person attribution, submit for review, and finalize. Sessions keep the
+  agency's local dates and shift times.
+- **Finalized means final.** A finalized record is stored as canonical bytes
+  with a content hash and a hash chain. Corrections are amendments that seal
+  the next version; the original stays readable.
+- **Acknowledgment records receipt, not agreement.** Trainees acknowledge,
+  respond, or refuse, and supervisors can attest on their behalf, per version.
+- **Weekly summaries and task signoffs.** Summaries link the exact daily
+  report versions they cover. Signoffs keep their full history, including
+  overrides and the reasons for them.
+- **Trainees see their own file** and can download it as a packet.
+- **Exports verify from the file alone**, anywhere, with
+  `consolebook-server export verify`: one record, one trainee's packet, or the
+  whole installation.
+- **Retention policies and record holds** are explicit, attributed workflows.
+- **Easy to run.** One executable and one SQLite data directory. A
+  one-command install and upgrade on Linux, automatic validated backups
+  (copied off the server when you give it a second disk), and a read-only
+  `doctor`.
+
+| | |
+| --- | --- |
+| ![Version history of an amended record](docs/screenshots/version-history.png) | ![A trainee's task signoffs](docs/screenshots/task-signoffs.png) |
+| Amendments seal a new version; the original and its acknowledgment stay. | Signoffs record observed or demonstrated, by whom, and every override. |
+| ![A trainee's own records](docs/screenshots/trainee-records.png) | |
+| A trainee's own records and what still awaits their acknowledgment. | |
+
+The screenshots show invented data from the demo below.
+
+## Try the demo
+
+With Rust and Node.js 24 installed (or `nix develop`, which provides both):
+
+```sh
+git clone https://github.com/FieldmouseWorks/consolebook && cd consolebook
+(cd web && npm ci && npm run build)
+cargo build -p consolebook-server
+(cd web && npm run demo)
+```
+
+It serves a throwaway installation at <http://127.0.0.1:7770>, filled with an
+invented agency's training program, two trainees, and a few weeks of records,
+and prints the accounts to sign in as. Ctrl-C stops it and deletes the data.
+
+## How it is built
+
+- Rust and Axum for the application and HTTP API; SQLx with SQLite in WAL mode
+  for storage.
+- A statically built SvelteKit interface embedded in the executable; Node.js
+  is a build tool only.
+- Opaque server-side sessions with Argon2id password hashes. Access is scoped
+  to a trainer's own assignments by default, and authorization is decided in
+  domain services, never in handlers or the UI.
+- A modular monolith: one executable and one data directory per agency, no
+  external services, no telemetry.
+- Every product decision is an [architecture decision record](docs/decisions/);
+  [PRINCIPLES.md](PRINCIPLES.md) holds the constraints they answer to.
+- Formatting, Clippy with warnings as errors, the Rust test suite, and
+  Playwright tests against the real compiled binary gate every change
+  ([CONTRIBUTING.md](CONTRIBUTING.md)).
+
+Lawful disposition, attachments, and PDF rendering (Typst) are still to come.
+The [preview runbook](docs/preview.md) covers the live demonstration
+deployment; local builds do not update it.
 
 ## Install
 
@@ -27,18 +114,6 @@ the administrator's home both warn until you do.
 [docs/operations.md](docs/operations.md) covers what to watch, the logs, and how to
 report a problem.
 
-## Product goals
-
-- Programs and agency terminology are versioned configuration.
-- Training sessions and evaluation records remain separate concepts.
-- Daily reports, weekly summaries, and phase evaluations have explicit provenance.
-- Finalized records are immutable while retained; corrections create successor versions.
-- Retention policies, holds, and lawful disposition are explicit workflows.
-- Acknowledgment records receipt rather than agreement.
-- Assignment-scoped access is the default.
-- Backups, recovery, and complete exports are product features.
-- A small center can operate one installation without a pile of external services.
-
 ## Non-goals
 
 - A multi-tenant schema in the core application.
@@ -46,31 +121,6 @@ report a problem.
 - Agency-specific code paths.
 - Cloud services, telemetry, or containers as runtime requirements.
 - Editing finalized records in place.
-
-## Architecture baseline
-
-The implementation is a modular monolith:
-
-- Rust and Axum for the application and HTTP API
-- SQLx with SQLite in WAL mode for storage
-- a statically built SvelteKit interface embedded in the executable
-- opaque server-side sessions with Argon2id password hashes
-- one executable and one data directory per installation
-
-The current build includes the operable shell and versioned program
-configuration from Milestones 1 and 2; training sessions, collaborative drafts,
-review, and assignment-scoped access from Milestone 3; immutable finalized
-records, acknowledgments, amendments, weekly summaries, task signoffs, and the
-trainee timeline from Milestone 4; and Milestone 5's file-verifiable structured
-record exports, complete trainee packets, a complete installation export, and
-retention policies with record holds. It installs and upgrades with one command on Linux, backs up before an
-upgrade migrates, serves `Secure` cookies behind HTTPS, and copies verified
-backups off the server; the [restore drill](docs/restore-drill.md) records
-recovery from a lost server, and the [operations guide](docs/operations.md)
-covers running a pilot. Lawful disposition, attachments, and Typst PDF
-rendering remain Milestone 5 work. For the live
-demonstration deployment, see the [preview runbook](docs/preview.md); local
-builds do not update that service.
 
 ## Repository map
 
@@ -127,7 +177,7 @@ the procedure is in [docs/releasing.md](docs/releasing.md).
 
 ## Privacy
 
-Examples and test fixtures must be invented. Do not commit real agency names, employee information, operational narratives, credentials, exports, screenshots, or training records.
+Examples, test fixtures, and screenshots must be invented. Do not commit real agency names, employee information, operational narratives, credentials, exports, screenshots of real installations, or training records.
 
 ## License
 
