@@ -39,9 +39,8 @@ current authorization the same way.
 
 Merging needs no grant: since 2026-10-23 (the owner's call) the autoland
 steward merges a PR once the review bot finds nothing on its exact head, every
-review thread is resolved and the required checks are green. Open the PR ready
-for review, never as a draft (the steward skips drafts), and leave the merge to
-it ([AGENTS.md](../AGENTS.md#pull-requests)). A PR touching an
+review thread is resolved and the required checks are green. Leave the PR as a draft
+and the merge to it ([AGENTS.md](../AGENTS.md#pull-requests)). A PR touching an
 ADR, `PRINCIPLES.md` or `migrations/` is settled the same way and then waits
 for the owner's merge. After the merge, verify the exact merged main
 revision, archive and read back the issue evidence, then clean up owned
