@@ -173,8 +173,8 @@ one-way path (secrets, migrations, CODEOWNERS) gets a judgment first: it lands
 unless it can't be undone or is the owner's to decide.
 <!-- house:prs end -->
 
-A PR touching an ADR, `PRINCIPLES.md` or `migrations/` is settled the same way
-and then waits for the owner's merge.
+A PR touching an ADR or `PRINCIPLES.md` is settled the same way and then waits
+for the owner's merge.
 
 ## Code Review Rules
 
