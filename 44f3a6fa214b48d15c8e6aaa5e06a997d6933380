@@ -1,0 +1,83 @@
+{
+  "conary": "note v1",
+  "change": "4y0w1jww8xkbaphetpszddwfv7",
+  "repo": {
+    "owner": "fieldmouseworks",
+    "name": "consolebook"
+  },
+  "pr": 167,
+  "url": "https://github.com/fieldmouseworks/consolebook/pull/167",
+  "summary": "docs: migrations land like any other PR",
+  "task": null,
+  "author": {
+    "kind": "agent",
+    "login": "TusanHomichi",
+    "session": "https://claude.ai/code/session_01LUSpz65cwD3ABEEydMWsoV"
+  },
+  "landing": {
+    "revision": "05f97a88188630efdb43fc8ec1bd9d48ab6d27de86742557e6b353a5c7cbc36f",
+    "before": "2a1876c744cc846d0964465feda1b51ee91738ce",
+    "after": "44f3a6fa214b48d15c8e6aaa5e06a997d6933380",
+    "by": {
+      "kind": "status",
+      "login": "TusanHomichi"
+    },
+    "at": 1793212744240
+  },
+  "evidence": [
+    {
+      "kind": "ci",
+      "check": "Analyze (actions)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/40745197613/job/123017004178"
+    },
+    {
+      "kind": "ci",
+      "check": "Analyze (python)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/40745197613/job/123017004245"
+    },
+    {
+      "kind": "ci",
+      "check": "Analyze (javascript-typescript)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/40745197613/job/123017004121"
+    },
+    {
+      "kind": "review",
+      "check": "codex",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/pull/167#pullrequestreview-5687712652"
+    },
+    {
+      "kind": "ci",
+      "check": "build-aarch64",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/40745202884/job/123017020762"
+    },
+    {
+      "kind": "ci",
+      "check": "build-x86_64",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/40745202884/job/123017020468"
+    },
+    {
+      "kind": "ci",
+      "check": "Analyze (rust)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/40745197613/job/123017003725"
+    },
+    {
+      "kind": "ci",
+      "check": "check / check",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/40745209575/job/123017038458"
+    },
+    {
+      "kind": "ci",
+      "check": "fmt-clippy-test",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/40745203184/job/123017016225"
+    }
+  ]
+}
