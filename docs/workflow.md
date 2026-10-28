@@ -42,8 +42,8 @@ steward merges a PR once the review bot finds nothing on its exact head, every
 review thread is resolved and the required checks are green. Open the PR ready
 for review, never as a draft (the steward skips drafts), and leave the merge to
 it ([AGENTS.md](../AGENTS.md#pull-requests)). A PR touching an
-ADR, `PRINCIPLES.md` or `migrations/` is settled the same way and then waits
-for the owner's merge. After the merge, verify the exact merged main
+ADR or `PRINCIPLES.md` is settled the same way and then waits for the owner's
+merge. After the merge, verify the exact merged main
 revision, archive and read back the issue evidence, then clean up owned
 branches, worktrees, and processes. Deploy only when explicitly authorized.
 
