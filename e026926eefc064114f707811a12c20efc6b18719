@@ -1,0 +1,89 @@
+{
+  "conary": "note v1",
+  "change": "5kwvvmtbacp1zbdsjnh92x29mx",
+  "repo": {
+    "owner": "FieldmouseWorks",
+    "name": "consolebook"
+  },
+  "pr": 163,
+  "url": "https://github.com/FieldmouseWorks/consolebook/pull/163",
+  "summary": "demo: seeded demo, README screenshots, and the shell's colors restored",
+  "task": "FieldmouseWorks/consolebook#162",
+  "author": {
+    "kind": "agent",
+    "login": "TusanHomichi",
+    "session": "https://claude.ai/code/session_01A8jL6BSB2M5KUufXQefcf9"
+  },
+  "landing": {
+    "revision": "782f0909aaab8740e22817515be12fddc532d284ded2cada7e5d7accdd5a2ba4",
+    "before": "af3ce227940092ee35a16a7f7f2d6eb3b9d3729c",
+    "after": "e026926eefc064114f707811a12c20efc6b18719",
+    "by": {
+      "kind": "status",
+      "login": "TusanHomichi"
+    },
+    "at": 1793142147866
+  },
+  "evidence": [
+    {
+      "kind": "ci",
+      "check": "CodeQL",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/runs/122009313120"
+    },
+    {
+      "kind": "ci",
+      "check": "fmt-clippy-test",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/40449661627/job/122009274695"
+    },
+    {
+      "kind": "ci",
+      "check": "check / check",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/40449662179/job/122009151415"
+    },
+    {
+      "kind": "ci",
+      "check": "build-x86_64",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/40449661595/job/122009149836"
+    },
+    {
+      "kind": "ci",
+      "check": "build-aarch64",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/40449661595/job/122009149626"
+    },
+    {
+      "kind": "ci",
+      "check": "Analyze (actions)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/40449656126/job/122009136118"
+    },
+    {
+      "kind": "ci",
+      "check": "Analyze (python)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/40449656126/job/122009136110"
+    },
+    {
+      "kind": "ci",
+      "check": "Analyze (rust)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/40449656126/job/122009136108"
+    },
+    {
+      "kind": "ci",
+      "check": "Analyze (javascript-typescript)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/40449656126/job/122009135915"
+    },
+    {
+      "kind": "review",
+      "check": "codex",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/pull/163#pullrequestreview-5662215518"
+    }
+  ]
+}
