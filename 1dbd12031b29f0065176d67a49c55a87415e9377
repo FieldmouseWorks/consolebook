@@ -1,0 +1,53 @@
+{
+  "conary": "note v1",
+  "change": "1y06m1hrgnks23nv5nnzxq9h1h",
+  "repo": {
+    "owner": "fieldmouseworks",
+    "name": "consolebook"
+  },
+  "pr": 168,
+  "url": "https://github.com/fieldmouseworks/consolebook/pull/168",
+  "summary": "deps(web): bump vite from 8.3.4 to 8.3.5 in /web in the web-minor-patch group",
+  "task": null,
+  "author": {
+    "kind": "bot",
+    "login": "dependabot[bot]",
+    "session": null
+  },
+  "landing": {
+    "revision": "6a74ecb87653356d8bfd18e6d2278792b3653cd6ea7a22d7cb2ef49deb215e17",
+    "before": "c20982c6d206a59bdd12562aa21f3f1dc241f697",
+    "after": "1dbd12031b29f0065176d67a49c55a87415e9377",
+    "by": {
+      "kind": "status",
+      "login": "fieldmouseworks-steward[bot]"
+    },
+    "at": 1793305309457
+  },
+  "evidence": [
+    {
+      "kind": "ci",
+      "check": "build-aarch64",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/40916361039/job/123597525744"
+    },
+    {
+      "kind": "ci",
+      "check": "build-x86_64",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/40916361039/job/123597525381"
+    },
+    {
+      "kind": "ci",
+      "check": "check / check",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/40916361910/job/123597526864"
+    },
+    {
+      "kind": "ci",
+      "check": "fmt-clippy-test",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/40916360900/job/123597524170"
+    }
+  ]
+}
