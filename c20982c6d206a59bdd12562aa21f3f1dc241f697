@@ -1,0 +1,53 @@
+{
+  "conary": "note v1",
+  "change": "3byfada82jq2kvhe41csf6g2yy",
+  "repo": {
+    "owner": "fieldmouseworks",
+    "name": "consolebook"
+  },
+  "pr": 169,
+  "url": "https://github.com/fieldmouseworks/consolebook/pull/169",
+  "summary": "deps(rust): bump tokio from 1.53.3 to 1.54.1 in the rust-minor-patch group",
+  "task": null,
+  "author": {
+    "kind": "bot",
+    "login": "dependabot[bot]",
+    "session": null
+  },
+  "landing": {
+    "revision": "f85b81f3a64a900ab5bf1ed63bfb449ec9950bebfcf669ccae25096a8ee71e3b",
+    "before": "44f3a6fa214b48d15c8e6aaa5e06a997d6933380",
+    "after": "c20982c6d206a59bdd12562aa21f3f1dc241f697",
+    "by": {
+      "kind": "status",
+      "login": "fieldmouseworks-steward[bot]"
+    },
+    "at": 1793304952027
+  },
+  "evidence": [
+    {
+      "kind": "ci",
+      "check": "build-x86_64",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/40916379686/job/123597591724"
+    },
+    {
+      "kind": "ci",
+      "check": "build-aarch64",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/40916379686/job/123597591185"
+    },
+    {
+      "kind": "ci",
+      "check": "check / check",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/40916380610/job/123597594118"
+    },
+    {
+      "kind": "ci",
+      "check": "fmt-clippy-test",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/40916379735/job/123597591771"
+    }
+  ]
+}
