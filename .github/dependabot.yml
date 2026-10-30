@@ -1,5 +1,8 @@
 # Dependency version updates. Holds are written down here with their reason;
 # remove an ignore rule when its reason no longer applies.
+# Commit subjects follow the house style's `area: plain sentence`
+# ("deps: bump tokio ..."): the steward squashes each PR onto main under its
+# title, and CI checks the title.
 version: 2
 updates:
   - package-ecosystem: npm
@@ -11,7 +14,7 @@ updates:
       default-days: 7
     open-pull-requests-limit: 5
     commit-message:
-      prefix: deps(web)
+      prefix: deps
     groups:
       web-minor-patch:
         update-types:
@@ -32,7 +35,7 @@ updates:
       default-days: 7
     open-pull-requests-limit: 5
     commit-message:
-      prefix: deps(rust)
+      prefix: deps
     groups:
       rust-minor-patch:
         update-types:
