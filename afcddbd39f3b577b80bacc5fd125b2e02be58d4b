@@ -1,0 +1,53 @@
+{
+  "conary": "note v1",
+  "change": "5hsa78sp0cjdwkkgwydn00n87f",
+  "repo": {
+    "owner": "FieldmouseWorks",
+    "name": "consolebook"
+  },
+  "pr": 171,
+  "url": "https://github.com/FieldmouseWorks/consolebook/pull/171",
+  "summary": "deps: bump uuid from 1.28.0 to 1.29.0 in the rust-minor-patch group",
+  "task": null,
+  "author": {
+    "kind": "bot",
+    "login": "dependabot[bot]",
+    "session": null
+  },
+  "landing": {
+    "revision": "cabc0b8078c80fb7f7fd2ce6cc2d9b413bd0f6980296df2a70fd0f23716ee022",
+    "before": "4bb745b6d68ecdc617658febc374932d0b90c03b",
+    "after": "afcddbd39f3b577b80bacc5fd125b2e02be58d4b",
+    "by": {
+      "kind": "status",
+      "login": "fieldmouseworks-steward[bot]"
+    },
+    "at": 1793398450728
+  },
+  "evidence": [
+    {
+      "kind": "ci",
+      "check": "build-x86_64",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41135121418/job/124335575099"
+    },
+    {
+      "kind": "ci",
+      "check": "build-aarch64",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41135121418/job/124335574789"
+    },
+    {
+      "kind": "ci",
+      "check": "check / check",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41135122203/job/124335576540"
+    },
+    {
+      "kind": "ci",
+      "check": "fmt-clippy-test",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41135121434/job/124335574888"
+    }
+  ]
+}
