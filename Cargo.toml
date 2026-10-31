@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/consolebook-server"]
+members = ["crates/consolebook-server", "crates/xtask"]
 resolver = "2"
 
 [workspace.package]

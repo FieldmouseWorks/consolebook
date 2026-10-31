@@ -18,7 +18,7 @@ changes without a migration are a **patch** (`0.2.0` → `0.2.1`).
 3. Run `cargo build -p consolebook-server` so `Cargo.lock` records the version.
 4. In `CHANGELOG.md`, move the `Unreleased` entries under
    `## [X.Y.Z] - YYYY-MM-DD` and leave an empty `Unreleased` section.
-5. Run the full gates (`scripts/proof.py`). `tests/release_version.rs` fails if
+5. Run the full gates (`cargo xtask proof`). `tests/release_version.rs` fails if
    any of the three versions or the changelog heading disagree.
 6. Open the PR as `release: X.Y.Z`, with the changelog section in the body.
 

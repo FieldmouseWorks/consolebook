@@ -17,7 +17,7 @@ env:
   RUST_BACKTRACE: 1
 
 # The hermetic part of the gate (rustfmt, clippy, the Rust tests without
-# embedded web assets, the guidance guard, the proof runner's self-test) runs
+# embedded web assets, the proof runner's among them, the guidance guard) runs
 # in the flake job (flake.yml, `nix flake check`). This job keeps what the
 # flake can't hold: the web build, the Rust tests against the embedded
 # interface, and the browser suite. Its name is a required check in the `main`

@@ -3,7 +3,7 @@ import { defineConfig } from '@playwright/test';
 // End-to-end proof against the real compiled server binary. Run
 // `npm run build` and `cargo build` first; the spec starts the server
 // itself on a scratch data directory.
-// scripts/proof.py sets CONSOLEBOOK_E2E_REPORT to collect a JSON report
+// `cargo xtask proof` sets CONSOLEBOOK_E2E_REPORT to collect a JSON report
 // alongside the usual output: its receipt requires proof that the suite ran.
 const report = process.env.CONSOLEBOOK_E2E_REPORT;
 
