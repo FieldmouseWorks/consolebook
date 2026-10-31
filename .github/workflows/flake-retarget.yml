@@ -1,0 +1,24 @@
+# The gate again for a PR retargeted onto another branch: the shared workflow's
+# run counts only for the base it judged. GitHub can't start a run only for a
+# new base, so a title or body edit starts one here too, and skips. In a file of
+# its own, since a skipped run in flake.yml takes its place as that workflow's
+# latest, and GitHub then no longer counts the push's required `check / check`.
+# Its name and call match flake.yml's, for the shared concurrency group.
+name: flake
+on:
+  pull_request:
+    types: [edited]
+permissions:
+  contents: read
+jobs:
+  check:
+    if: github.event.changes.base
+    uses: FieldmouseWorks/burrow/.github/workflows/flake-check.yml@21174eaf96a3d89a514d5869ba65cab8a30e4e76 # main
+    # What the shared workflow needs to attest its result.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    with:
+      runner: ubuntu-latest
+      install-nix: true
