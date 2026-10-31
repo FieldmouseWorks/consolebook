@@ -44,8 +44,10 @@ contract names.
 
 `scripts/` holds repository guards that the gates run before the build;
 `CONTRIBUTING.md` lists each one in the local command sequence.
-`scripts/proof.py` runs that sequence as written and leaves a receipt in the
-ignored `.proof/`; `.agents/skills/consolebook-proof/` routes changes to it.
+`crates/xtask` is the repository's own tooling, in Rust, run as
+`cargo xtask NAME` and shipped in no release. `cargo xtask proof` runs that
+sequence as written and leaves a receipt in the ignored `.proof/`;
+`.agents/skills/consolebook-proof/` routes changes to it.
 
 Packet membership and timeline verification tests live in
 `tests/trainee_packet/pin_history.rs`; the parent packet test module owns

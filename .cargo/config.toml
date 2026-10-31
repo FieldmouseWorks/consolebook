@@ -1,0 +1,3 @@
+# `cargo xtask ...`: the repository's own tools (crates/xtask).
+[alias]
+xtask = "run --quiet --package xtask --"

@@ -19,7 +19,7 @@
 CLAUDE.local.md
 .claude/
 
-# Local proof receipts written by scripts/proof.py
+# Local proof receipts written by `cargo xtask proof`
 /.proof/
 
 # Release archives written by scripts/package-release.sh

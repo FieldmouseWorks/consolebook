@@ -116,13 +116,13 @@ cargo build -p consolebook-server
 (cd web && npx playwright install chromium && npm run e2e)
 ```
 
-`scripts/proof.py` runs this exact block, one line per step from the
-repository root, stops at the first failure, and writes a local receipt under
-the ignored `.proof/` (`--chromium PATH` uses the system-browser line below;
-`--list` prints what it will run). The block is therefore executable input:
-keep one command per line, and keep exactly one line running `npm run e2e`
-and one documented `CONSOLEBOOK_E2E_CHROMIUM=/path/to/chromium` alternative,
-or the script refuses to run. The
+`cargo xtask proof` (`crates/xtask`) runs this exact block, one line per step
+from the repository root, stops at the first failure, and writes a local
+receipt under the ignored `.proof/` (`--chromium PATH` uses the system-browser
+line below; `--list` prints what it will run). The block is therefore
+executable input: keep one command per line, and keep exactly one line running
+`npm run e2e` and one documented `CONSOLEBOOK_E2E_CHROMIUM=/path/to/chromium`
+alternative, or the runner refuses to run. The
 [consolebook-proof skill](.agents/skills/consolebook-proof/SKILL.md) routes a
 change to its focused proof before this full run.
 
@@ -151,7 +151,7 @@ pull requests, and the [release workflow](.github/workflows/release.yml)
 builds the static Linux archives and installs and upgrades them on a systemd
 runner. The [flake workflow](.github/workflows/flake.yml) runs `nix flake check`
 ([flake.nix](flake.nix)): format, clippy, Rust tests without embedded web
-assets, Python syntax, the guidance guard, and the proof runner's self-test,
+assets (the proof runner's included), Python syntax, and the guidance guard,
 each in the Nix sandbox. The [house workflow](.github/workflows/house.yml)
 holds each pull request to the house rules a machine can read, its title and
 body included. Focused local tests help development but do

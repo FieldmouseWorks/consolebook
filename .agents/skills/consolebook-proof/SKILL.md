@@ -22,7 +22,7 @@ output is not a gate receipt. Pick by what the change touches:
 | Web UI or typed API client in `web/src/` | `(cd web && npm run check)`; for a workflow, build web then `cargo build -p consolebook-server` and run the one spec: `(cd web && npx playwright test e2e/<spec>.spec.ts)` |
 | Browser harness in `web/e2e/` | `(cd web && npx playwright test e2e/server.spec.ts)` and the specs that use the changed fixture |
 | Guidance and documentation | `scripts/check-guidance-names.sh`, `git diff --check`, and the link and command checks in `CONTRIBUTING.md` (Documentation and fixtures) |
-| This skill or `scripts/proof.py` | `scripts/proof.py --self-test`, then `scripts/proof.py --list` to see the sequence it will run |
+| This skill or `crates/xtask` | `cargo test -p xtask`, then `cargo xtask proof --list` to see the sequence it will run |
 
 No area is exempt from the full gates, documentation included.
 
@@ -31,15 +31,15 @@ No area is exempt from the full gates, documentation included.
 Review the diff first. Then, from anywhere in the repository:
 
 ```sh
-scripts/proof.py                      # Playwright-managed Chromium, as CONTRIBUTING.md's sequence installs it
-scripts/proof.py --chromium PATH      # a system Chromium, through CONTRIBUTING.md's documented alternative
+cargo xtask proof                     # Playwright-managed Chromium, as CONTRIBUTING.md's sequence installs it
+cargo xtask proof --chromium PATH     # a system Chromium, through CONTRIBUTING.md's documented alternative
 ```
 
 `CONSOLEBOOK_E2E_CHROMIUM` in the environment counts as `--chromium`. The
-script reads the sequence from the first `sh` block under "Build and
+runner reads the sequence from the first `sh` block under "Build and
 verification" in `CONTRIBUTING.md` and runs each line in order from the
 repository root, so the skill and that file cannot disagree; if the block's
-shape changes in a way the script does not recognize, it refuses to run
+shape changes in a way the runner does not recognize, it refuses to run
 (exit 2). It prints each step, its exit status and duration, and the browser
 the suite will use; it stops at the first failing step.
 
@@ -51,7 +51,7 @@ unprivileged, read from the effective capability set:
 
 ```sh
 setpriv --inh-caps=-dac_override,-dac_read_search,-fowner \
-  --bounding-set=-dac_override,-dac_read_search,-fowner scripts/proof.py
+  --bounding-set=-dac_override,-dac_read_search,-fowner cargo xtask proof
 ```
 
 ## 3. Read and report the receipt
@@ -78,7 +78,7 @@ observed. The receipt does not prove a hosted result, a recovery drill, or a
 merged-main revision.
 
 A receipt is stale when the candidate changes after it: rerun and keep both.
-If the script warns that the candidate changed during the run, that receipt
+If the runner warns that the candidate changed during the run, that receipt
 is stale already. A failed receipt stays as evidence; read its step log,
 identify the cause, and follow the failure loop in `docs/workflow.md` instead
 of rerunning unchanged.

@@ -37,7 +37,7 @@ Operability as of 0.3.0:
 - a recorded [restore drill](restore-drill.md) and an
   [operations guide](operations.md).
 
-`scripts/proof.py` runs the full local gate sequence and leaves a receipt.
+`cargo xtask proof` runs the full local gate sequence and leaves a receipt.
 
 Material limits: confirmed disposition, tombstones, portable policy-boundary
 evidence, and deterministic PDFs remain Milestone 5 work. The restore drill has run

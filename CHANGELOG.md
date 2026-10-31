@@ -28,6 +28,8 @@ not a production-readiness statement.
 
 - Building the web interface needs Node.js 24 or later (was `^22.17 || >=24`);
   the installed server still needs no Node.js.
+- The local gate runner is `cargo xtask proof` (was `scripts/proof.py`), so
+  running the gates no longer needs Python.
 
 ## [0.3.0] - 2026-10-15
 

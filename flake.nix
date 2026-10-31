@@ -11,7 +11,10 @@
     { self, burrow }:
     burrow.lib.project {
       inherit self;
-      rust = { };
+      # The proof runner's tests (crates/xtask) make throwaway git repositories.
+      rust = {
+        testInputs = pkgs: [ pkgs.git ];
+      };
       python = { };
       node = { };
       # The repository guards read the tracked tree through git, so each runs
@@ -23,10 +26,7 @@
             name: script:
             pkgs.runCommand name
               {
-                nativeBuildInputs = [
-                  pkgs.git
-                  pkgs.python3
-                ];
+                nativeBuildInputs = [ pkgs.git ];
               }
               ''
                 export HOME=$TMPDIR
@@ -42,7 +42,6 @@
         in
         {
           guidance-names = inRepo "guidance-names" "sh scripts/check-guidance-names.sh";
-          proof-self-test = inRepo "proof-self-test" "python3 scripts/proof.py --self-test";
         };
     };
 }
