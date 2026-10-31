@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
+use std::fmt::Write;
 use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
@@ -29,14 +30,21 @@ pub fn git(root: &Path, args: &[&str]) -> io::Result<Vec<u8>> {
     }
 }
 
-/// `git status` as (two-letter code, path) pairs, the path as it is on disk.
+/// One entry of `git status`, its paths as they are on disk.
+pub struct Entry {
+    /// The two-letter code.
+    pub code: String,
+    pub path: Vec<u8>,
+    /// A rename's or copy's second path, the one it came from.
+    pub source: Option<Vec<u8>>,
+}
+
+/// `git status`, entry by entry.
 ///
 /// Reads the NUL-separated form, so names with spaces, quotes, or non-ASCII
-/// characters arrive exactly as on disk; a rename's or copy's second (source)
-/// path is folded into its entry, `SOURCE -> PATH`. Either column can carry
-/// the rename: `X` for a staged one, `Y` for a worktree rename of an
-/// intent-to-add file.
-pub fn status(root: &Path) -> io::Result<Vec<(String, Vec<u8>)>> {
+/// characters arrive exactly as on disk. Either column can carry a rename:
+/// `X` for a staged one, `Y` for a worktree rename of an intent-to-add file.
+pub fn status(root: &Path) -> io::Result<Vec<Entry>> {
     let raw = git(
         root,
         &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
@@ -48,14 +56,39 @@ pub fn status(root: &Path) -> io::Result<Vec<(String, Vec<u8>)>> {
             continue;
         }
         let code = String::from_utf8_lossy(&record[..2]).into_owned();
-        let mut path = record[3..].to_vec();
-        if code.contains(['R', 'C']) {
-            let source = fields.next().unwrap_or_default();
-            path = [source, b" -> ", &path].concat();
-        }
-        entries.push((code, path));
+        let source = if code.contains(['R', 'C']) {
+            Some(fields.next().unwrap_or_default().to_vec())
+        } else {
+            None
+        };
+        entries.push(Entry {
+            code,
+            path: record[3..].to_vec(),
+            source,
+        });
     }
     Ok(entries)
+}
+
+/// A file name as text, one to one: UTF-8 as it is, but for `\` and `>`,
+/// escaped as `\\` and `\>`, and each byte that isn't UTF-8 as `\xNN`.
+/// So no two names read the same (a name with U+FFFD in it included), and a
+/// rename's `SOURCE -> PATH` splits only one way.
+#[must_use]
+pub fn name(raw: &[u8]) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for chunk in raw.utf8_chunks() {
+        for c in chunk.valid().chars() {
+            if matches!(c, '\\' | '>') {
+                out.push('\\');
+            }
+            out.push(c);
+        }
+        for b in chunk.invalid() {
+            let _ = write!(out, "\\x{b:02x}");
+        }
+    }
+    out
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -63,10 +96,11 @@ pub struct Candidate {
     pub head: String,
     pub tree: String,
     pub dirty: bool,
+    /// `git status`, one entry a line, each name as [`name`] writes it.
     pub status: Vec<String>,
     pub tracked_diff_sha256: String,
-    /// Each untracked file's hash, by its name; null for one that isn't a
-    /// regular file.
+    /// Each untracked file's hash, by its name as [`name`] writes it; null
+    /// for one that isn't a regular file.
     pub untracked_sha256: BTreeMap<String, Option<String>>,
 }
 
@@ -74,15 +108,15 @@ pub struct Candidate {
 pub fn state(root: &Path) -> io::Result<Candidate> {
     let entries = status(root)?;
     let mut untracked = BTreeMap::new();
-    for (code, rel) in &entries {
-        if code == "??" {
-            let p = root.join(OsStr::from_bytes(rel));
+    for e in &entries {
+        if e.code == "??" {
+            let p = root.join(OsStr::from_bytes(&e.path));
             let hash = if p.is_file() {
                 Some(sha256_file(&p)?)
             } else {
                 None
             };
-            untracked.insert(String::from_utf8_lossy(rel).into_owned(), hash);
+            untracked.insert(name(&e.path), hash);
         }
     }
     let rev = |what: &str| -> io::Result<String> {
@@ -96,7 +130,10 @@ pub fn state(root: &Path) -> io::Result<Candidate> {
         dirty: !entries.is_empty(),
         status: entries
             .iter()
-            .map(|(code, path)| format!("{code} {}", String::from_utf8_lossy(path)))
+            .map(|e| match &e.source {
+                Some(source) => format!("{} {} -> {}", e.code, name(source), name(&e.path)),
+                None => format!("{} {}", e.code, name(&e.path)),
+            })
             .collect(),
         tracked_diff_sha256: sha256(&git(root, &["diff", "HEAD", "--binary"])?),
         untracked_sha256: untracked,

@@ -174,6 +174,29 @@ fn sigterm_mid_run_keeps_an_interrupted_receipt() {
     assert_eq!(ran.held, None);
 }
 
+/// A step that closes its output early can still be stopped: a signal
+/// doesn't wait for it to exit.
+#[test]
+fn a_step_that_closes_its_output_can_still_be_stopped() {
+    let (root, (_k, base)) = (repo(), receipts());
+    let ran = run(
+        &[
+            "exec >/dev/null 2>&1; sleep 0.3; kill -TERM $PPID; sleep 5",
+            "echo never",
+        ],
+        root.path(),
+        &base,
+        &options(),
+    );
+    let r = saved(&ran.dir);
+    assert_eq!(
+        (r["result"].as_str(), r["failed_step"].as_u64()),
+        (Some("interrupted"), Some(1))
+    );
+    assert_eq!(statuses(&r), ["interrupted", "not-run"]);
+    assert!(r["steps"][0]["duration_s"].as_f64().unwrap() < 4.0, "{r}");
+}
+
 /// Nothing a stopped step started can change the candidate after the
 /// runner reads it again: a child that ignores SIGTERM is killed with it.
 #[test]

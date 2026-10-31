@@ -6,7 +6,7 @@ use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -138,21 +138,32 @@ enum Ended {
 }
 
 /// A step's output, to the terminal and its log, until the step's pipe
-/// closes or the log is taken away.
-fn tee(mut from: io::PipeReader, log: Arc<Mutex<Option<File>>>) -> JoinHandle<()> {
+/// closes or the log is taken away; then the log is synced, so what's
+/// hashed is on disk. A failure reading the pipe or writing the log is the
+/// step's error: a log cut short is never a step's whole log. The terminal
+/// is only a view of it, so writing there is best effort.
+fn tee(mut from: io::PipeReader, log: Arc<Mutex<Option<File>>>) -> JoinHandle<io::Result<()>> {
     thread::spawn(move || {
         let mut buf = vec![0; 1 << 16];
         loop {
             let n = match from.read(&mut buf) {
-                Ok(0) | Err(_) => return,
+                Ok(0) => break,
                 Ok(n) => n,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e),
             };
             let mut log = log.lock().unwrap_or_else(PoisonError::into_inner);
-            let Some(file) = log.as_mut() else { return };
+            let Some(file) = log.as_mut() else {
+                return Ok(());
+            };
             let mut out = io::stdout().lock();
             let _ = out.write_all(&buf[..n]);
             let _ = out.flush();
-            let _ = file.write_all(&buf[..n]);
+            file.write_all(&buf[..n])?;
+        }
+        match log.lock().unwrap_or_else(PoisonError::into_inner).as_mut() {
+            Some(file) => file.sync_all(),
+            None => Ok(()),
         }
     })
 }
@@ -183,22 +194,49 @@ fn step(
     // Its ends of the pipe closed, so the step's output ends with the step.
     drop(command);
     let tee = tee(reader, log.clone());
-    loop {
-        if interrupts.take().is_some() {
-            // The log ends here, whatever the step says while it's stopped.
-            log.lock().unwrap_or_else(PoisonError::into_inner).take();
-            stop_group(&mut child, opts.grace);
-            return Ok(Ended::Interrupted);
-        }
-        // Its output ends when the step and all it started are done with it.
-        if tee.is_finished() {
-            let status = child.wait()?;
-            // A step killed by a signal exits minus that signal's number.
-            let code = status
+    let watched = watch(&mut child, tee, interrupts);
+    if !matches!(watched, Ok(Some(_))) {
+        // The log ends here, whatever the step says while it's stopped.
+        log.lock().unwrap_or_else(PoisonError::into_inner).take();
+        stop_group(&mut child, opts.grace);
+    }
+    match watched? {
+        // A step killed by a signal exits minus that signal's number.
+        Some(status) => Ok(Ended::Exited(
+            status
                 .code()
                 .or_else(|| status.signal().map(|s| -s))
-                .unwrap_or(-1);
-            return Ok(Ended::Exited(code));
+                .unwrap_or(-1),
+        )),
+        None => Ok(Ended::Interrupted),
+    }
+}
+
+/// A running step until it's done: how it exited, or `None` for a signal
+/// that came first. Signals are looked for all the while, so a step that
+/// closes its output early can still be stopped. A step is done once it has
+/// exited and its output has ended, which is when all it started is done
+/// with that too.
+fn watch(
+    child: &mut Child,
+    tee: JoinHandle<io::Result<()>>,
+    interrupts: &mut Interrupts,
+) -> io::Result<Option<ExitStatus>> {
+    let mut tee = Some(tee);
+    let mut exited = None;
+    loop {
+        if interrupts.take().is_some() {
+            return Ok(None);
+        }
+        if let Some(t) = tee.take_if(|t| t.is_finished()) {
+            t.join()
+                .unwrap_or_else(|_| Err(io::Error::other("the step's output capture panicked")))?;
+        }
+        if exited.is_none() {
+            exited = child.try_wait()?;
+        }
+        if let (None, Some(status)) = (&tee, exited) {
+            return Ok(Some(status));
         }
         thread::sleep(Duration::from_millis(20));
     }
@@ -421,7 +459,7 @@ pub fn run(
 
 /// The steps, one after another until one doesn't pass: how the run ended,
 /// the step it ended at if that one didn't pass, and the error, for one that
-/// couldn't be run.
+/// couldn't be run or whose output couldn't be kept.
 fn steps_in_turn(
     steps: &mut [Step],
     root: &Path,
@@ -457,7 +495,7 @@ fn steps_in_turn(
             Err(e) => {
                 s.status = Status::Error;
                 s.exit_status = Some(None);
-                eprintln!("{ME}: step {i} couldn't run: {e}");
+                eprintln!("{ME}: step {i} ended in an error: {e}");
                 return (Outcome::Error, Some(i), Some(e));
             }
         };
@@ -509,4 +547,35 @@ fn finish(
         r.artifacts = artifacts(root, out_dir, &r.steps)?;
     }
     receipt::write(r, out_dir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A log that can't be written is the step's error, and the step is
+    /// stopped for it, not left to run on with its log cut short.
+    #[test]
+    fn a_log_that_cant_be_written_is_the_steps_error() {
+        let mut interrupts = Interrupts::start().unwrap();
+        let invocation = Invocation {
+            command: "cargo xtask proof".to_owned(),
+            cwd: "/invented".to_owned(),
+        };
+        let opts = Options::new(None, invocation);
+        let t0 = Instant::now();
+        let ended = step(
+            "echo invented; sleep 5",
+            Path::new("/"),
+            &BTreeMap::new(),
+            Path::new("/dev/full"),
+            &opts,
+            &mut interrupts,
+        );
+        assert_eq!(
+            ended.err().map(|e| e.kind()),
+            Some(io::ErrorKind::StorageFull)
+        );
+        assert!(t0.elapsed() < Duration::from_secs(4), "{:?}", t0.elapsed());
+    }
 }
