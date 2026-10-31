@@ -369,7 +369,7 @@ pub fn run(
     let contributing = root.join("CONTRIBUTING.md");
     let host = host::host();
     if host.privileged {
-        eprintln!(
+        note!(
             "{ME}: warning: this process can bypass file permissions; CONTRIBUTING.md asks for an \
              unprivileged user so permission tests are meaningful"
         );
@@ -422,11 +422,12 @@ pub fn run(
         browser: None,
         artifacts: Artifacts::default(),
     };
-    match &opts.chromium {
-        Some(c) => println!("{ME}: browser for '{E2E_MARKER}': system Chromium at {c}"),
-        None => println!("{ME}: browser for '{E2E_MARKER}': Playwright-managed Chromium"),
+    if let Some(c) = &opts.chromium {
+        say!("{ME}: browser for '{E2E_MARKER}': system Chromium at {c}");
+    } else {
+        say!("{ME}: browser for '{E2E_MARKER}': Playwright-managed Chromium");
     }
-    println!("{ME}: receipt directory: {}", out_dir.display());
+    say!("{ME}: receipt directory: {}", out_dir.display());
 
     let mut interrupts = Interrupts::start().map_err(setup)?;
     let t0 = Instant::now();
@@ -440,7 +441,7 @@ pub fn run(
         &mut interrupts,
     );
     if result == Outcome::Interrupted {
-        eprintln!("\n{ME}: interrupted; writing the receipt");
+        note!("\n{ME}: interrupted; writing the receipt");
     }
     r.duration_s = seconds(t0);
     r.result = result;
@@ -475,7 +476,7 @@ fn steps_in_turn(
             return (Outcome::Interrupted, None, None);
         }
         let i = s.index;
-        println!("\n==> [{i}/{n}] {}", s.command);
+        say!("\n==> [{i}/{n}] {}", s.command);
         let log = out_dir.join(format!("{i:02}.log"));
         s.started_at = Some(now());
         let s0 = Instant::now();
@@ -495,7 +496,7 @@ fn steps_in_turn(
             Err(e) => {
                 s.status = Status::Error;
                 s.exit_status = Some(None);
-                eprintln!("{ME}: step {i} ended in an error: {e}");
+                note!("{ME}: step {i} ended in an error: {e}");
                 return (Outcome::Error, Some(i), Some(e));
             }
         };
@@ -511,12 +512,12 @@ fn steps_in_turn(
             if let Some(p) = problem {
                 if code == 0 {
                     s.status = Status::Failed;
-                    eprintln!("{ME}: {p}");
+                    note!("{ME}: {p}");
                 }
                 s.problem = Some(p);
             }
         }
-        println!(
+        say!(
             "<== [{i}/{n}] exit {code} in {:.1}s",
             s.duration_s.unwrap_or_default()
         );

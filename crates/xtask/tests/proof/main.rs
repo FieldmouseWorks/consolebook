@@ -3,6 +3,7 @@
 mod candidate;
 mod parse;
 mod runner;
+mod terminal;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

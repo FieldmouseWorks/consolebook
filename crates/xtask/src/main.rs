@@ -5,6 +5,8 @@
 //! Exit: 0 every gate passed, 1 a gate failed or the run was interrupted,
 //! 2 usage or setup error (nothing was run).
 
+#![deny(clippy::print_stdout, clippy::print_stderr)]
+
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -15,6 +17,7 @@ use xtask::proof::receipt::{Invocation, Outcome, markdown};
 use xtask::proof::run::{Options, RunError, run};
 use xtask::proof::sequence::{parse, with_system_browser};
 use xtask::proof::{BROWSER_VAR, ME, RECEIPT_ROOT, SetupError};
+use xtask::{note, say};
 
 const USAGE: &str = "usage: cargo xtask proof [--chromium PATH] [--list]
 
@@ -28,7 +31,7 @@ fn main() -> ExitCode {
     match args.split_first() {
         Some((first, rest)) if first == "proof" => proof(rest),
         _ => {
-            eprintln!("{USAGE}");
+            note!("{USAGE}");
             ExitCode::from(2)
         }
     }
@@ -62,26 +65,26 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
 
 fn proof(given: &[String]) -> ExitCode {
     if given.iter().any(|a| a == "-h" || a == "--help") {
-        println!("{USAGE}");
+        say!("{USAGE}");
         return ExitCode::SUCCESS;
     }
     let flags = match parse_args(given) {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("{ME}: {e}\n{USAGE}");
+            note!("{ME}: {e}\n{USAGE}");
             return ExitCode::from(2);
         }
     };
     let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let Ok(top) = xtask::proof::candidate::git(&cwd, &["rev-parse", "--show-toplevel"]) else {
-        eprintln!("{ME}: not inside a git repository");
+        note!("{ME}: not inside a git repository");
         return ExitCode::from(2);
     };
     let root = PathBuf::from(String::from_utf8_lossy(&top).trim());
     match gate(&root, &cwd, given, flags) {
         Ok(code) => code,
         Err(e) => {
-            eprintln!("{ME}: {e}");
+            note!("{ME}: {e}");
             ExitCode::from(2)
         }
     }
@@ -116,7 +119,7 @@ fn gate(root: &Path, cwd: &Path, given: &[String], flags: Args) -> Result<ExitCo
     };
     if flags.list {
         for (i, s) in steps.iter().enumerate() {
-            println!("{}. {s}", i + 1);
+            say!("{}. {s}", i + 1);
         }
         return Ok(ExitCode::SUCCESS);
     }
@@ -137,24 +140,24 @@ fn gate(root: &Path, cwd: &Path, given: &[String], flags: Args) -> Result<ExitCo
         Ok(ran) => ran,
         Err(RunError::Setup(why)) => return Err(SetupError(why)),
         Err(e @ RunError::Receipt(..)) => {
-            eprintln!("{ME}: {e}");
+            note!("{ME}: {e}");
             return Ok(ExitCode::FAILURE);
         }
     };
     let r = &ran.receipt;
-    println!("\n{}", markdown(r));
+    say!("\n{}", markdown(r));
     let json = ran.dir.join("receipt.json");
-    println!(
+    say!(
         "{ME}: {}; receipt {} sha256 {}",
         r.result.as_str(),
         json.display(),
         sha256_file(&json).unwrap_or_default()
     );
     if !r.candidate_unchanged_during_run {
-        eprintln!("{ME}: warning: the candidate changed during the run; this receipt is stale");
+        note!("{ME}: warning: the candidate changed during the run; this receipt is stale");
     }
     if let Some(e) = &ran.error {
-        eprintln!("{ME}: the run ended in an error: {e}");
+        note!("{ME}: the run ended in an error: {e}");
     }
     if let Some(sig) = ran.held {
         // The signal that came while the receipt was written, delivered now.
