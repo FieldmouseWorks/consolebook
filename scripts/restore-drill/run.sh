@@ -8,14 +8,18 @@
 # (or HOST_B_BINARY), installed "with the same --backup-dir", stopped, and
 # restored from the copy directory. Then doctor, collect, compare.
 set -euo pipefail
-TARBALL=$1 SUMS=$2 WORK=$3 HOST_B_BINARY=${4:-}
+TARBALL=$1 SUMS=$2 WORK=$(realpath -m -- "$3") HOST_B_BINARY=${4:-}
 HERE=$(cd "$(dirname "$0")" && pwd)
+ROOT=$(cd "$HERE/../.." && pwd)
 PORT_A=7811 PORT_B=7812
 export NO_COLOR=1 RUST_LOG=info
 t0=$(date +%s.%N)
 step() { printf '\n== [%6.1fs] %s\n' "$(awk "BEGIN { print $(date +%s.%N) - $t0 }")" "$*"; }
 health() { for _ in $(seq 100); do curl -fsS "http://127.0.0.1:$1/api/health" 2>/dev/null && return 0; sleep 0.1; done; return 1; }
 stop() { kill -TERM "$1"; wait "$1" || true; }
+# The drill's HTTP side: seed, collect and compare (crates/xtask/src/drill).
+# It runs from the repository, so every path it is given is absolute.
+drill() { (cd "$ROOT" && cargo xtask drill "$@"); }
 # Every doctor line must be ok. The service copies its newest backup off the
 # server on its first scheduler pass, so give that a few seconds. 0.1.0's
 # doctor has no --backup-copy-dir.
@@ -47,8 +51,13 @@ if [[ -e $WORK && -n $(ls -A "$WORK") ]]; then
   exit 2
 fi
 mkdir -p "$WORK"
+# Host A's administrator, with the password seed makes for this run.
+ACCOUNT=$WORK/account.json
 COPY=$(mktemp -d /dev/shm/consolebook-drill-copy.XXXXXX)
 echo "copy directory: $COPY (filesystem $(stat -f -c %T "$COPY")); data on $(stat -f -c %T "$WORK")"
+
+step "build the drill's client"
+(cd "$ROOT" && cargo build --quiet --package xtask)
 
 step "verify the release archive"
 (cd "$(dirname "$TARBALL")" && sha256sum -c "$(basename "$SUMS")")
@@ -65,7 +74,7 @@ health $PORT_A; echo
 CODE=$(grep -m1 -o 'setup_code="[0-9a-f]*"' "$WORK/hostA.log" | cut -d'"' -f2)
 
 step "host A: seed invented records and collect the 'before' manifest"
-python3 -I "$HERE/seed_collect.py" seed "http://127.0.0.1:$PORT_A" "$CODE" "$WORK/before"
+drill seed "http://127.0.0.1:$PORT_A" "$CODE" "$ACCOUNT" "$WORK/before"
 
 step "host A: take a backup now (copied off the server)"
 # 0.1.0 refuses a second snapshot within the same second as the scheduler's
@@ -123,7 +132,7 @@ step "host B: start and check"
 PID=$!
 health $PORT_B; echo
 if doctor "$BIN_B"; then DOCTOR_OK=1; else DOCTOR_OK=0; fi
-if python3 -I "$HERE/seed_collect.py" collect "http://127.0.0.1:$PORT_B" "$WORK/after-newest"; then
+if drill collect "http://127.0.0.1:$PORT_B" "$ACCOUNT" "$WORK/after-newest"; then
   RESTORED_OK=1
 else
   RESTORED_OK=0
@@ -139,28 +148,14 @@ if [[ $RESTORED_OK == 0 ]]; then
   PID=$!
   health $PORT_B; echo
   doctor "$BIN_B" || true  # diagnosis only: this run has already failed
-  python3 -I "$HERE/seed_collect.py" collect "http://127.0.0.1:$PORT_B" "$WORK/after"
+  drill collect "http://127.0.0.1:$PORT_B" "$ACCOUNT" "$WORK/after"
   stop $PID
 else
   mv "$WORK/after-newest" "$WORK/after"
 fi
 
 step "compare before and after"
-python3 -I - "$WORK/before/manifest.json" "$WORK/after/manifest.json" <<'EOF'
-import json, sys
-a, b = (json.load(open(p)) for p in sys.argv[1:3])
-added = sorted(set(b["instance"]) - set(a["instance"]))
-for key in added:  # fields a newer version adds to /api/instance
-    b["instance"].pop(key)
-same = a == b
-print("instance:", a["instance"] == b["instance"], "| fields only the restoring version reports:", added,
-      "| records:", len(a["records"]), "vs", len(b["records"]))
-for ra, rb in zip(a["records"], b["records"]):
-    print(f"  record {ra['record_id']}: content {ra['meta'].get('content_hash','?')[:16]} chain {ra['meta'].get('chain_hash','?')[:16]} "
-          f"meta equal={ra['meta']==rb['meta']} ack equal={ra['acknowledgment']==rb['acknowledgment']}")
-print("MANIFESTS EQUAL" if same else "MANIFESTS DIFFER")
-sys.exit(0 if same else 1)
-EOF
+drill compare "$WORK/before/manifest.json" "$WORK/after/manifest.json"
 for side in before after; do
   for zip in "$WORK/$side"/*.zip; do
     printf '%s/%s: ' "$side" "$(basename "$zip")"

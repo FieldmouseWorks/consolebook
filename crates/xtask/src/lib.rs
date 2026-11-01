@@ -24,4 +24,5 @@ macro_rules! note {
     }};
 }
 
+pub mod drill;
 pub mod proof;

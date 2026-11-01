@@ -1,9 +1,14 @@
+//! The repository's own tools.
+//!
 //! `cargo xtask proof [--chromium PATH] [--list]`: CONTRIBUTING.md's gate
 //! sequence, run in order, stopping at the first failure, with a receipt
-//! left under `.proof/` (see `xtask::proof`).
+//! left under `.proof/` (see `xtask::proof`). Exit: 0 every gate passed, 1 a
+//! gate failed or the run was interrupted, 2 usage or setup error (nothing
+//! was run).
 //!
-//! Exit: 0 every gate passed, 1 a gate failed or the run was interrupted,
-//! 2 usage or setup error (nothing was run).
+//! `cargo xtask drill seed|collect|compare …`: the restore drill's HTTP side
+//! (see `xtask::drill`). Exit: 0 done (for `compare`, the manifests hold the
+//! same), 1 the drill failed (the manifests differ), 2 usage error.
 
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
@@ -11,6 +16,8 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use xtask::drill::account::Account;
+use xtask::drill::{DrillError, collect, compare, seed};
 use xtask::proof::host::sha256_file;
 use xtask::proof::lex::join;
 use xtask::proof::receipt::{Invocation, Outcome, markdown};
@@ -26,12 +33,96 @@ const USAGE: &str = "usage: cargo xtask proof [--chromium PATH] [--list]
                                        (default: $CONSOLEBOOK_E2E_CHROMIUM if set)
   cargo xtask proof --list             print the parsed sequence and exit";
 
+const DRILL_USAGE: &str = "usage: cargo xtask drill seed BASE_URL SETUP_CODE ACCOUNT OUT_DIR
+       cargo xtask drill collect BASE_URL ACCOUNT OUT_DIR
+       cargo xtask drill compare BEFORE AFTER
+
+  seed      set up the fresh installation at BASE_URL with invented people and
+            records, write its administrator's sign-in to ACCOUNT (a new file),
+            then collect into OUT_DIR
+  collect   sign in with ACCOUNT and write OUT_DIR/manifest.json: every finalized
+            record's version metadata and acknowledgment, and what its export and
+            the installation's export declare, with the exports saved beside it
+  compare   compare two manifest.json files; exit 0 if they hold the same, 1 if not";
+
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
     match args.split_first() {
         Some((first, rest)) if first == "proof" => proof(rest),
+        Some((first, rest)) if first == "drill" => drill(rest),
         _ => {
-            note!("{USAGE}");
+            note!("{USAGE}\n\n{DRILL_USAGE}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn drill(args: &[String]) -> ExitCode {
+    let words: Vec<&str> = args.iter().map(String::as_str).collect();
+    let done = match words.as_slice() {
+        ["-h" | "--help"] => {
+            say!("{DRILL_USAGE}");
+            return ExitCode::SUCCESS;
+        }
+        ["seed", base, code, account, out] => {
+            seed::seed(base, code, Path::new(account)).and_then(|seeded| {
+                say!(
+                    "seeded {} finalized records for enrollment {}",
+                    seeded.records,
+                    seeded.enrollment
+                );
+                collected(base, &seeded.admin, out)
+            })
+        }
+        ["collect", base, account, out] => {
+            Account::read(Path::new(account)).and_then(|admin| collected(base, &admin, out))
+        }
+        ["compare", before, after] => return compared(Path::new(before), Path::new(after)),
+        _ => {
+            note!("{DRILL_USAGE}");
+            return ExitCode::from(2);
+        }
+    };
+    match done {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            note!("drill: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn collected(base: &str, admin: &Account, out: &str) -> Result<(), DrillError> {
+    let collected = collect::collect(base, admin, Path::new(out))?;
+    say!(
+        "collected {} records; manifest sha256 {}",
+        collected.records,
+        collected.sha256
+    );
+    Ok(())
+}
+
+fn compared(before: &Path, after: &Path) -> ExitCode {
+    let read = |path: &Path| -> Result<serde_json::Value, String> {
+        let text = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        serde_json::from_slice(&text).map_err(|e| format!("{}: {e}", path.display()))
+    };
+    let seen = read(before)
+        .and_then(|a| read(after).map(|b| (a, b)))
+        .and_then(|(a, b)| compare::compare(&a, &b).map_err(|e| e.to_string()));
+    match seen {
+        Ok(seen) => {
+            for line in &seen.report {
+                say!("{line}");
+            }
+            if seen.same {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
+        }
+        Err(e) => {
+            note!("drill: {e}");
             ExitCode::from(2)
         }
     }
