@@ -39,12 +39,55 @@ pub(crate) fn shown(value: &serde_json::Value) -> String {
     }
 }
 
-/// `value`'s `key`, or an error that shows what came instead.
+/// `value`'s `key`, or an error that names the keys it has instead.
 pub(crate) fn field<'a>(
     value: &'a serde_json::Value,
     key: &str,
 ) -> Result<&'a serde_json::Value, DrillError> {
     value
         .get(key)
-        .ok_or_else(|| DrillError(format!("expected `{key}` in {value}")))
+        .ok_or_else(|| DrillError(format!("expected `{key}` in {}", described(value))))
+}
+
+/// What a JSON value is, for an error: its kind, and an object's keys, but
+/// never its values. An answer can carry a credential (a new user's
+/// `reset_code`), and an error is printed and logged.
+pub(crate) fn described(value: &serde_json::Value) -> String {
+    use serde_json::Value;
+    match value {
+        Value::Null => "null".to_owned(),
+        Value::Bool(_) => "a boolean".to_owned(),
+        Value::Number(_) => "a number".to_owned(),
+        Value::String(_) => "a string".to_owned(),
+        Value::Array(_) => "a list".to_owned(),
+        Value::Object(map) if map.is_empty() => "an object with no keys".to_owned(),
+        Value::Object(map) => {
+            let keys: Vec<String> = map.keys().map(|k| format!("`{k}`")).collect();
+            format!("an object with keys {}", keys.join(", "))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{described, field};
+
+    #[test]
+    fn an_error_names_keys_and_kinds_never_values() {
+        let created = json!({ "username": "avery.admin", "reset_code": "R3SET-C0DE" });
+        let why = field(&created, "id").unwrap_err().0;
+        assert_eq!(
+            why,
+            "expected `id` in an object with keys `reset_code`, `username`"
+        );
+        for value in [json!("R3SET-C0DE"), json!(["R3SET-C0DE"]), json!({})] {
+            let why = field(&value, "id").unwrap_err().0;
+            assert!(!why.contains("R3SET"), "{why}");
+        }
+        assert_eq!(described(&json!(null)), "null");
+        assert_eq!(described(&json!(7)), "a number");
+        assert_eq!(described(&json!({})), "an object with no keys");
+    }
 }

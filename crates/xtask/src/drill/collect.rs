@@ -14,7 +14,7 @@ use ureq::http::Method;
 
 use super::account::Account;
 use super::client::Client;
-use super::{DrillError, field, shown};
+use super::{DrillError, described, field, shown};
 use crate::proof::host::hex;
 
 /// Record ids are small whole numbers: the walk ends after this many in a
@@ -119,13 +119,14 @@ pub fn record_entry(
         )));
     }
     // The first of the highest version numbers, as a max would take it.
-    let mut newest: Option<&Value> = None;
+    let mut newest: Option<(&Value, i64)> = None;
     for unit in units(export)? {
-        if newest.is_none_or(|best| number(unit) > number(best)) {
-            newest = Some(unit);
+        let (_, number) = unit_key(unit)?;
+        if newest.is_none_or(|(_, best)| number > best) {
+            newest = Some((unit, number));
         }
     }
-    let Some(newest) = newest else {
+    let Some((newest, _)) = newest else {
         return Err(DrillError(format!(
             "record {record_id}'s export holds no versions"
         )));
@@ -161,7 +162,10 @@ pub fn manifest(
 ) -> Result<Value, DrillError> {
     let mut instance = instance.clone();
     let Some(fields) = instance.as_object_mut() else {
-        return Err(DrillError(format!("GET /api/instance: {instance}")));
+        let got = described(&instance);
+        return Err(DrillError(format!(
+            "GET /api/instance: expected an object, not {got}"
+        )));
     };
     fields.remove("commit");
     fields.remove("version");
@@ -171,15 +175,12 @@ pub fn manifest(
             "the installation export declares {scope}"
         )));
     }
-    let mut held: Vec<&Value> = units(installation)?.iter().collect();
+    let held = ordered(units(installation)?)?;
     let mut every: Vec<&Value> = Vec::new();
     for record in records {
         every.extend(units(field(record, "export")?)?);
     }
-    let key = |unit: &&Value| (unit.get("record_id").and_then(Value::as_i64), number(unit));
-    held.sort_by_key(key);
-    every.sort_by_key(key);
-    if held != every {
+    if held != ordered(every)? {
         return Err(DrillError(
             "the installation export does not hold exactly every record's versions".to_owned(),
         ));
@@ -192,13 +193,36 @@ pub fn manifest(
 }
 
 fn units(export: &Value) -> Result<&Vec<Value>, DrillError> {
-    field(export, "units")?
-        .as_array()
-        .ok_or_else(|| DrillError(format!("an export's units aren't a list: {export}")))
+    field(export, "units")?.as_array().ok_or_else(|| {
+        let got = described(&export["units"]);
+        DrillError(format!("an export's `units` is {got}, not a list"))
+    })
 }
 
-fn number(unit: &Value) -> Option<i64> {
-    unit.get("version_number").and_then(Value::as_i64)
+/// A unit's record and version. Every unit has both, as whole numbers, or
+/// the export is wrong: one without them can't be ordered or compared.
+fn unit_key(unit: &Value) -> Result<(i64, i64), DrillError> {
+    let whole = |key: &str| {
+        let value = field(unit, key)?;
+        value.as_i64().ok_or_else(|| {
+            DrillError(format!(
+                "an export's unit has a `{key}` that isn't a whole number but {}",
+                described(value)
+            ))
+        })
+    };
+    Ok((whole("record_id")?, whole("version_number")?))
+}
+
+/// `units` with their keys, in key order (and in their own order where
+/// keys tie, as a stable sort leaves them).
+fn ordered<'a>(units: impl IntoIterator<Item = &'a Value>) -> Result<Vec<&'a Value>, DrillError> {
+    let mut keyed = units
+        .into_iter()
+        .map(|unit| Ok((unit_key(unit)?, unit)))
+        .collect::<Result<Vec<_>, DrillError>>()?;
+    keyed.sort_by_key(|(key, _)| *key);
+    Ok(keyed.into_iter().map(|(_, unit)| unit).collect())
 }
 
 /// `value` as `manifest.json` holds it: keys sorted (`serde_json`'s map is
@@ -303,6 +327,38 @@ mod tests {
         let empty = export(2, &[]);
         let why = check(2, &version(2, 2), &empty).unwrap_err();
         assert_eq!(why, "record 2's export holds no versions");
+    }
+
+    #[test]
+    fn every_unit_has_its_record_and_version() {
+        // Missing or not a whole number, on the newest unit, an older one,
+        // or the only one: the export is wrong.
+        for key in ["record_id", "version_number"] {
+            for bad in [Value::Null, json!("2"), json!(2.5)] {
+                let mut broken = unit(2, 1);
+                if bad.is_null() {
+                    broken.as_object_mut().unwrap().remove(key);
+                } else {
+                    broken[key] = bad.clone();
+                }
+                for units in [
+                    vec![broken.clone(), unit(2, 2)],
+                    vec![unit(2, 2), broken.clone()],
+                    vec![broken.clone()],
+                ] {
+                    let why = check(2, &version(2, 2), &export(2, &units)).unwrap_err();
+                    assert!(why.contains(&format!("`{key}`")), "{key} {bad}: {why}");
+                }
+                // The same broken unit on both sides of the installation's
+                // comparison is still broken.
+                let mut records = records();
+                records[0]["export"]["units"] = json!([broken.clone()]);
+                let why = manifest(&instance(), &records, &installation(&[broken.clone()]))
+                    .unwrap_err()
+                    .0;
+                assert!(why.contains(&format!("`{key}`")), "{key} {bad}: {why}");
+            }
+        }
     }
 
     fn installation(units: &[Value]) -> Value {

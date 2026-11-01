@@ -3,7 +3,7 @@
 
 use serde_json::Value;
 
-use super::{DrillError, field};
+use super::{DrillError, described, field};
 
 /// The verdict, and the lines that show it.
 #[derive(Debug, PartialEq, Eq)]
@@ -73,15 +73,17 @@ pub fn compare(before: &Value, after: &Value) -> Result<Comparison, DrillError> 
 }
 
 fn instance(manifest: &Value) -> Result<&serde_json::Map<String, Value>, DrillError> {
-    field(manifest, "instance")?
-        .as_object()
-        .ok_or_else(|| DrillError(format!("a manifest's instance isn't an object: {manifest}")))
+    field(manifest, "instance")?.as_object().ok_or_else(|| {
+        let got = described(&manifest["instance"]);
+        DrillError(format!("a manifest's `instance` is {got}, not an object"))
+    })
 }
 
 fn records(manifest: &Value) -> Result<&Vec<Value>, DrillError> {
-    field(manifest, "records")?
-        .as_array()
-        .ok_or_else(|| DrillError(format!("a manifest's records aren't a list: {manifest}")))
+    field(manifest, "records")?.as_array().ok_or_else(|| {
+        let got = described(&manifest["records"]);
+        DrillError(format!("a manifest's `records` is {got}, not a list"))
+    })
 }
 
 #[cfg(test)]

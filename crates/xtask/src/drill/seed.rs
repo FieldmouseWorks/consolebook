@@ -9,7 +9,7 @@ use ureq::http::Method;
 
 use super::account::Account;
 use super::client::Client;
-use super::{DrillError, field, shown};
+use super::{DrillError, described, field, shown};
 
 const AGENCY: &str = "Example County Communications";
 const DATES: [&str; 3] = ["2026-06-02", "2026-06-03", "2026-06-04"];
@@ -251,13 +251,38 @@ fn user(admin: &mut Client, base: &str, who: &Person) -> Result<(i64, Client), D
 }
 
 fn list<'a>(value: &'a Value, key: &str) -> Result<&'a Vec<Value>, DrillError> {
-    field(value, key)?
-        .as_array()
-        .ok_or_else(|| DrillError(format!("expected a list in `{key}` of {value}")))
+    field(value, key)?.as_array().ok_or_else(|| {
+        let got = described(&value[key]);
+        DrillError(format!("expected a list in `{key}`, not {got}"))
+    })
 }
 
 fn id(value: &Value) -> Result<i64, DrillError> {
-    field(value, "id")?
-        .as_i64()
-        .ok_or_else(|| DrillError(format!("expected a whole-number `id` in {value}")))
+    field(value, "id")?.as_i64().ok_or_else(|| {
+        let got = described(&value["id"]);
+        DrillError(format!("expected a whole-number `id`, not {got}"))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{id, list};
+
+    #[test]
+    fn an_answer_it_cant_use_is_named_without_its_values() {
+        // A new user's answer holds its reset code: an error says what's
+        // wrong with the answer, never what's in it.
+        let created = |id: serde_json::Value| json!({ "id": id, "reset_code": "R3SET-C0DE" });
+        let why = id(&json!({ "reset_code": "R3SET-C0DE" })).unwrap_err().0;
+        assert_eq!(why, "expected `id` in an object with keys `reset_code`");
+        let why = id(&created(json!("7"))).unwrap_err().0;
+        assert_eq!(why, "expected a whole-number `id`, not a string");
+        assert_eq!(id(&created(json!(7))), Ok(7));
+        let why = list(&json!({ "users": "R3SET-C0DE" }), "users")
+            .unwrap_err()
+            .0;
+        assert_eq!(why, "expected a list in `users`, not a string");
+    }
 }
