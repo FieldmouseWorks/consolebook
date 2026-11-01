@@ -54,8 +54,22 @@ jobs:
         run: |
           rustup toolchain install
           rustup target add ${{ matrix.target }}
-          sudo apt-get update -q
-          sudo apt-get install -y -q musl-tools
+      # musl-gcc compiles bundled SQLite's C for the static target. A mirror
+      # that stops answering ends an attempt in minutes rather than holding
+      # the job to its timeout: apt retries each file, and the step tries
+      # three times.
+      - name: musl-gcc
+        timeout-minutes: 15
+        run: |
+          apt() {
+            timeout 120 sudo apt-get -q -o Acquire::Retries=3 \
+              -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 "$@"
+          }
+          for attempt in 1 2 3; do
+            apt update && apt install -y musl-tools && exit 0
+            echo "::warning::apt attempt $attempt failed"
+          done
+          exit 1
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
