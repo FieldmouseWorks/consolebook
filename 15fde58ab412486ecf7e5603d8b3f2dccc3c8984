@@ -8,7 +8,7 @@
   "pr": 176,
   "url": "https://github.com/fieldmouseworks/consolebook/pull/176",
   "summary": "xtask: the proof runner is Rust, as cargo xtask proof",
-  "task": "fieldmouseworks/consolebook#175",
+  "task": "FieldmouseWorks/consolebook#175",
   "author": {
     "kind": "agent",
     "login": "TusanHomichi",
@@ -174,6 +174,42 @@
       "check": "build-x86_64",
       "result": "pass",
       "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41250133647/job/124691014593"
+    },
+    {
+      "kind": "ci",
+      "check": "house",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41254859508/job/124695746664"
+    },
+    {
+      "kind": "ci",
+      "check": "house/title (#176)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41254859508"
+    },
+    {
+      "kind": "ci",
+      "check": "house/rust-first (#176)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41254859508"
+    },
+    {
+      "kind": "ci",
+      "check": "house/timers (#176)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41254859508"
+    },
+    {
+      "kind": "ci",
+      "check": "house/file-size (#176)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41254859508"
+    },
+    {
+      "kind": "ci",
+      "check": "house/model-names (#176)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41254859508"
     }
   ]
 }
