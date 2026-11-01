@@ -15,7 +15,6 @@
       rust = {
         testInputs = pkgs: [ pkgs.git ];
       };
-      python = { };
       node = { };
       # The repository guards read the tracked tree through git, so each runs
       # in a fresh commit of the flake's source (which is the tracked files).

@@ -47,7 +47,10 @@ contract names.
 `crates/xtask` is the repository's own tooling, in Rust, run as
 `cargo xtask NAME` and shipped in no release. `cargo xtask proof` runs that
 sequence as written and leaves a receipt in the ignored `.proof/`;
-`.agents/skills/consolebook-proof/` routes changes to it.
+`.agents/skills/consolebook-proof/` routes changes to it. `cargo xtask drill`
+is the scripted [restore drill](restore-drill.md)'s HTTP side: it seeds the
+installation the drill loses, collects what an installation holds, and
+compares the two. Its tests run it against a live server.
 
 Packet membership and timeline verification tests live in
 `tests/trainee_packet/pin_history.rs`; the parent packet test module owns

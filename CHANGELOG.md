@@ -30,6 +30,10 @@ not a production-readiness statement.
   the installed server still needs no Node.js.
 - The local gate runner is `cargo xtask proof` (was `scripts/proof.py`), so
   running the gates no longer needs Python.
+- The scripted restore drill's seed, collect and compare steps are
+  `cargo xtask drill` (were `scripts/restore-drill/seed_collect.py` and
+  Python inside `run.sh`), so nothing in the repository needs Python. The
+  drill's passwords are made for each run.
 
 ## [0.3.0] - 2026-10-15
 

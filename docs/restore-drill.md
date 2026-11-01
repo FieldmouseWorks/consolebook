@@ -94,9 +94,11 @@ surprised you. File each failure as an issue, without real data.
 
 `scripts/restore-drill/run.sh` runs the same drill on one Linux machine.
 Two data directories stand in for the two hosts, and the copy directory is
-on `/dev/shm`, another filesystem. `seed_collect.py` creates the invented
-records over the HTTP API and collects the evidence: version metadata,
-acknowledgments, and exports.
+on `/dev/shm`, another filesystem. `cargo xtask drill` (`crates/xtask`)
+creates the invented records over the HTTP API and collects the evidence:
+version metadata, acknowledgments, and exports. The script builds it first,
+so it needs the repository's Rust toolchain. The administrator's password is
+made for each run and kept in the work directory's `account.json`.
 
 ```sh
 scripts/restore-drill/run.sh consolebook-linux-x86_64.tar.gz consolebook-linux-x86_64.tar.gz.sha256 /tmp/drill [HOST_B_BINARY]

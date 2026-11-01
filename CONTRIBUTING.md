@@ -151,8 +151,9 @@ pull requests, and the [release workflow](.github/workflows/release.yml)
 builds the static Linux archives and installs and upgrades them on a systemd
 runner. The [flake workflow](.github/workflows/flake.yml) runs `nix flake check`
 ([flake.nix](flake.nix)): format, clippy, Rust tests without embedded web
-assets (the proof runner's included), Python syntax, and the guidance guard,
-each in the Nix sandbox. The [house workflow](.github/workflows/house.yml)
+assets (the proof runner's and the restore drill's included), and the
+guidance guard, each in the Nix sandbox. The
+[house workflow](.github/workflows/house.yml)
 holds each pull request to the house rules a machine can read, its title and
 body included. Focused local tests help development but do
 not replace required gates. Preserve exact failure evidence and report only
