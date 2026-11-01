@@ -1,0 +1,167 @@
+{
+  "conary": "note v1",
+  "change": "18dz00vvpm3sg7h2qanyqm9xgd",
+  "repo": {
+    "owner": "fieldmouseworks",
+    "name": "consolebook"
+  },
+  "pr": 180,
+  "url": "https://github.com/fieldmouseworks/consolebook/pull/180",
+  "summary": "xtask: the restore drill's seed, collect and compare are Rust, as cargo xtask drill",
+  "task": "fieldmouseworks/consolebook#179",
+  "author": {
+    "kind": "agent",
+    "login": "TusanHomichi",
+    "session": "https://claude.ai/code/session_01BkHcyCBcidmXexVLwsRKbD"
+  },
+  "landing": {
+    "revision": "859037f7c320df24d97502e935fd9771ae21703f948a546437d87afc06ed38f5",
+    "before": "54142fd008b5e4cf7c56882640a401d10c99797d",
+    "after": "7ca00ae48c25188d07639cc6f67c76749d0ffc50",
+    "by": {
+      "kind": "status",
+      "login": "fieldmouseworks-steward[bot]"
+    },
+    "at": 1793500213880
+  },
+  "evidence": [
+    {
+      "kind": "ci",
+      "check": "house",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41264440510/job/124724194443"
+    },
+    {
+      "kind": "ci",
+      "check": "house/title (#180)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41264440510"
+    },
+    {
+      "kind": "ci",
+      "check": "house/rust-first (#180)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41264440510"
+    },
+    {
+      "kind": "ci",
+      "check": "house/timers (#180)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41264440510"
+    },
+    {
+      "kind": "ci",
+      "check": "house/file-size (#180)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41264440510"
+    },
+    {
+      "kind": "ci",
+      "check": "house/model-names (#180)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41264440510"
+    },
+    {
+      "kind": "ci",
+      "check": "Analyze (javascript-typescript)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41264437298/job/124724188635"
+    },
+    {
+      "kind": "ci",
+      "check": "Analyze (python)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41264437298/job/124724188587"
+    },
+    {
+      "kind": "ci",
+      "check": "Analyze (actions)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41264437298/job/124724188459"
+    },
+    {
+      "kind": "ci",
+      "check": "house",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41264542889/job/124724502826"
+    },
+    {
+      "kind": "ci",
+      "check": "house/title (#180)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41264542889"
+    },
+    {
+      "kind": "ci",
+      "check": "house/rust-first (#180)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41264542889"
+    },
+    {
+      "kind": "ci",
+      "check": "house/timers (#180)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41264542889"
+    },
+    {
+      "kind": "ci",
+      "check": "house/file-size (#180)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41264542889"
+    },
+    {
+      "kind": "ci",
+      "check": "house/model-names (#180)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41264542889"
+    },
+    {
+      "kind": "review",
+      "check": "codex",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/pull/180#pullrequestreview-5726002429"
+    },
+    {
+      "kind": "ci",
+      "check": "build-x86_64",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41264440407/job/124724194708"
+    },
+    {
+      "kind": "ci",
+      "check": "build-aarch64",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41264440407/job/124724194477"
+    },
+    {
+      "kind": "review",
+      "check": "codex",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/pull/180#pullrequestreview-5726004299"
+    },
+    {
+      "kind": "ci",
+      "check": "CodeQL",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/runs/124724308016"
+    },
+    {
+      "kind": "ci",
+      "check": "Analyze (rust)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41264437298/job/124724188615"
+    },
+    {
+      "kind": "ci",
+      "check": "check / check",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41264440833/job/124724195645"
+    },
+    {
+      "kind": "ci",
+      "check": "fmt-clippy-test",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/41264440356/job/124724194239"
+    }
+  ]
+}
