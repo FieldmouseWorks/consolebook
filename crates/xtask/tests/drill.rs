@@ -227,9 +227,11 @@ fn the_commands_run_the_drill_and_exit_by_its_verdict() {
     );
     let unread = xtask(&["collect", &server.base, &missing, &path("again")]);
     assert_eq!(unread.status.code(), Some(1), "{unread:?}");
+    // Too few words, or an unknown command: a usage error, read before any
+    // file or server is.
     for args in [
         &[][..],
-        &["seed", &server.base, &account][..],
+        &["seed", &server.base, "account.json"][..],
         &["collect", &server.base][..],
         &["compare", &before_manifest][..],
         &["verify"][..],
