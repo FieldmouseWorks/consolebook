@@ -1,0 +1,95 @@
+{
+  "conary": "note v1",
+  "change": "1be0pqkecy4jryewx9b6evc549",
+  "repo": {
+    "owner": "fieldmouseworks",
+    "name": "consolebook"
+  },
+  "pr": 185,
+  "url": "https://github.com/fieldmouseworks/consolebook/pull/185",
+  "summary": "deps: bump the rust-minor-patch group with 2 updates",
+  "task": null,
+  "author": {
+    "kind": "bot",
+    "login": "dependabot[bot]",
+    "session": null
+  },
+  "landing": {
+    "revision": "6ce0d440f15d23592ee2924ef92d34b6bb25d94d75b631fe837e545f6187e694",
+    "before": "1573619628bac35fbaa832fedc5cba4ac6ded638",
+    "after": "07e7919ef913bcb58fcfee484780db2bd6c68c41",
+    "by": {
+      "kind": "status",
+      "login": "fieldmouseworks-steward[bot]"
+    },
+    "at": 1793898605856
+  },
+  "evidence": [
+    {
+      "kind": "ci",
+      "check": "house",
+      "result": "fail",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42069467778/job/127393038495"
+    },
+    {
+      "kind": "ci",
+      "check": "house/title (#185)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42069467778"
+    },
+    {
+      "kind": "ci",
+      "check": "house/rust-first (#185)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42069467778"
+    },
+    {
+      "kind": "ci",
+      "check": "house/timers (#185)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42069467778"
+    },
+    {
+      "kind": "ci",
+      "check": "build-aarch64",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42069467814/job/127393041022"
+    },
+    {
+      "kind": "ci",
+      "check": "build-x86_64",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42069467814/job/127393040263"
+    },
+    {
+      "kind": "ci",
+      "check": "check / check",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42069469237/job/127393044323"
+    },
+    {
+      "kind": "ci",
+      "check": "house",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42069467778/job/127399864568"
+    },
+    {
+      "kind": "ci",
+      "check": "house/file-size (#185)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42069467778"
+    },
+    {
+      "kind": "ci",
+      "check": "house/model-names (#185)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42069467778"
+    },
+    {
+      "kind": "ci",
+      "check": "fmt-clippy-test",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42069468290/job/127393041217"
+    }
+  ]
+}
