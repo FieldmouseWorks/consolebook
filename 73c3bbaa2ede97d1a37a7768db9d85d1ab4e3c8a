@@ -1,0 +1,89 @@
+{
+  "conary": "note v1",
+  "change": "34b2pqxsa3f2rggyr4q3say1as",
+  "repo": {
+    "owner": "fieldmouseworks",
+    "name": "consolebook"
+  },
+  "pr": 186,
+  "url": "https://github.com/fieldmouseworks/consolebook/pull/186",
+  "summary": "deps: bump signal-hook from 0.3.18 to 0.4.5",
+  "task": null,
+  "author": {
+    "kind": "bot",
+    "login": "dependabot[bot]",
+    "session": null
+  },
+  "landing": {
+    "revision": "fdeafe4d681aca57110133502f2e45f5183370d2df504b9c88dda2ae9ff1f9b6",
+    "before": "07e7919ef913bcb58fcfee484780db2bd6c68c41",
+    "after": "73c3bbaa2ede97d1a37a7768db9d85d1ab4e3c8a",
+    "by": {
+      "kind": "status",
+      "login": "fieldmouseworks-steward[bot]"
+    },
+    "at": 1793899148628
+  },
+  "evidence": [
+    {
+      "kind": "ci",
+      "check": "house/title (#186)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42069487747"
+    },
+    {
+      "kind": "ci",
+      "check": "house/rust-first (#186)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42069487747"
+    },
+    {
+      "kind": "ci",
+      "check": "house/timers (#186)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42069487747"
+    },
+    {
+      "kind": "ci",
+      "check": "house",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42069487747/job/127393130434"
+    },
+    {
+      "kind": "ci",
+      "check": "house/file-size (#186)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42069487747"
+    },
+    {
+      "kind": "ci",
+      "check": "house/model-names (#186)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42069487747"
+    },
+    {
+      "kind": "ci",
+      "check": "build-aarch64",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42069481783/job/127393093594"
+    },
+    {
+      "kind": "ci",
+      "check": "build-x86_64",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42069481783/job/127393092857"
+    },
+    {
+      "kind": "ci",
+      "check": "check / check",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42069482474/job/127393094762"
+    },
+    {
+      "kind": "ci",
+      "check": "fmt-clippy-test",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42069481768/job/127393091382"
+    }
+  ]
+}
