@@ -55,7 +55,9 @@ Fix causes and prove the contract, including in-scope defects and duplicated
 authority. File exact-evidence issues for separate work. Heuristics may assist
 discovery or presentation; authorization, integrity, retention, disposition,
 and exports require typed contracts. Investigate intermittent failures rather
-than retrying until green.
+than retrying until green, and report exact failures. Design documents are not
+runtime proof, and unit tests are not recovery drills. Use `thiserror` for
+library errors and `anyhow` at application boundaries.
 
 Keep modules focused on a domain capability. For Rust source files:
 
@@ -104,7 +106,8 @@ lockfile. `web/package.json` declares Node.js `>=24`, and `@types/node` follows 
 floor; CI builds with Node.js 24.
 Node.js is build-time only.
 
-From the repository root, run in this order:
+From the repository root, run in this order (the web build comes first
+because the server embeds it):
 
 ```sh
 scripts/check-guidance-names.sh
