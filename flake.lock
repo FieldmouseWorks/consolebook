@@ -9,25 +9,27 @@
         "rust-overlay": "rust-overlay"
       },
       "locked": {
-        "lastModified": 1793482135,
-        "narHash": "sha256-j0eFd19cc781Y94t+Q39EKEpAW9y0oE5KWnl3ZMXglw=",
-        "ref": "refs/heads/main",
-        "rev": "aa79850c8464fd00a62afbe70ecd940aadc65ae7",
-        "revCount": 312,
+        "lastModified": 1794158867,
+        "narHash": "sha256-9cn7MlxxJWV1KIJ6XZ989WTm8trxHNoX3OtGPDy6iSg=",
+        "ref": "main",
+        "rev": "1a477ab7eebcf92953fda9b2d8f821d582d592e9",
+        "revCount": 503,
         "type": "git",
         "url": "https://github.com/FieldmouseWorks/burrow"
       },
       "original": {
+        "ref": "main",
+        "rev": "1a477ab7eebcf92953fda9b2d8f821d582d592e9",
         "type": "git",
         "url": "https://github.com/FieldmouseWorks/burrow"
       }
     },
     "crane": {
       "locked": {
-        "lastModified": 1792350552,
-        "narHash": "sha256-292lvpvxTGKryKxh3/3tcIVi85CwYGdl4oOi113Sob8=",
+        "lastModified": 1793836618,
+        "narHash": "sha256-TREenflwEjxOSq292FYwbc3kEm7TDRtXCZRNWEdjBmg=",
         "ref": "refs/heads/master",
-        "rev": "e675a36b7377bebe41d548388a2501cbb16d380d",
+        "rev": "79fd63528501446749c09f08cad486a58c7d173e",
         "shallow": true,
         "type": "git",
         "url": "https://github.com/ipetkov/crane"
@@ -63,10 +65,10 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1793294725,
-        "narHash": "sha256-loLMnbbS4KhmG2ln9EY6f0YMNCA273Yx02oWYQ9IMeE=",
+        "lastModified": 1793865203,
+        "narHash": "sha256-/cpdPHaySDIyCgZI6EWngiM6jK3YLUNzv1b7lTzy6Bk=",
         "ref": "nixos-26.05",
-        "rev": "6f06d204d8f2d8761d9da78778745974a3216381",
+        "rev": "c56a87d8e41ce69bd2af57eb35dcc117a9dfca33",
         "shallow": true,
         "type": "git",
         "url": "https://github.com/NixOS/nixpkgs"
@@ -80,10 +82,10 @@
     },
     "nixpkgs-unstable": {
       "locked": {
-        "lastModified": 1793341285,
-        "narHash": "sha256-Y1CiZ4SoBUjLQyQM/pY+rS2dXD3CHLPstF0lmOc73D4=",
+        "lastModified": 1793876309,
+        "narHash": "sha256-Wojg9lIH/hDH91iDVH2/EPw8oDSpxjxhXONbU1yf4Zg=",
         "ref": "nixos-unstable",
-        "rev": "1c89083e451e891152365b799595cf7790a43325",
+        "rev": "f9a75f41be3a74eab55d3a7679d34ad6cc0da977",
         "shallow": true,
         "type": "git",
         "url": "https://github.com/NixOS/nixpkgs"
@@ -108,10 +110,10 @@
         ]
       },
       "locked": {
-        "lastModified": 1793434469,
-        "narHash": "sha256-+sgVNI2c67di+XIeMaz5KSei4T65kX68s5Nl0E5Gzbc=",
+        "lastModified": 1794127728,
+        "narHash": "sha256-QhZ104DwHvvMxWxmI13zdppISE27UmdqhRI2VwBg/yU=",
         "ref": "refs/heads/master",
-        "rev": "6ecf534a7c16e7c969f26838fdd8c93597ae93f3",
+        "rev": "51c6dc40d18552701f7c5c62e3f7a5fc899f7132",
         "shallow": true,
         "type": "git",
         "url": "https://github.com/oxalica/rust-overlay"
