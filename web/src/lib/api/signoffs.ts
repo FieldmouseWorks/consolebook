@@ -1,9 +1,4 @@
-// Typed client for the task-signoff reads (issue #49; ADR 0021).
-//
-// The complete-history read is the one a trainee uses on their own
-// enrollment. The pinned-version matrix beside it stays the recording
-// interface's read, unchanged: this module adds a contract rather than
-// widening that one.
+// Typed task-signoff recording, matrix, and retained-history contracts.
 import { request } from './transport';
 
 /** The closed signoff kind set (ADR 0013). */
@@ -69,4 +64,34 @@ export function signoffStateLabel(task: SignoffTaskRow): string {
 		case null:
 			return 'Not signed off';
 	}
+}
+
+export interface SignoffTask {
+	task_id: number;
+	competency_category: string;
+	competency_name: string;
+	prompt: string;
+	kind: SignoffKind | null;
+	reason: string | null;
+	signed_by_display_name: string | null;
+	signed_at: number | null;
+	history: number;
+}
+
+export function signoffMatrix(
+	enrollmentId: number
+): Promise<{ tasks: SignoffTask[] }> {
+	return request(`/api/enrollments/${enrollmentId}/signoffs`);
+}
+
+export function recordSignoff(
+	enrollmentId: number,
+	taskId: number,
+	kind: SignoffKind,
+	reason?: string
+): Promise<void> {
+	return request(`/api/enrollments/${enrollmentId}/signoffs`, {
+		method: 'POST',
+		body: JSON.stringify({ task_id: taskId, kind, reason })
+	});
 }

@@ -102,10 +102,16 @@ snapshot; check where the decision is evaluated. See the
 The UI is a client-routed SPA. `web/src/routes/+layout.ts` guards setup and
 authentication; `+layout.svelte` owns navigation and shared styling.
 `web/src/lib/api/transport.ts` owns shared same-origin requests and typed errors.
-`web/src/lib/api.ts` keeps compatible legacy imports and domain calls;
-`web/src/lib/api/retention.ts` owns retention contracts.
+`web/src/lib/api.ts` is the compatibility re-export entrypoint. Domain contracts
+and calls live in `web/src/lib/api/`: `session.ts` owns authentication and notices,
+`installation.ts` setup/backup status, `users.ts` user administration, `programs.ts`
+program configuration, `enrollments.ts` lifecycle and assignments, `sessions.ts`
+training periods, `drafts.ts` authoring and review, `records.ts` finalized records,
+acknowledgments and amendments, `summaries.ts` summary links, `exports.ts` archive
+downloads, and `retention.ts` retention. Each uses the shared transport; domain
+modules import cross-domain types directly rather than through the barrel.
 `web/src/lib/retention/` owns policy editing, hold editing, and authority controls.
-`web/src/lib/api/signoffs.ts` owns the task-signoff read contract (#49) and
+`web/src/lib/api/signoffs.ts` owns task-signoff recording, matrix, and history contracts (#49) and
 `web/src/lib/signoffs/` its read-only presentation.
 `web/src/lib/drafts/` owns the draft working copy, its autosave chain, and the
 refused-save recovery buffer (#34; ownership boundary of #59).

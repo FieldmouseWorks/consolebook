@@ -29,6 +29,12 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 	if (response.status === 204) {
 		return undefined as T;
 	}
+	await requireOk(response);
+	return (await response.json()) as T;
+}
+
+/** Shared typed refusal handling for JSON calls and archive downloads. */
+export async function requireOk(response: Response): Promise<void> {
 	if (!response.ok) {
 		let body: ApiErrorBody;
 		try {
@@ -38,5 +44,4 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 		}
 		throw new ApiError(response.status, body);
 	}
-	return (await response.json()) as T;
 }
