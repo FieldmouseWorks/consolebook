@@ -139,6 +139,48 @@
       "check": "fmt-clippy-test",
       "result": "pass",
       "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42507494589/job/128813182661"
+    },
+    {
+      "kind": "ci",
+      "check": "house",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42510202480/job/128821413576"
+    },
+    {
+      "kind": "ci",
+      "check": "house/title (#191)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42510202480"
+    },
+    {
+      "kind": "ci",
+      "check": "house/rust-first (#191)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42510202480"
+    },
+    {
+      "kind": "ci",
+      "check": "house/timers (#191)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42510202480"
+    },
+    {
+      "kind": "ci",
+      "check": "house/file-size (#191)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42510202480"
+    },
+    {
+      "kind": "ci",
+      "check": "house/guide-size (#191)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42510202480"
+    },
+    {
+      "kind": "ci",
+      "check": "house/model-names (#191)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/42510202480"
     }
   ]
 }
