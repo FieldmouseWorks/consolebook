@@ -20,7 +20,7 @@ tests show what is implemented. [Roadmap](roadmap.md) owns milestone status.
 | Capabilities and assignments | `capabilities.rs`, `assignments.rs`, `draft_access.rs` | [ADR 0010](decisions/0010-service-owned-authorization-boundary.md), [Domain model](domain-model.md) |
 | Program configuration | `programs.rs`, `programs/content.rs`, `programs/persistence.rs`, `program_export.rs` | [ADR 0007](decisions/0007-program-version-configuration-model.md), [Program format](formats/program-version-export.md) |
 | Enrollment and training sessions | `enrollments.rs`, `lifecycle.rs`, `training_sessions.rs`, `session_membership.rs`, `session_time.rs` | [ADR 0008](decisions/0008-session-draft-and-attribution-model.md), [ADR 0009](decisions/0009-session-local-time-resolution.md), [ADR 0018](decisions/0018-enrollment-event-reference-shape.md) |
-| Drafts and review | `evaluation_drafts.rs`, `draft_content.rs`, `draft_review.rs` | [ADR 0008](decisions/0008-session-draft-and-attribution-model.md), [ADR 0010](decisions/0010-service-owned-authorization-boundary.md) |
+| Drafts and review | `evaluation_drafts.rs`, `evaluation_drafts/workspace.rs`, `draft_content.rs`, `draft_review.rs` | [ADR 0008](decisions/0008-session-draft-and-attribution-model.md), [ADR 0010](decisions/0010-service-owned-authorization-boundary.md) |
 | Finalization and canonical bytes | `finalization.rs`, `canonical.rs`, `record_envelope.rs` | [Integrity](records-integrity.md), [ADR 0011](decisions/0011-canonical-record-format-and-finalization.md) |
 | Acknowledgments and amendments | `acknowledgments.rs`, `amendments.rs` | [Domain model](domain-model.md), [ADR 0012](decisions/0012-amendment-reopening-state-machine.md) |
 | Summaries and signoffs | `summaries.rs`, `task_signoffs.rs` | [ADR 0013](decisions/0013-weekly-summaries-and-task-signoffs.md), [ADR 0021](decisions/0021-trainee-signoff-history-read.md) |
@@ -88,6 +88,11 @@ and its domain child modules own concurrency proof.
 owns configuration vocabulary and validation; `programs/persistence.rs` owns
 content persistence and caller-transaction inserts. Public imports remain under
 `programs`.
+`evaluation_drafts.rs` owns draft workflow transitions, record loading, status
+derivation, and contributor-event appending. `evaluation_drafts/workspace.rs`
+owns the workspace snapshot projection and its response types; public imports
+remain under `evaluation_drafts`.
+
 A transaction's presence alone does not prove authorization shares its
 snapshot; check where the decision is evaluated. See the
 [domain-model qualification](domain-model.md#application-service-invariants).
