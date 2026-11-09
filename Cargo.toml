@@ -18,3 +18,16 @@ pedantic = { level = "warn", priority = -1 }
 # every public function is pre-alpha and changing shape.
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
+
+# RUSTSEC-2026-0459 (#196): the bundled SQLite before 3.54 can return
+# uninitialized memory for a crafted database and `-wal` pair. sqlx 0.9.0,
+# the latest release, caps libsqlite3-sys below 0.38; upstream raised the cap
+# in launchbadge/sqlx#4502 after that release. Every sqlx crate comes from
+# that one commit so they stay one version. Delete this table once a sqlx
+# release includes #4502.
+[patch.crates-io]
+sqlx = { git = "https://github.com/launchbadge/sqlx", rev = "10462fa4414c6c7f1ed1d39bb31678e3b726878c" }
+sqlx-core = { git = "https://github.com/launchbadge/sqlx", rev = "10462fa4414c6c7f1ed1d39bb31678e3b726878c" }
+sqlx-macros = { git = "https://github.com/launchbadge/sqlx", rev = "10462fa4414c6c7f1ed1d39bb31678e3b726878c" }
+sqlx-macros-core = { git = "https://github.com/launchbadge/sqlx", rev = "10462fa4414c6c7f1ed1d39bb31678e3b726878c" }
+sqlx-sqlite = { git = "https://github.com/launchbadge/sqlx", rev = "10462fa4414c6c7f1ed1d39bb31678e3b726878c" }
