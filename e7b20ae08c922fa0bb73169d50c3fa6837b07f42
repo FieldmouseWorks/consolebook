@@ -1,0 +1,144 @@
+{
+  "conary": "note v1",
+  "change": "2j12wd9fc73tnfg6j7xtphhfva",
+  "repo": {
+    "owner": "fieldmouseworks",
+    "name": "consolebook"
+  },
+  "pr": 207,
+  "url": "https://github.com/fieldmouseworks/consolebook/pull/207",
+  "summary": "deps: update fieldmouseworks/burrow to 4e3957f",
+  "task": null,
+  "author": {
+    "kind": "bot",
+    "login": "fieldmouseworks-workers[bot]",
+    "session": null
+  },
+  "class": "R0",
+  "landing": {
+    "revision": "d7fe89046fc351224d2e4500964f0e7fc12b854ef8ea7419e86fe4b4e93dbb5d",
+    "before": "f919a4ce1a7c6173e33bc4d305a23d92087ced3c",
+    "after": "e7b20ae08c922fa0bb73169d50c3fa6837b07f42",
+    "by": {
+      "kind": "status",
+      "login": "fieldmouseworks-steward[bot]"
+    },
+    "at": 1794472362304
+  },
+  "evidence": [
+    {
+      "kind": "ci",
+      "check": "check / lane into main",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/43181146904/job/131057151262"
+    },
+    {
+      "kind": "ci",
+      "check": "check / commits",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/43181146904/job/131057151176"
+    },
+    {
+      "kind": "ci",
+      "check": "check / negative",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/43181146904/job/131057150947"
+    },
+    {
+      "kind": "ci",
+      "check": "house",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/43181146654/job/131057147922"
+    },
+    {
+      "kind": "ci",
+      "check": "Analyze (actions)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/43181142094/job/131057139128"
+    },
+    {
+      "kind": "ci",
+      "check": "Analyze (javascript-typescript)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/43181142094/job/131057138877"
+    },
+    {
+      "kind": "ci",
+      "check": "renovate/stability-days",
+      "result": "pass",
+      "source": "https://docs.renovatebot.com/key-concepts/minimum-release-age/"
+    },
+    {
+      "kind": "ci",
+      "check": "house/title (#207)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/43181146654"
+    },
+    {
+      "kind": "ci",
+      "check": "house/rust-first (#207)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/43181146654"
+    },
+    {
+      "kind": "ci",
+      "check": "house/timers (#207)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/43181146654"
+    },
+    {
+      "kind": "ci",
+      "check": "house/file-size (#207)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/43181146654"
+    },
+    {
+      "kind": "ci",
+      "check": "house/guide-size (#207)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/43181146654"
+    },
+    {
+      "kind": "ci",
+      "check": "house/model-names (#207)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/43181146654"
+    },
+    {
+      "kind": "ci",
+      "check": "CodeQL",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/runs/131057375299"
+    },
+    {
+      "kind": "ci",
+      "check": "build-x86_64",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/43181146652/job/131057148708"
+    },
+    {
+      "kind": "ci",
+      "check": "build-aarch64",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/43181146652/job/131057148394"
+    },
+    {
+      "kind": "ci",
+      "check": "Analyze (rust)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/43181142094/job/131057139206"
+    },
+    {
+      "kind": "ci",
+      "check": "check / check",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/43181146904/job/131057198107"
+    },
+    {
+      "kind": "ci",
+      "check": "fmt-clippy-test",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/43181146402/job/131057147315"
+    }
+  ]
+}
