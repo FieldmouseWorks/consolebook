@@ -1,7 +1,7 @@
 {
   description = "Consolebook";
 
-  inputs.burrow.url = "git+https://github.com/FieldmouseWorks/burrow?ref=main&rev=202d1c06990656145a30a290b8dd134f61006b4a";
+  inputs.burrow.url = "git+https://github.com/FieldmouseWorks/burrow?ref=main&rev=9c6ad0248c58f0fe1d5fcc6bc6d97f72361502b9";
 
   # `nix develop` for the toolchains, `nix flake check` for the gate (see
   # burrow's lib/project.nix). The web, embedded-asset, browser and
