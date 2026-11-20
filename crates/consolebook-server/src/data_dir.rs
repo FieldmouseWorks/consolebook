@@ -65,4 +65,10 @@ impl DataDir {
     pub fn instance(&self) -> PathBuf {
         self.root.join("instance")
     }
+
+    /// Path to the installation's durable disposition recovery ledger (ADR 0030).
+    #[must_use]
+    pub fn disposition_ledger(&self) -> PathBuf {
+        self.instance().join("disposition-ledger.json")
+    }
 }

@@ -58,11 +58,33 @@ pub struct CopyReport {
 /// Copies one validated local snapshot into `copy_dir` and prunes there.
 ///
 /// Refuses a missing or non-directory target, one on the snapshot's own
-/// filesystem, one holding another installation's backups, and an existing
-/// copy of the same name. A copy that does not match the snapshot, or whose
-/// rename cannot be made durable, is removed so the next attempt makes it
-/// again; the local snapshot is never touched.
+/// filesystem, one holding another installation's backups, an existing copy
+/// of the same name, or any snapshot containing records listed in the
+/// installation's disposition recovery ledger (ADR 0030). A copy that does not
+/// match the snapshot, or whose rename cannot be made durable, is removed so
+/// the next attempt makes it again; the local snapshot is never touched.
 pub async fn copy_snapshot(snapshot: &Path, copy_dir: &Path, keep: usize) -> Result<CopyReport> {
+    copy_snapshot_inner(None, snapshot, copy_dir, keep).await
+}
+
+/// [`copy_snapshot`] with an explicit [`DataDir`] so local recovery evidence
+/// (`data/instance/disposition-ledger.json` and the live database) is checked
+/// and mirrored alongside the clean copy.
+pub async fn copy_snapshot_with_data_dir(
+    data_dir: &DataDir,
+    snapshot: &Path,
+    copy_dir: &Path,
+    keep: usize,
+) -> Result<CopyReport> {
+    copy_snapshot_inner(Some(data_dir), snapshot, copy_dir, keep).await
+}
+
+async fn copy_snapshot_inner(
+    data_dir: Option<&DataDir>,
+    snapshot: &Path,
+    copy_dir: &Path,
+    keep: usize,
+) -> Result<CopyReport> {
     let name = snapshot
         .file_name()
         .context("snapshot path has no file name")?
@@ -86,6 +108,9 @@ pub async fn copy_snapshot(snapshot: &Path, copy_dir: &Path, keep: usize) -> Res
         bail!("backup copy directory {}: {problem}", copy_dir.display());
     }
     ensure_same_installation(snapshot, copy_dir).await?;
+    let merged_ledger =
+        crate::disposition_recovery::verify_snapshot_for_publication(data_dir, snapshot, copy_dir)
+            .await?;
     let target = copy_dir.join(&name);
     if target.exists() {
         bail!(
@@ -124,6 +149,10 @@ pub async fn copy_snapshot(snapshot: &Path, copy_dir: &Path, keep: usize) -> Res
             target.display()
         )));
     }
+    if let Some(ledger) = merged_ledger {
+        let mirror_path = copy_dir.join(crate::disposition_recovery::DISPOSITION_LEDGER_FILENAME);
+        crate::disposition_recovery::write_ledger_atomic(&mirror_path, &ledger)?;
+    }
     let pruned = backup::prune_in(copy_dir, keep)?;
     Ok(CopyReport {
         copy: target,
@@ -135,10 +164,11 @@ pub async fn copy_snapshot(snapshot: &Path, copy_dir: &Path, keep: usize) -> Res
 /// Copies the newest local snapshot when the copy directory lacks it, so a
 /// copy that failed (or a copy directory added later) catches up without
 /// waiting for the next backup. When the newest copy is already there, it
-/// finishes retention instead, which a prune that failed after its copy
-/// left undone; that prune deletes nothing until the directory is known to
+/// finishes retention and mirrors any pending disposition recovery ledger
+/// updates instead; that prune deletes nothing until the directory is known to
 /// be this installation's, since a file of the same name may be another's.
-/// Returns `None` when no copy was made.
+/// Refuses to copy or republish any snapshot containing lawfully disposed
+/// records (ADR 0030). Returns `None` when no copy was made.
 pub async fn catch_up(
     data_dir: &DataDir,
     copy_dir: &Path,
@@ -151,10 +181,23 @@ pub async fn catch_up(
         .file_name()
         .context("snapshot path has no file name")?;
     if !copy_dir.join(name).exists() {
-        return copy_snapshot(&newest, copy_dir, keep).await.map(Some);
+        return copy_snapshot_with_data_dir(data_dir, &newest, copy_dir, keep)
+            .await
+            .map(Some);
     }
     if let Some(problem) = shares_filesystem(copy_dir, &data_dir.backups())? {
         bail!("backup copy directory {}: {problem}", copy_dir.display());
+    }
+    let merged_ledger = crate::disposition_recovery::verify_snapshot_for_publication(
+        Some(data_dir),
+        &newest,
+        copy_dir,
+    )
+    .await?;
+    if let Some(ledger) = merged_ledger {
+        ensure_same_installation(&newest, copy_dir).await?;
+        let mirror_path = copy_dir.join(crate::disposition_recovery::DISPOSITION_LEDGER_FILENAME);
+        crate::disposition_recovery::write_ledger_atomic(&mirror_path, &ledger)?;
     }
     if backup::snapshots_in(copy_dir)?.len() > keep.max(1) {
         ensure_same_installation(&newest, copy_dir).await?;
@@ -185,6 +228,12 @@ async fn ensure_same_installation(snapshot: &Path, copy_dir: &Path) -> Result<()
             break;
         }
     }
+    if theirs.is_none() {
+        let mirror_path = copy_dir.join(crate::disposition_recovery::DISPOSITION_LEDGER_FILENAME);
+        if let Some(mirror) = crate::disposition_recovery::read_ledger_if_present(&mirror_path)? {
+            theirs = Some(mirror.installation_id);
+        }
+    }
     let Some(theirs) = theirs else {
         return Ok(());
     };
@@ -206,7 +255,7 @@ const SAME_FILESYSTEM: &str = "is on the same filesystem as the local backups, s
 
 /// `Some(reason)` when `copy_dir` is on the same filesystem as `local_dir`.
 #[cfg(unix)]
-fn shares_filesystem(copy_dir: &Path, local_dir: &Path) -> Result<Option<&'static str>> {
+pub(crate) fn shares_filesystem(copy_dir: &Path, local_dir: &Path) -> Result<Option<&'static str>> {
     use std::os::unix::fs::MetadataExt;
     let device = |path: &Path| {
         std::fs::metadata(path)
@@ -217,7 +266,10 @@ fn shares_filesystem(copy_dir: &Path, local_dir: &Path) -> Result<Option<&'stati
 }
 
 #[cfg(not(unix))]
-fn shares_filesystem(_copy_dir: &Path, _local_dir: &Path) -> Result<Option<&'static str>> {
+pub(crate) fn shares_filesystem(
+    _copy_dir: &Path,
+    _local_dir: &Path,
+) -> Result<Option<&'static str>> {
     Ok(None)
 }
 
@@ -247,6 +299,7 @@ pub struct BackupStatus {
     pub keep: usize,
     pub local: LocalStatus,
     pub copy: CopyStatus,
+    pub disposition_recovery: crate::disposition_recovery::RecoveryHealth,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -297,7 +350,14 @@ pub async fn status_for(
     if !capabilities::user_has(pool, actor_user_id, Capability::ManageUsers).await? {
         return Ok(Err(StatusRefusal::CapabilityRequired));
     }
-    status(settings).map(Ok)
+    let mut report = status(settings)?;
+    report.disposition_recovery = crate::disposition_recovery::inspect_recovery_health(
+        pool,
+        &settings.data_dir,
+        settings.copy_dir.as_deref(),
+    )
+    .await?;
+    Ok(Ok(report))
 }
 
 /// Backup health from the files themselves.
@@ -310,6 +370,10 @@ pub fn status(settings: &BackupSettings) -> Result<BackupStatus> {
         &local_dir,
         newest_local.as_deref(),
     );
+    let disposition_recovery = crate::disposition_recovery::inspect_recovery_health_files_only(
+        &settings.data_dir,
+        settings.copy_dir.as_deref(),
+    );
     Ok(BackupStatus {
         interval_hours: settings.interval_hours,
         keep: settings.keep,
@@ -320,6 +384,7 @@ pub fn status(settings: &BackupSettings) -> Result<BackupStatus> {
             newest_at: backup::latest_snapshot_mtime(&settings.data_dir)?,
         },
         copy,
+        disposition_recovery,
     })
 }
 

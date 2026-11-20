@@ -508,7 +508,7 @@ pub fn verify_archive(bytes: &[u8]) -> ArchiveReport {
         (PACKET_FORMAT, PACKET_FORMAT_VERSION) => {
             crate::packet_verify::verify_packet(&mut archive, &names, &manifest_bytes, &mut report);
         }
-        (INSTALLATION_FORMAT, 1 | 2 | INSTALLATION_FORMAT_VERSION) => {
+        (INSTALLATION_FORMAT, 1 | 2 | 3 | INSTALLATION_FORMAT_VERSION) => {
             crate::installation_verify::verify_installation(
                 &mut archive,
                 &names,

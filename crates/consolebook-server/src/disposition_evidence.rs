@@ -80,6 +80,30 @@ closed_vocabulary! {
     }
 }
 
+macro_rules! impl_serialize_as_str {
+    ($($ty:ty),+ $(,)?) => {
+        $(
+            impl Serialize for $ty {
+                fn serialize<S: serde::Serializer>(
+                    &self,
+                    serializer: S,
+                ) -> std::result::Result<S::Ok, S::Error> {
+                    serializer.serialize_str(self.as_str())
+                }
+            }
+        )+
+    };
+}
+
+impl_serialize_as_str!(
+    DispositionRunState,
+    DispositionErrorCode,
+    DispositionMethod,
+    DispositionOutcome,
+    DispositionReasonCode,
+    DisposedRecordClass,
+);
+
 /// One retained version fingerprint inside a portable disposition entry.
 /// Carries opaque hashes and UTC timestamps only — never narratives, ratings,
 /// or presentation display names.

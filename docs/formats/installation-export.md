@@ -62,7 +62,7 @@ tables/{table}.json                        one document per carried table
 | Member | Type | Meaning |
 | --- | --- | --- |
 | `format` | string | Always `consolebook-installation-export` |
-| `format_version` | integer | `3` (versions `1` and `2` continue to verify under their own schemas); bumped by any change to the manifest, the table set, or any document's columns, types, or rules |
+| `format_version` | integer | `4` (versions `1`, `2`, and `3` continue to verify under their own schemas); bumped by any change to the manifest, the table set, or any document's columns, types, or rules |
 | `installation_id` | string | The exporting installation's identity |
 | `exported_at` | integer | The export instant, UTC Unix seconds. It is identical in every unit manifest |
 | `units` | array | Every finalized version the installation holds, listed exactly as the record export lists units. It may be empty |
@@ -70,12 +70,13 @@ tables/{table}.json                        one document per carried table
 | `excluded` | array | Every table or column the format does not carry, ascending by `name`, each with its `reason` |
 
 The `tables` and `excluded` names together are the **ledger**. For a given
-format version the ledger is a closed set. Version 3 has 47 carried tables and
-5 exclusions (four tables and one column), listed below; version 2 carried 43
-tables before migration 0018 added the four disposition evidence tables
-(`disposition_run`, `disposition_event`, `disposition_version_hash`,
+format version the ledger is a closed set. Version 4 has 48 carried tables and
+5 exclusions (four tables and one column), listed below; version 3 carried 47
+tables before migration 0019 added `evaluation_record_id_floor`, version 2
+carried 43 tables before migration 0018 added the four disposition evidence
+tables (`disposition_run`, `disposition_event`, `disposition_version_hash`,
 `disposition_boundary_checkpoint`), and version 1 carried those 43 tables
-without `retention_authority_event.capability` (migration 0017; ADR 0030). Both
+without `retention_authority_event.capability` (migration 0017; ADR 0030). All
 earlier versions continue to verify under their recorded table sets. A name
 outside the set, a name missing from it, or a name listed twice is a finding.
 The ledger makes "nothing silently omitted" a property the archive states and
@@ -342,6 +343,8 @@ Each table's columns are listed in stored order, with these meanings:
 | `evaluation_record` | `revision` | integer | no |  |
 | `evaluation_record` | `created_at` | integer | no |  |
 | `evaluation_record` | `created_by` | integer | yes | → `user` |
+| `evaluation_record_id_floor` | `id` | integer | no | key |
+| `evaluation_record_id_floor` | `last_reserved_id` | integer | no |  |
 | `evaluation_session` | `id` | integer | no | key |
 | `evaluation_session` | `evaluation_record_id` | integer | no | → `evaluation_record` |
 | `evaluation_session` | `training_session_id` | integer | no | → `training_session` |

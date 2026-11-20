@@ -298,16 +298,22 @@ const V3_ADDED_TABLES: [&str; 4] = [
     "disposition_version_hash",
 ];
 
+/// Tables introduced in `format_version` 4 (migration 0019).
+const V4_ADDED_TABLES: [&str; 1] = ["evaluation_record_id_floor"];
+
 /// The carried table named `name`.
 #[must_use]
 pub fn table(name: &str) -> Option<&'static Table> {
     TABLES.iter().find(|table| table.name == name)
 }
 
-/// The carried table named `name` as defined by `format_version` (1, 2, or 3).
+/// The carried table named `name` as defined by `format_version` (1, 2, 3, or 4).
 #[must_use]
 pub fn table_for_version(format_version: i64, name: &str) -> Option<&'static Table> {
     if format_version < 3 && V3_ADDED_TABLES.contains(&name) {
+        return None;
+    }
+    if format_version < 4 && V4_ADDED_TABLES.contains(&name) {
         return None;
     }
     if format_version == 1 && name == "retention_authority_event" {
@@ -316,7 +322,7 @@ pub fn table_for_version(format_version: i64, name: &str) -> Option<&'static Tab
     table(name)
 }
 
-/// Every carried table for `format_version` (1, 2, or 3), ascending by name.
+/// Every carried table for `format_version` (1, 2, 3, or 4), ascending by name.
 #[must_use]
 pub fn tables_for_version(format_version: i64) -> Vec<&'static Table> {
     TABLES

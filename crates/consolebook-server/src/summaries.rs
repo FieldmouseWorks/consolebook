@@ -103,12 +103,14 @@ pub async fn create(
         Err(refusal) => return storage::refuse(tx, refusal).await,
     };
     let now = OffsetDateTime::now_utc().unix_timestamp();
-    let result = sqlx::query(
+    let record_id = evaluation_drafts::allocate_record_id(&mut tx).await?;
+    sqlx::query(
         "INSERT INTO evaluation_record
-             (enrollment_id, program_version_id, evaluation_form_id,
+             (id, enrollment_id, program_version_id, evaluation_form_id,
               owner_user_id, created_at, created_by)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?4)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?5)",
     )
+    .bind(record_id)
     .bind(enrollment_id)
     .bind(version_id)
     .bind(form_id)
@@ -117,7 +119,6 @@ pub async fn create(
     .execute(&mut *tx)
     .await
     .context("creating summary record")?;
-    let record_id = result.last_insert_rowid();
     evaluation_drafts::append_event(&mut tx, record_id, "created", actor_user_id, None, now)
         .await?;
     let trainee: i64 = sqlx::query_scalar("SELECT user_id FROM enrollment WHERE id = ?1")
