@@ -56,8 +56,9 @@ confirmation have not been evaluated by this lookup.
 ## Remaining disposition work
 
 Finalized records retain their existing immutability guards. There is no
-supported command or web control to bypass them. The next stage must define
-and prove the complete destruction scope, including duplicate content,
-summary dependencies, backups and restore, failure/retry handling, minimal
-tombstones with independent retention, and honest export verification of
-unavailable records and policy boundaries. See [ADR 0020](decisions/0020-retention-policy-and-hold-administration.md).
+supported command or web control to bypass them. [ADR 0030](decisions/0030-lawful-disposition-scope-and-recovery.md)
+and the [disposition scope specification](disposition-scope.md) define the
+complete destruction scope, dependency refusal rules, backup/restore ledger
+contract, crash/retry states, minimal tombstones with independent retention,
+and honest export verification for the upcoming implementation slices
+(`#211`–`#219`). See also [ADR 0020](decisions/0020-retention-policy-and-hold-administration.md).
