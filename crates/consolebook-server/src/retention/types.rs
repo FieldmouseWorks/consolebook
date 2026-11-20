@@ -112,4 +112,6 @@ pub enum RetentionRefusal {
     ConfirmationExpired,
     StaleConfirmation,
     DispositionNotEligible,
+    NoSuchDispositionRun,
+    DispositionAlreadyCompleted,
 }

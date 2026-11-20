@@ -84,11 +84,35 @@ pub async fn notify_user<'e>(
     kind: NoticeKind,
     message: &str,
 ) -> Result<()> {
+    notify_user_inner(executor, user_id, None, kind, message).await
+}
+
+/// Notifies one recipient about an evaluation record, linking the notice to
+/// `evaluation_record_id` so lawful disposition removes it with the record
+/// (ADR 0030; #214).
+pub async fn notify_user_for_record<'e>(
+    executor: impl Executor<'e, Database = Sqlite>,
+    user_id: i64,
+    evaluation_record_id: i64,
+    kind: NoticeKind,
+    message: &str,
+) -> Result<()> {
+    notify_user_inner(executor, user_id, Some(evaluation_record_id), kind, message).await
+}
+
+async fn notify_user_inner<'e>(
+    executor: impl Executor<'e, Database = Sqlite>,
+    user_id: i64,
+    evaluation_record_id: Option<i64>,
+    kind: NoticeKind,
+    message: &str,
+) -> Result<()> {
     sqlx::query(
-        "INSERT INTO notice (user_id, kind, message, created_at)
-         VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO notice (user_id, evaluation_record_id, kind, message, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
     )
     .bind(user_id)
+    .bind(evaluation_record_id)
     .bind(kind.as_str())
     .bind(message)
     .bind(OffsetDateTime::now_utc().unix_timestamp())

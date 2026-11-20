@@ -90,6 +90,16 @@ impl From<RetentionRefusal> for ApiError {
                 "disposition_not_eligible",
                 "one or more selected records are blocked from disposition",
             ),
+            RetentionRefusal::NoSuchDispositionRun => (
+                StatusCode::NOT_FOUND,
+                "no_such_disposition_run",
+                "no such disposition run",
+            ),
+            RetentionRefusal::DispositionAlreadyCompleted => (
+                StatusCode::CONFLICT,
+                "disposition_already_completed",
+                "the disposition run is already completed",
+            ),
         };
         Self::new(status, code, message)
     }

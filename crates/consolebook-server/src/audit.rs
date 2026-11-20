@@ -18,6 +18,8 @@ closed_vocabulary! {
         RetentionAuthorityRevoked => "retention_authority_revoked",
         DispositionAuthorityGranted => "disposition_authority_granted",
         DispositionAuthorityRevoked => "disposition_authority_revoked",
+        DispositionExecuted => "disposition_executed",
+        DispositionCompleted => "disposition_completed",
         RetentionPolicyCreated => "retention_policy_created",
         RecordHoldCreated => "record_hold_created",
         RecordHoldReplaced => "record_hold_replaced",
@@ -71,6 +73,7 @@ closed_vocabulary! {
 pub enum Subject {
     RetentionPolicy(i64),
     RecordHold(i64),
+    DispositionRun(i64),
     Program(i64),
     ProgramVersion(i64),
     Enrollment(i64),
@@ -86,6 +89,7 @@ impl Subject {
         match self {
             Self::RetentionPolicy(_) => SubjectKind::RetentionPolicy,
             Self::RecordHold(_) => SubjectKind::RecordHold,
+            Self::DispositionRun(_) => SubjectKind::DispositionRun,
             Self::Program(_) => SubjectKind::Program,
             Self::ProgramVersion(_) => SubjectKind::ProgramVersion,
             Self::Enrollment(_) => SubjectKind::Enrollment,
@@ -105,6 +109,7 @@ impl Subject {
         match self {
             Self::RetentionPolicy(id)
             | Self::RecordHold(id)
+            | Self::DispositionRun(id)
             | Self::Program(id)
             | Self::ProgramVersion(id)
             | Self::Enrollment(id)
@@ -121,6 +126,7 @@ closed_vocabulary! {
     pub enum SubjectKind {
         RetentionPolicy => "retention_policy",
         RecordHold => "record_hold",
+        DispositionRun => "disposition_run",
         Program => "program",
         ProgramVersion => "program_version",
         Enrollment => "enrollment",

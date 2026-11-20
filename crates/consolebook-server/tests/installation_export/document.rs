@@ -276,6 +276,10 @@ const RECORDED_FINGERPRINTS: &[(i64, &str)] = &[
         4,
         "64341b6b60da8dcf252b8c628bf9d32dc4cd97c1c73060783ab3b86a748f1c9a",
     ),
+    (
+        5,
+        "91b76345199ea0bd944cfada675543b8f49228fd6340875b8b74fbb2789df301",
+    ),
 ];
 
 #[test]

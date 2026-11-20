@@ -239,6 +239,56 @@ async fn packet(pool: &SqlitePool) -> Vec<u8> {
     packet
 }
 
+async fn verify_shape_migration_preserves_schema(path: &Path, before_schema: &[SchemaRow]) {
+    let mut connection = connect(path).await;
+    let shape_only = sqlx::migrate::Migrator {
+        migrations: Cow::Owned(
+            storage::MIGRATOR
+                .iter()
+                .filter(|migration| migration.version <= SHAPE_VERSION)
+                .cloned()
+                .collect(),
+        ),
+        ..sqlx::migrate::Migrator::DEFAULT
+    };
+    shape_only
+        .run(&mut connection)
+        .await
+        .expect("shape migration");
+    let v14_schema = schema(&mut connection).await;
+    for object in before_schema {
+        assert!(
+            v14_schema.contains(object),
+            "migration 0014 changed an existing schema object: {object:?}"
+        );
+    }
+    assert!(
+        v14_schema
+            .iter()
+            .any(|(_, name, _, _)| name == "enrollment_event_version_reference_shape")
+    );
+    connection.close().await.expect("close v14 connection");
+}
+
+fn assert_enrollment_schema_preserved(before_schema: &[SchemaRow], after_schema: &[SchemaRow]) {
+    assert!(
+        after_schema
+            .iter()
+            .any(|(_, name, _, _)| name == "enrollment_event_version_reference_shape")
+    );
+    for object in before_schema.iter().filter(|(_, _, tbl, _)| {
+        matches!(
+            tbl.as_str(),
+            "enrollment" | "enrollment_event" | "phase_event"
+        )
+    }) {
+        assert!(
+            after_schema.contains(object),
+            "enrollment/phase schema object changed across forward migrations: {object:?}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn upgrade_preserves_history_references_schema_objects_and_packet_bytes() {
     let tmp = tempfile::tempdir().expect("scratch");
@@ -260,7 +310,12 @@ async fn upgrade_preserves_history_references_schema_objects_and_packet_bytes() 
     let before_packet = packet(&pool).await;
     pool.close().await;
 
-    // Exercise the real startup path, including migration checksum validation.
+    // First verify migration 0014 itself leaves every pre-0014 schema object
+    // untouched and adds only `enrollment_event_version_reference_shape`.
+    verify_shape_migration_preserves_schema(&path, &before_schema).await;
+
+    // Exercise the real startup path through all current forward migrations,
+    // including migration checksum validation.
     let pool = storage::open(&path).await.expect("upgrade at startup");
     let after_packet = packet(&pool).await;
     assert_eq!(
@@ -270,19 +325,7 @@ async fn upgrade_preserves_history_references_schema_objects_and_packet_bytes() 
     let mut connection = pool.acquire().await.expect("inspect upgraded storage");
     assert_eq!(before, history(&mut connection).await);
     let after_schema = schema(&mut connection).await;
-    // Later forward migrations may add owners. Every pre-upgrade schema
-    // object must still be present with exactly the same definition.
-    for object in before_schema {
-        assert!(
-            after_schema.contains(&object),
-            "existing schema object changed: {object:?}"
-        );
-    }
-    assert!(
-        after_schema
-            .iter()
-            .any(|(_, name, _, _)| name == "enrollment_event_version_reference_shape")
-    );
+    assert_enrollment_schema_preserved(&before_schema, &after_schema);
     let foreign_keys: i64 = sqlx::query_scalar("PRAGMA foreign_keys")
         .fetch_one(&mut *connection)
         .await

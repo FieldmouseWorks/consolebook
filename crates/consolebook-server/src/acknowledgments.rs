@@ -266,9 +266,10 @@ pub async fn acknowledge(
                     .fetch_one(&mut *tx)
                     .await
                     .context("reading owner")?;
-            notices::notify_user(
+            notices::notify_user_for_record(
                 &mut *tx,
                 owner,
+                record_id,
                 NoticeKind::AcknowledgmentResponse,
                 &format!(
                     "{trainee_name} acknowledged a finalized evaluation record with a response."
@@ -279,10 +280,11 @@ pub async fn acknowledge(
         // The refusal reaches everyone who can attest it.
         TraineeAckKind::Refused => {
             sqlx::query(
-                "INSERT INTO notice (user_id, kind, message, created_at)
-                 SELECT cg.user_id, ?1, ?2, ?3 FROM capability_grant cg
-                 WHERE cg.capability = ?4",
+                "INSERT INTO notice (user_id, evaluation_record_id, kind, message, created_at)
+                 SELECT cg.user_id, ?1, ?2, ?3, ?4 FROM capability_grant cg
+                 WHERE cg.capability = ?5",
             )
+            .bind(record_id)
             .bind(NoticeKind::AcknowledgmentRefused.as_str())
             .bind(format!(
                 "{trainee_name} refused to acknowledge a finalized evaluation record."
@@ -383,9 +385,10 @@ pub async fn attest(
         }
         AttestedKind::Unavailable => "you were recorded as unavailable to acknowledge",
     };
-    notices::notify_user(
+    notices::notify_user_for_record(
         &mut *tx,
         version.trainee_user_id,
+        record_id,
         NoticeKind::AcknowledgmentAttested,
         &format!("On a finalized evaluation record, {statement}."),
     )

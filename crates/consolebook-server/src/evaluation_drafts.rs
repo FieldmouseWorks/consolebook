@@ -547,9 +547,10 @@ pub async fn transfer(
     .fetch_one(&mut *tx)
     .await
     .context("reading trainee name")?;
-    notices::notify_user(
+    notices::notify_user_for_record(
         &mut *tx,
         to_user_id,
+        record_id,
         NoticeKind::DraftOwnershipReceived,
         &format!("You are now the owner of the draft evaluation for {trainee}."),
     )
@@ -666,9 +667,10 @@ pub async fn submit(
             .context("listing reviewers")?;
     for reviewer in reviewers {
         if reviewer != actor_user_id {
-            notices::notify_user(
+            notices::notify_user_for_record(
                 &mut *tx,
                 reviewer,
+                record_id,
                 NoticeKind::DraftSubmittedForReview,
                 &format!("A draft evaluation for {trainee} awaits review."),
             )

@@ -307,7 +307,7 @@ pub fn table(name: &str) -> Option<&'static Table> {
     TABLES.iter().find(|table| table.name == name)
 }
 
-/// The carried table named `name` as defined by `format_version` (1, 2, 3, or 4).
+/// The carried table named `name` as defined by `format_version` (1..=5).
 #[must_use]
 pub fn table_for_version(format_version: i64, name: &str) -> Option<&'static Table> {
     if format_version < 3 && V3_ADDED_TABLES.contains(&name) {
@@ -319,10 +319,16 @@ pub fn table_for_version(format_version: i64, name: &str) -> Option<&'static Tab
     if format_version == 1 && name == "retention_authority_event" {
         return Some(&tables::V1_RETENTION_AUTHORITY_EVENT);
     }
+    if format_version < 5 && name == "notice" {
+        return Some(&tables::V1_TO_V4_NOTICE);
+    }
+    if format_version < 5 && name == "record_hold" {
+        return Some(&tables::V1_TO_V4_RECORD_HOLD);
+    }
     table(name)
 }
 
-/// Every carried table for `format_version` (1, 2, 3, or 4), ascending by name.
+/// Every carried table for `format_version` (1..=5), ascending by name.
 #[must_use]
 pub fn tables_for_version(format_version: i64) -> Vec<&'static Table> {
     TABLES

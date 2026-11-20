@@ -62,7 +62,7 @@ tables/{table}.json                        one document per carried table
 | Member | Type | Meaning |
 | --- | --- | --- |
 | `format` | string | Always `consolebook-installation-export` |
-| `format_version` | integer | `4` (versions `1`, `2`, and `3` continue to verify under their own schemas); bumped by any change to the manifest, the table set, or any document's columns, types, or rules |
+| `format_version` | integer | `5` (versions `1` through `4` continue to verify under their own schemas); bumped by any change to the manifest, the table set, or any document's columns, types, or rules |
 | `installation_id` | string | The exporting installation's identity |
 | `exported_at` | integer | The export instant, UTC Unix seconds. It is identical in every unit manifest |
 | `units` | array | Every finalized version the installation holds, listed exactly as the record export lists units. It may be empty |
@@ -70,9 +70,11 @@ tables/{table}.json                        one document per carried table
 | `excluded` | array | Every table or column the format does not carry, ascending by `name`, each with its `reason` |
 
 The `tables` and `excluded` names together are the **ledger**. For a given
-format version the ledger is a closed set. Version 4 has 48 carried tables and
-5 exclusions (four tables and one column), listed below; version 3 carried 47
-tables before migration 0019 added `evaluation_record_id_floor`, version 2
+format version the ledger is a closed set. Version 5 has 48 carried tables and
+5 exclusions (four tables and one column), listed below; version 4 carried the
+same 48 tables before migration 0020 added `notice.evaluation_record_id` and
+decoupled `record_hold.evaluation_record_id`'s foreign key, version 3 carried
+47 tables before migration 0019 added `evaluation_record_id_floor`, version 2
 carried 43 tables before migration 0018 added the four disposition evidence
 tables (`disposition_run`, `disposition_event`, `disposition_version_hash`,
 `disposition_boundary_checkpoint`), and version 1 carried those 43 tables
@@ -429,7 +431,7 @@ Each table's columns are listed in stored order, with these meanings:
 | `retention_policy` | `created_at` | integer | no |  |
 | `record_hold` | `id` | integer | no | key |
 | `record_hold` | `enrollment_id` | integer | yes | → `enrollment` |
-| `record_hold` | `evaluation_record_id` | integer | yes | → `evaluation_record` |
+| `record_hold` | `evaluation_record_id` | integer | yes |  |
 | `record_hold` | `kind` | text | no | one of `litigation`, `anticipated_litigation`, `audit`, `investigation`, `public_records_request`, `other` |
 | `record_hold` | `authority` | text | no |  |
 | `record_hold` | `reason` | text | no |  |
@@ -496,6 +498,7 @@ Each table's columns are listed in stored order, with these meanings:
 | `notice` | `message` | text | no |  |
 | `notice` | `created_at` | integer | no |  |
 | `notice` | `read_at` | integer | yes |  |
+| `notice` | `evaluation_record_id` | integer | yes |  |
 | `audit_event` | `id` | integer | no | key |
 | `audit_event` | `occurred_at` | integer | no |  |
 | `audit_event` | `kind` | text | no | audit event kind (see Vocabularies) |
@@ -565,7 +568,8 @@ defines instead, because the table has no `CHECK`:
   `acknowledgment_attested`, `amendment_opened`.
 - **audit event kind** (`audit.rs`): `retention_authority_granted`,
   `retention_authority_revoked`, `disposition_authority_granted`,
-  `disposition_authority_revoked`, `retention_policy_created`,
+  `disposition_authority_revoked`, `disposition_executed`,
+  `disposition_completed`, `retention_policy_created`,
   `record_hold_created`, `record_hold_replaced`, `record_hold_released`,
   `setup_completed`, `login_succeeded`, `login_failed`, `logout`,
   `reset_code_issued`, `reset_code_used`, `recovery_code_issued`,
@@ -582,8 +586,8 @@ defines instead, because the table has no `CHECK`:
   `task_signoff_recorded`, `record_exported`, `trainee_packet_exported`,
   and `installation_exported` (see Authorization).
 - **audit subject kind** (`audit.rs`): `retention_policy`, `record_hold`,
-  `program`, `program_version`, `enrollment`, `assignment`, `session` (a
-  training session), and `record` (an evaluation record).
+  `disposition_run`, `program`, `program_version`, `enrollment`, `assignment`,
+  `session` (a training session), and `record` (an evaluation record).
 
 Every vocabulary is closed and is shared with the module that owns it. The
 producer parses each stored value on the way out. The verifier parses it on

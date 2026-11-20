@@ -2,6 +2,7 @@
 //! and read-only disposition preview (ADR 0020; ADR 0030; #211).
 //! No destruction operation is exposed here.
 mod authority;
+mod disposition_execute;
 mod disposition_preview;
 mod holds;
 mod policies;
@@ -9,6 +10,11 @@ mod types;
 
 pub use authority::{
     authority_history, disposition_authority_history, set_authority, set_disposition_authority,
+};
+pub use disposition_execute::{
+    DispositionExecutionFault, DispositionExecutionInput, DispositionExecutionReport,
+    execute_disposition, execute_disposition_at, execute_disposition_with_fault,
+    retry_disposition_run, retry_disposition_run_at, retry_disposition_run_with_fault,
 };
 pub use disposition_preview::{
     ControlledCopyInventory, CopyDirectoryInventory, CopyFileEntry, DispositionActiveHold,
