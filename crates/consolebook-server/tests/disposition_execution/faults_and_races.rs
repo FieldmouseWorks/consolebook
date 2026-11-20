@@ -629,3 +629,125 @@ async fn races_against_holds_policies_scope_expiry_and_authority_fail_closed() {
         .expect("resp");
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn off_server_copy_cleanup_refuses_foreign_installation_even_on_matching_basename() {
+    let fx = ExecFixture::new().await;
+    let foreign = ExecFixture::new().await;
+
+    fx.set_destroy_policy(RecordClass::DailyReport, None, 30)
+        .await;
+    fx.set_destroy_policy(RecordClass::DispositionEvent, None, 3650)
+        .await;
+    let (record_id, finalized_at, _) = fx
+        .create_rich_amended_daily("2026-09-10", "FOREIGN-GUARD")
+        .await;
+
+    let backups_no_copy = fx.backups(false);
+    let evaluated_at = finalized_at + 31 * SECONDS_PER_DAY;
+    let preview = retention::preview_disposition_at(
+        &fx.pool,
+        fx.executor_id,
+        &DispositionPreviewInput {
+            record_ids: vec![record_id],
+        },
+        Some(&backups_no_copy),
+        evaluated_at,
+    )
+    .await
+    .expect("call")
+    .expect("preview");
+    assert!(preview.eligible);
+
+    // Stop right after clean local snapshot creation (DuringLocalCleanup) so we
+    // know the exact clean snapshot basename that retry will attempt to copy.
+    let paused = retention::execute_disposition_with_fault(
+        &fx.pool,
+        fx.executor_id,
+        &DispositionExecutionInput {
+            record_ids: vec![record_id],
+            confirmation_digest: preview.confirmation_digest,
+            expires_at: preview.expires_at,
+            authority_reference: "INVENTED-FOREIGN-GUARD".into(),
+            reason_code: DispositionReasonCode::ScheduledRetentionElapsed,
+            retain_version_hashes: true,
+        },
+        &backups_no_copy,
+        evaluated_at + 1,
+        DispositionExecutionFault::DuringLocalCleanup,
+    )
+    .await
+    .expect("call")
+    .expect("report");
+    assert_eq!(paused.state, DispositionRunState::CopyCleanupPending);
+    let clean_name = paused
+        .clean_snapshot
+        .as_ref()
+        .expect("clean snapshot taken before local cleanup fault")
+        .file_name()
+        .expect("basename")
+        .to_owned();
+
+    // Seed a foreign installation's ONLY backup in a separate copy directory
+    // under the EXACT same basename as our clean snapshot.
+    let foreign_snap = backup::run_after_restore(&foreign.data_dir)
+        .await
+        .expect("foreign snapshot")
+        .snapshot;
+    let foreign_bytes = std::fs::read(&foreign_snap).expect("read foreign snapshot");
+    let foreign_copy_dir = fx.other_fs.path().join("foreign-installation-copies");
+    std::fs::create_dir_all(&foreign_copy_dir).expect("mkdir foreign copy dir");
+    let foreign_target = foreign_copy_dir.join(&clean_name);
+    std::fs::write(&foreign_target, &foreign_bytes).expect("place foreign sole backup");
+
+    let misconfigured = BackupSettings {
+        data_dir: fx.data_dir.clone(),
+        interval_hours: 24,
+        keep: 14,
+        copy_dir: Some(foreign_copy_dir.clone()),
+    };
+    let refused = retention::retry_disposition_run_at(
+        &fx.pool,
+        fx.executor_id,
+        paused.run_id,
+        &misconfigured,
+        evaluated_at + 2,
+    )
+    .await
+    .expect("call")
+    .expect("report");
+    assert_eq!(refused.state, DispositionRunState::CopyCleanupPending);
+    assert_eq!(
+        refused.last_error_code,
+        Some(DispositionErrorCode::CopyCleanupFailed)
+    );
+    assert!(!refused.is_completed());
+
+    // The foreign installation's sole backup must remain byte-for-byte intact
+    // and no recovery ledger may be written into the foreign directory.
+    assert_eq!(
+        std::fs::read(&foreign_target).expect("foreign snapshot must survive untouched"),
+        foreign_bytes
+    );
+    assert!(
+        !foreign_copy_dir
+            .join(consolebook_server::disposition_recovery::DISPOSITION_LEDGER_FILENAME)
+            .exists(),
+        "must not write our ledger into a foreign installation's copy directory"
+    );
+
+    // Pointing retry back to our own copy directory completes cleanly.
+    let own_backups = fx.backups(true);
+    let completed = retention::retry_disposition_run_at(
+        &fx.pool,
+        fx.executor_id,
+        paused.run_id,
+        &own_backups,
+        evaluated_at + 3,
+    )
+    .await
+    .expect("call")
+    .expect("report");
+    assert!(completed.is_completed(), "{completed:?}");
+}

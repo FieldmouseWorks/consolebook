@@ -309,45 +309,15 @@ async fn clean_off_server_copies(
         return Err((DispositionErrorCode::CopyDirUnreachable, err.to_string()));
     }
 
+    // Verify copy_dir ownership BEFORE deleting or writing anything so a
+    // misconfigured copy directory belonging to another installation is never
+    // modified, even if it holds a snapshot with the same basename.
+    verify_copy_dir_ownership(copy_dir, &ledger.installation_id).await?;
+
     // 1. Copy the fresh clean snapshot off-server FIRST (before deleting any
     //    older off-server copy) and mirror the updated recovery ledger.
-    let Some(clean_name) = clean_snapshot.file_name() else {
-        return Err((
-            DispositionErrorCode::CopyCleanupFailed,
-            "clean snapshot path has no file name".to_owned(),
-        ));
-    };
-    let clean_copy_path = copy_dir.join(clean_name);
-    if is_clean_post_disposition_snapshot(&clean_copy_path, ledger).await {
-        if let Err(err) =
-            disposition_recovery::mirror_ledger_to_copy_dir(&backups.data_dir, copy_dir, ledger)
-                .await
-        {
-            return Err((DispositionErrorCode::CopyCleanupFailed, format!("{err:#}")));
-        }
-    } else {
-        if clean_copy_path.exists()
-            && let Err(err) = std::fs::remove_file(&clean_copy_path)
-        {
-            return Err((
-                DispositionErrorCode::CopyCleanupFailed,
-                format!(
-                    "removing unverified off-server copy {}: {err}",
-                    clean_copy_path.display()
-                ),
-            ));
-        }
-        if let Err(err) = backup_copy::copy_snapshot_with_data_dir(
-            &backups.data_dir,
-            clean_snapshot,
-            copy_dir,
-            backups.keep,
-        )
-        .await
-        {
-            return Err((DispositionErrorCode::CopyCleanupFailed, format!("{err:#}")));
-        }
-    }
+    let clean_copy_path =
+        ensure_clean_off_server_copy(backups, copy_dir, ledger, clean_snapshot).await?;
 
     if fault == DispositionExecutionFault::DuringCopyCleanup {
         return Err((
@@ -411,6 +381,113 @@ async fn clean_off_server_copies(
     }
 
     Ok(removed)
+}
+
+/// Ensures `clean_snapshot` is mirrored in `copy_dir` along with the updated
+/// recovery ledger. Assumes `verify_copy_dir_ownership` has already verified
+/// that `copy_dir` does not belong to another installation, and re-checks any
+/// existing file at `clean_copy_path` before replacing it.
+async fn ensure_clean_off_server_copy(
+    backups: &BackupSettings,
+    copy_dir: &Path,
+    ledger: &DispositionLedger,
+    clean_snapshot: &Path,
+) -> std::result::Result<PathBuf, (DispositionErrorCode, String)> {
+    let Some(clean_name) = clean_snapshot.file_name() else {
+        return Err((
+            DispositionErrorCode::CopyCleanupFailed,
+            "clean snapshot path has no file name".to_owned(),
+        ));
+    };
+    let clean_copy_path = copy_dir.join(clean_name);
+    if is_clean_post_disposition_snapshot(&clean_copy_path, ledger).await {
+        if let Err(err) =
+            disposition_recovery::mirror_ledger_to_copy_dir(&backups.data_dir, copy_dir, ledger)
+                .await
+        {
+            return Err((DispositionErrorCode::CopyCleanupFailed, format!("{err:#}")));
+        }
+        return Ok(clean_copy_path);
+    }
+    if clean_copy_path.exists() {
+        if let Ok(other_id) = backup::snapshot_installation(&clean_copy_path).await
+            && other_id != ledger.installation_id
+        {
+            return Err((
+                DispositionErrorCode::CopyCleanupFailed,
+                format!(
+                    "refusing to remove foreign snapshot {} belonging to installation {other_id}",
+                    clean_copy_path.display()
+                ),
+            ));
+        }
+        if let Err(err) = std::fs::remove_file(&clean_copy_path) {
+            return Err((
+                DispositionErrorCode::CopyCleanupFailed,
+                format!(
+                    "removing unverified off-server copy {}: {err}",
+                    clean_copy_path.display()
+                ),
+            ));
+        }
+    }
+    if let Err(err) = backup_copy::copy_snapshot_with_data_dir(
+        &backups.data_dir,
+        clean_snapshot,
+        copy_dir,
+        backups.keep,
+    )
+    .await
+    {
+        return Err((DispositionErrorCode::CopyCleanupFailed, format!("{err:#}")));
+    }
+    Ok(clean_copy_path)
+}
+
+/// Verifies that every readable snapshot and any recovery ledger mirror in
+/// `copy_dir` belongs to `expected_installation_id`. Refuses before any file is
+/// written or removed if another installation owns the directory.
+async fn verify_copy_dir_ownership(
+    copy_dir: &Path,
+    expected_installation_id: &str,
+) -> std::result::Result<(), (DispositionErrorCode, String)> {
+    let snapshots = backup::snapshots_in(copy_dir)
+        .map_err(|err| (DispositionErrorCode::CopyCleanupFailed, format!("{err:#}")))?;
+    for path in &snapshots {
+        if let Ok(other_id) = backup::snapshot_installation(path).await
+            && other_id != expected_installation_id
+        {
+            return Err((
+                DispositionErrorCode::CopyCleanupFailed,
+                format!(
+                    "backup copy directory {} holds snapshot {} of installation {other_id}, \
+                     not {expected_installation_id}; refusing to modify foreign copies",
+                    copy_dir.display(),
+                    path.display()
+                ),
+            ));
+        }
+    }
+    let mirror_path = copy_dir.join(disposition_recovery::DISPOSITION_LEDGER_FILENAME);
+    match disposition_recovery::read_ledger_if_present(&mirror_path) {
+        Ok(Some(mirror)) if mirror.installation_id != expected_installation_id => Err((
+            DispositionErrorCode::CopyCleanupFailed,
+            format!(
+                "backup copy directory {} holds recovery ledger of installation {}, \
+                 not {expected_installation_id}; refusing to modify foreign copies",
+                copy_dir.display(),
+                mirror.installation_id
+            ),
+        )),
+        Ok(_) => Ok(()),
+        Err(err) => Err((
+            DispositionErrorCode::CopyCleanupFailed,
+            format!(
+                "reading recovery ledger mirror {}: {err:#}",
+                mirror_path.display()
+            ),
+        )),
+    }
 }
 
 /// True iff `snapshot` is a readable SQLite snapshot of the same installation
