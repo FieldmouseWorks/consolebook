@@ -82,18 +82,21 @@ async fn connect(db_path: &Path, create: bool) -> Result<SqlitePool> {
 
 /// Opens (creating if necessary) the database, runs migrations, verifies the
 /// connection invariants, and ensures the instance identity row exists.
+///
+/// An existing database whose migration history this build refuses
+/// ([`migration_history`]) fails closed read-only before a writable connection
+/// is opened or any migration runs, leaving the database file untouched.
 pub async fn open(db_path: &Path) -> Result<SqlitePool> {
+    if let Some(history) = inspect_existing_history(db_path).await?
+        && let Some(refusal) = history.first_refusal()
+    {
+        bail!("{refusal}");
+    }
+
     let pool = connect(db_path, true).await?;
 
-    // Refusals `SQLx` would not word plainly, or would reach only after
-    // trying to migrate. It words the others itself.
     let history = migration_history(&pool).await?;
-    if let Some(refusal) = history.refusals.iter().find(|refusal| {
-        matches!(
-            refusal,
-            RefusedHistory::Newer(_) | RefusedHistory::MissingHistory
-        )
-    }) {
+    if let Some(refusal) = history.first_refusal() {
         bail!("{refusal}");
     }
 
@@ -119,37 +122,37 @@ pub async fn open(db_path: &Path) -> Result<SqlitePool> {
     Ok(pool)
 }
 
-/// Migrations this executable would apply to an existing database, in order.
-///
-/// Empty for a database that is up to date, and for one that has never been
-/// migrated (a new installation), which has nothing to lose. Reads only.
-pub async fn pending_migrations(pool: &SqlitePool) -> Result<Vec<i64>> {
-    let Some(recorded) = recorded_history(pool).await? else {
-        return Ok(Vec::new());
-    };
-    let applied: Vec<i64> = recorded
-        .iter()
-        .filter(|row| row.success)
-        .map(|row| row.version)
-        .collect();
-    if applied.is_empty() {
-        return Ok(Vec::new());
+/// Inspects an existing database's migration history read-only, without opening
+/// a writable connection or changing journal mode. Returns `None` when the
+/// database file does not exist yet.
+pub async fn inspect_existing_history(db_path: &Path) -> Result<Option<MigrationHistory>> {
+    if !db_path.exists() {
+        return Ok(None);
     }
-    Ok(MIGRATOR
-        .iter()
-        .filter(|migration| migration.migration_type.is_up_migration())
-        .map(|migration| migration.version)
-        .filter(|version| !applied.contains(version))
-        .collect())
+    let pool = open_diagnostic(db_path).await?;
+    let history = migration_history(&pool).await;
+    pool.close().await;
+    Ok(Some(history?))
 }
 
-/// A migration history this executable refuses to start on. [`open`]
-/// refuses each of these, through its own check or `SQLx`'s migrator
-/// (`sqlx-core` 0.9 `Migrator::run_direct`): a version it does not embed
-/// (`ignore_missing` is off), a row recorded as unsuccessful, a stored
-/// checksum that differs from the embedded migration's, or no recorded
-/// history in a database that already holds a schema (migration 1 cannot
-/// run over existing tables).
+/// Migrations this executable would apply to an existing database, in order.
+///
+/// Empty for a database that is up to date, for one that has never been
+/// migrated (a new installation, which has nothing to lose), and for any
+/// database whose history startup refuses. Reads only.
+pub async fn pending_migrations(pool: &SqlitePool) -> Result<Vec<i64>> {
+    let history = migration_history(pool).await?;
+    Ok(history.pending_upgrade().to_vec())
+}
+
+/// A migration history this executable refuses to start on. [`open`] and
+/// [`crate::backup::open_migrated`] refuse each of these through
+/// [`migration_history`] before taking any pre-migration backup or running
+/// `SQLx`'s migrator (`sqlx-core` 0.9 `Migrator::run_direct`): a version this
+/// build does not embed (`ignore_missing` is off), a row recorded as
+/// unsuccessful, a stored checksum that differs from the embedded migration's,
+/// or no recorded history in a database that already holds a schema (migration
+/// 1 cannot run over existing tables).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RefusedHistory {
     /// No migration is recorded (the table is missing or empty), yet the
@@ -197,6 +200,46 @@ pub struct MigrationHistory {
     pub refusals: Vec<RefusedHistory>,
     /// Embedded migrations with no recorded row, which startup applies.
     pub unapplied: Vec<i64>,
+}
+
+impl MigrationHistory {
+    /// The refusal startup reports first: missing history, then the lowest
+    /// unsuccessful row, then the lowest unknown version, then the lowest
+    /// changed checksum. `doctor` reports every entry in `refusals`.
+    #[must_use]
+    pub fn first_refusal(&self) -> Option<RefusedHistory> {
+        self.refusals
+            .iter()
+            .find(|r| matches!(r, RefusedHistory::MissingHistory))
+            .or_else(|| {
+                self.refusals
+                    .iter()
+                    .find(|r| matches!(r, RefusedHistory::Unfinished(_)))
+            })
+            .or_else(|| {
+                self.refusals
+                    .iter()
+                    .find(|r| matches!(r, RefusedHistory::Newer(_)))
+            })
+            .or_else(|| {
+                self.refusals
+                    .iter()
+                    .find(|r| matches!(r, RefusedHistory::Changed(_)))
+            })
+            .copied()
+    }
+
+    /// Pending migrations this build will apply to an existing, non-refused
+    /// database. Empty when nothing is recorded yet (a new installation) or
+    /// when startup would refuse the database.
+    #[must_use]
+    pub fn pending_upgrade(&self) -> &[i64] {
+        if self.recorded == 0 || !self.refusals.is_empty() {
+            &[]
+        } else {
+            &self.unapplied
+        }
+    }
 }
 
 /// Judges the recorded history against this build. Startup ([`open`])

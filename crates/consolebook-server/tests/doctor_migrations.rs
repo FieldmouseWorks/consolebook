@@ -213,7 +213,7 @@ async fn a_changed_checksum_fails_doctor_and_the_service_refuses_it() {
 
     assert_serve_refuses(
         &data,
-        &format!("migration {version} was previously applied but has been modified"),
+        &format!("migration {version} was applied by a different build's version of it"),
     );
 }
 
@@ -236,7 +236,10 @@ async fn a_failed_migration_fails_doctor_and_the_service_refuses_it() {
     );
     assert_doctor_exits_failing(&data, version);
 
-    assert_serve_refuses(&data, &format!("migration {version} is partially applied"));
+    assert_serve_refuses(
+        &data,
+        &format!("migration {version} is recorded as unsuccessful"),
+    );
 }
 
 #[tokio::test]
@@ -470,6 +473,175 @@ async fn assert_missing_history_refused(data: &DataDir) {
     );
 
     assert_serve_refuses(data, MISSING_HISTORY);
+}
+
+#[tokio::test]
+async fn a_gap_migration_with_a_changed_checksum_is_refused_without_changing_the_database_or_backing_up()
+ {
+    let tmp = tempfile::tempdir().expect("scratch directory");
+    let data = DataDir::new(tmp.path().join("data"));
+    data.ensure_layout().expect("layout");
+
+    // Apply every migration except the second-to-last, leaving a genuine
+    // pending gap before an applied later migration whose checksum is then
+    // corrupted.
+    let all = &MIGRATOR.migrations;
+    assert!(all.len() >= 3, "need a gap before the newest migration");
+    let gap_index = all.len() - 2;
+    let gap_version = all[gap_index].version;
+    let newest = all[all.len() - 1].version;
+    let mut with_gap = all[..gap_index].to_vec();
+    with_gap.push(all[all.len() - 1].clone());
+    let migrator = sqlx::migrate::Migrator::with_migrations(with_gap);
+    let pool = sqlx::SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(data.database())
+            .create_if_missing(true)
+            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal),
+    )
+    .await
+    .expect("fixture connection");
+    migrator.run(&pool).await.expect("migrations with gap");
+    sqlx::query("INSERT INTO instance (id, installation_id, created_at_utc) VALUES (1, 'invented-gap-id', '2026-10-01T00:00:00Z')")
+        .execute(&pool)
+        .await
+        .expect("fixture identity");
+    pool.close().await;
+
+    alter_history(
+        &data,
+        "UPDATE _sqlx_migrations SET checksum = zeroblob(length(checksum)) WHERE version = ?1",
+        newest,
+    )
+    .await;
+
+    let before_bytes = std::fs::read(data.database()).expect("read db before");
+
+    assert_fails_naming(
+        &migration_findings(&data).await,
+        newest,
+        "a different build",
+    );
+
+    let err = consolebook_server::backup::open_migrated(&data, None, None)
+        .await
+        .expect_err("open_migrated must refuse changed checksum before backing up or migrating");
+    let msg = format!("{err:#}");
+    assert!(
+        names_migration(&msg, newest) && msg.contains("a different build"),
+        "{msg}"
+    );
+    assert!(
+        consolebook_server::backup::snapshots(&data)
+            .expect("snapshots")
+            .is_empty(),
+        "no pre-migration snapshot may be taken when history is refused"
+    );
+    assert_eq!(
+        std::fs::read(data.database()).expect("read db after open_migrated"),
+        before_bytes,
+        "open_migrated must leave the database byte-identical (gap migration {gap_version} must not run)"
+    );
+
+    let err = storage::open(&data.database())
+        .await
+        .expect_err("storage::open must refuse changed checksum before migrating");
+    let msg = format!("{err:#}");
+    assert!(
+        names_migration(&msg, newest) && msg.contains("a different build"),
+        "{msg}"
+    );
+    assert_eq!(
+        std::fs::read(data.database()).expect("read db after storage::open"),
+        before_bytes,
+        "storage::open must leave the database byte-identical"
+    );
+
+    assert_serve_refuses(&data, "a different build");
+    assert!(
+        consolebook_server::backup::snapshots(&data)
+            .expect("snapshots")
+            .is_empty(),
+        "serve must not take a pre-migration snapshot when history is refused"
+    );
+    assert_eq!(
+        std::fs::read(data.database()).expect("read db after serve"),
+        before_bytes,
+        "serve must leave the database byte-identical"
+    );
+}
+
+#[tokio::test]
+async fn a_failed_migration_is_refused_without_a_pre_migration_snapshot_or_changes() {
+    let (_tmp, data) = installation().await;
+    let version = newest_version();
+    alter_history(
+        &data,
+        "UPDATE _sqlx_migrations SET success = 0 WHERE version = ?1",
+        version,
+    )
+    .await;
+
+    let before_bytes = std::fs::read(data.database()).expect("read db before");
+
+    let diag = storage::open_diagnostic(&data.database())
+        .await
+        .expect("diagnostic open");
+    assert!(
+        storage::pending_migrations(&diag)
+            .await
+            .expect("pending")
+            .is_empty(),
+        "an unsuccessful migration must not count as pending"
+    );
+    diag.close().await;
+
+    assert!(
+        consolebook_server::backup::before_migrating(&data)
+            .await
+            .expect("before_migrating")
+            .is_none(),
+        "before_migrating must not snapshot a database with an unsuccessful migration"
+    );
+    assert!(
+        consolebook_server::backup::snapshots(&data)
+            .expect("snapshots")
+            .is_empty(),
+        "before_migrating must leave backups/ empty"
+    );
+
+    let err = consolebook_server::backup::open_migrated(&data, None, None)
+        .await
+        .expect_err("open_migrated must refuse an unsuccessful migration");
+    let msg = format!("{err:#}");
+    assert!(
+        names_migration(&msg, version) && msg.contains("recorded as unsuccessful"),
+        "{msg}"
+    );
+    assert!(
+        consolebook_server::backup::snapshots(&data)
+            .expect("snapshots")
+            .is_empty(),
+        "no snapshot on refusal"
+    );
+    assert_eq!(
+        std::fs::read(data.database()).expect("read db after open_migrated"),
+        before_bytes,
+        "open_migrated must leave the database byte-identical"
+    );
+
+    assert_serve_refuses(&data, "recorded as unsuccessful");
+    assert!(
+        consolebook_server::backup::snapshots(&data)
+            .expect("snapshots")
+            .is_empty(),
+        "serve must not take a snapshot on refusal"
+    );
+    assert_eq!(
+        std::fs::read(data.database()).expect("read db after serve"),
+        before_bytes,
+        "serve must leave the database byte-identical"
+    );
 }
 
 #[tokio::test]
