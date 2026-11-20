@@ -48,7 +48,13 @@ The options for origin evidence were:
 - An unreleased change on `main` no longer reaches new installations; only
   a tagged release does.
 - Origin can be verified by people who want to, with standard tooling. The
-  default install trusts GitHub's release hosting over HTTPS plus the
+  loose command `gh attestation verify <file> -R FieldmouseWorks/consolebook`
+  accepts an attestation from any workflow, ref, or commit in the repository;
+  post-publish release verification therefore requires the strict form pinned
+  to `--signer-workflow FieldmouseWorks/consolebook/.github/workflows/release.yml`,
+  `--source-ref refs/tags/vX.Y.Z`, `--source-digest <merge-commit>`, and
+  `--deny-self-hosted-runners` (see [releasing.md](../releasing.md#verify-the-published-release)).
+  The default install trusts GitHub's release hosting over HTTPS plus the
   checksum, and the trust boundary is stated rather than implied.
 - A pinned-key signature, and the installer verifying it by default, stay
   open. Revisit them if agencies need offline verification or an origin
