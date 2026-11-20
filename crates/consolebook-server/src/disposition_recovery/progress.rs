@@ -427,7 +427,10 @@ pub async fn advance_to_copy_cleanup_pending(
 /// `completed`, clearing `last_error_code` and recording `completed_at`
 /// (durable progress interface for `#214`). Refuses if the run is still in
 /// `db_committed_vacuum_pending` or already `completed`.
-pub async fn mark_run_completed(pool: &SqlitePool, run_id: i64, completed_at: i64) -> Result<()> {
+pub async fn mark_run_completed<'e, E>(executor: E, run_id: i64, completed_at: i64) -> Result<()>
+where
+    E: sqlx::SqliteExecutor<'e>,
+{
     let affected = sqlx::query(
         "UPDATE disposition_run \
          SET state = 'completed', completed_at = ?1, last_error_code = NULL \
@@ -435,7 +438,7 @@ pub async fn mark_run_completed(pool: &SqlitePool, run_id: i64, completed_at: i6
     )
     .bind(completed_at)
     .bind(run_id)
-    .execute(pool)
+    .execute(executor)
     .await
     .context("marking disposition_run completed")?
     .rows_affected();

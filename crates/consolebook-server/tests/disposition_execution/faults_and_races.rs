@@ -751,3 +751,105 @@ async fn off_server_copy_cleanup_refuses_foreign_installation_even_on_matching_b
     .expect("report");
     assert!(completed.is_completed(), "{completed:?}");
 }
+
+#[tokio::test]
+async fn completion_audit_failure_rolls_back_run_completion_and_retries_cleanly() {
+    let fx = ExecFixture::new().await;
+    fx.set_destroy_policy(RecordClass::DailyReport, None, 30)
+        .await;
+    fx.set_destroy_policy(RecordClass::DispositionEvent, None, 3650)
+        .await;
+    let (record_id, finalized_at, _) = fx
+        .create_rich_amended_daily("2026-09-12", "AUDIT-ATOMIC")
+        .await;
+
+    let backups = fx.backups(false);
+    let evaluated_at = finalized_at + 31 * SECONDS_PER_DAY;
+    let preview = retention::preview_disposition_at(
+        &fx.pool,
+        fx.executor_id,
+        &DispositionPreviewInput {
+            record_ids: vec![record_id],
+        },
+        Some(&backups),
+        evaluated_at,
+    )
+    .await
+    .expect("call")
+    .expect("preview");
+    assert!(preview.eligible);
+
+    // Block only the `disposition_completed` audit insert with a temporary trigger
+    // so the completion transition and audit insert must succeed or roll back together.
+    sqlx::query(
+        "CREATE TRIGGER block_disposition_completed_audit \
+         BEFORE INSERT ON audit_event \
+         WHEN NEW.kind = 'disposition_completed' \
+         BEGIN \
+             SELECT RAISE(ABORT, 'injected completion audit failure'); \
+         END",
+    )
+    .execute(&fx.pool)
+    .await
+    .expect("install trigger");
+
+    let err = retention::execute_disposition_at(
+        &fx.pool,
+        fx.executor_id,
+        &DispositionExecutionInput {
+            record_ids: vec![record_id],
+            confirmation_digest: preview.confirmation_digest,
+            expires_at: preview.expires_at,
+            authority_reference: "INVENTED-AUDIT-ATOMIC".into(),
+            reason_code: DispositionReasonCode::ScheduledRetentionElapsed,
+            retain_version_hashes: true,
+        },
+        &backups,
+        evaluated_at + 1,
+    )
+    .await
+    .expect_err("completion audit failure must propagate");
+    assert!(
+        err.to_string()
+            .contains("injected completion audit failure")
+            || format!("{err:#}").contains("injected completion audit failure"),
+        "unexpected error: {err:#}"
+    );
+
+    // The run must NOT be marked completed without its audit row; it stays retryable.
+    let (run_id, state): (i64, String) =
+        sqlx::query_as("SELECT id, state FROM disposition_run ORDER BY id DESC LIMIT 1")
+            .fetch_one(&fx.pool)
+            .await
+            .expect("run");
+    assert_eq!(state, "copy_cleanup_pending");
+    let completed_audits: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM audit_event WHERE kind = 'disposition_completed'")
+            .fetch_one(&fx.pool)
+            .await
+            .expect("audit count");
+    assert_eq!(completed_audits, 0);
+
+    sqlx::query("DROP TRIGGER block_disposition_completed_audit")
+        .execute(&fx.pool)
+        .await
+        .expect("drop trigger");
+
+    let retried = retention::retry_disposition_run_at(
+        &fx.pool,
+        fx.executor_id,
+        run_id,
+        &backups,
+        evaluated_at + 2,
+    )
+    .await
+    .expect("call")
+    .expect("retry");
+    assert!(retried.is_completed(), "{retried:?}");
+    let completed_audits: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM audit_event WHERE kind = 'disposition_completed'")
+            .fetch_one(&fx.pool)
+            .await
+            .expect("audit count");
+    assert_eq!(completed_audits, 1);
+}

@@ -147,16 +147,22 @@ pub(super) async fn drive_post_commit_steps(
         .await;
     }
 
-    // Phase 4: Monotonic completion & minimal audit event.
-    disposition_recovery::mark_run_completed(pool, run_id, now).await?;
+    // Phase 4: Atomic completion transition & minimal audit event.
+    let mut tx = crate::storage::write_tx(pool)
+        .await
+        .context("starting disposition completion transaction")?;
+    disposition_recovery::mark_run_completed(&mut *tx, run_id, now).await?;
     audit::record_for_subject(
-        pool,
+        &mut *tx,
         EventKind::DispositionCompleted,
         Some(actor),
         None,
         Subject::DispositionRun(run_id),
     )
     .await?;
+    tx.commit()
+        .await
+        .context("committing disposition completion and audit event")?;
 
     report.state = DispositionRunState::Completed;
     report.last_error_code = None;
@@ -267,6 +273,13 @@ async fn clean_local_artifacts(
     }
     let inventory = disposition_recovery::enumerate_controlled_artifacts(&backups.data_dir, None)?;
     let mut removed = Vec::new();
+    let mut synced_dirs = std::collections::BTreeSet::new();
+    if backups.data_dir.backups().is_dir() {
+        synced_dirs.insert(backups.data_dir.backups());
+    }
+    if backups.data_dir.exports().is_dir() {
+        synced_dirs.insert(backups.data_dir.exports());
+    }
 
     for path in inventory
         .local_snapshots
@@ -278,6 +291,9 @@ async fn clean_local_artifacts(
         }
         std::fs::remove_file(&path)
             .with_context(|| format!("removing pre-disposition snapshot {}", path.display()))?;
+        if let Some(parent) = path.parent() {
+            synced_dirs.insert(parent.to_path_buf());
+        }
         removed.push(path);
     }
 
@@ -289,7 +305,14 @@ async fn clean_local_artifacts(
     {
         std::fs::remove_file(&path)
             .with_context(|| format!("removing pre-disposition artifact {}", path.display()))?;
+        if let Some(parent) = path.parent() {
+            synced_dirs.insert(parent.to_path_buf());
+        }
         removed.push(path);
+    }
+
+    for dir in synced_dirs {
+        sync_dir(&dir)?;
     }
 
     Ok(removed)
@@ -370,6 +393,9 @@ async fn clean_off_server_copies(
         removed.push(path);
     }
 
+    sync_dir(copy_dir)
+        .map_err(|err| (DispositionErrorCode::CopyCleanupFailed, format!("{err:#}")))?;
+
     let remaining = find_pre_disposition_snapshots(copy_dir, ledger)
         .await
         .map_err(|err| (DispositionErrorCode::CopyCleanupFailed, format!("{err:#}")))?;
@@ -381,6 +407,14 @@ async fn clean_off_server_copies(
     }
 
     Ok(removed)
+}
+
+/// Explicitly fsyncs a directory so unlinked entries are durable before
+/// marking a disposition run completed.
+fn sync_dir(dir: &Path) -> Result<()> {
+    std::fs::File::open(dir)
+        .and_then(|f| f.sync_all())
+        .with_context(|| format!("syncing directory {}", dir.display()))
 }
 
 /// Ensures `clean_snapshot` is mirrored in `copy_dir` along with the updated
