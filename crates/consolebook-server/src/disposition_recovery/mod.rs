@@ -240,10 +240,12 @@ async fn collect_live_db_ledger_for_restore(
     ledgers: &mut Vec<DispositionLedger>,
 ) -> Result<()> {
     // A catastrophically damaged live DB must not block its own recovery from
-    // intact ledger files, so unreadable live DBs are skipped here.
+    // intact ledger files, so unreadable live DBs are skipped here. Use the
+    // WAL-aware read-only diagnostic opener so committed disposition events
+    // still residing only in `-wal` after an unclean shutdown are observed.
     let db_path = data_dir.database();
     if db_path.exists()
-        && let Ok(live_pool) = storage::open_snapshot(&db_path).await
+        && let Ok(live_pool) = storage::open_diagnostic(&db_path).await
     {
         let live_id = storage::installation_id(&live_pool).await.ok();
         if live_id.as_deref() == Some(snapshot_installation_id) {
@@ -311,9 +313,11 @@ pub async fn verify_snapshot_for_publication(
             local_path_and_ledger = Some((local_path, local));
         }
 
+        // Use the WAL-aware read-only diagnostic opener on the live database
+        // so committed disposition events still in `-wal` are never missed.
         let db_path = local_data.database();
         if db_path.exists()
-            && let Ok(live_pool) = storage::open_snapshot(&db_path).await
+            && let Ok(live_pool) = storage::open_diagnostic(&db_path).await
         {
             // Pre-migration or uninitialized databases may lack an `instance`
             // row or `disposition_event` table; only read when identity exists.
@@ -439,24 +443,59 @@ pub(crate) fn verify_copy_dir_reachable_for_recovery(
     Ok(())
 }
 
-/// Checks that a freshly taken local snapshot does not contradict the
-/// installation's local recovery ledger (failing closed if the local ledger
-/// is corrupt, mismatched, or shows disposed records still present).
+/// Checks that a freshly taken local snapshot agrees with the installation's
+/// local recovery ledger and that the local ledger covers every
+/// `disposition_event` recorded in the snapshot. Fails closed if the local
+/// ledger is corrupt, mismatched, missing/stale relative to database
+/// disposition events, or shows disposed records still present in the snapshot.
 pub async fn verify_local_snapshot_against_ledger(
     data_dir: &DataDir,
     snapshot: &Path,
 ) -> Result<()> {
     let ledger_path = data_dir.disposition_ledger();
-    let Some(local) = read_ledger_if_present(&ledger_path).with_context(|| {
+    let local = read_ledger_if_present(&ledger_path).with_context(|| {
         format!(
             "checking local disposition ledger {}",
             ledger_path.display()
         )
-    })?
-    else {
+    })?;
+
+    let snap_pool = storage::open_snapshot(snapshot).await?;
+    let snapshot_id = match storage::installation_id(&snap_pool).await {
+        Ok(id) => id,
+        Err(err) => {
+            snap_pool.close().await;
+            if local.is_some() {
+                return Err(err).with_context(|| {
+                    format!(
+                        "reading installation identity of {} with local ledger present",
+                        snapshot.display()
+                    )
+                });
+            }
+            // Pre-migration uninitialized snapshots may not have an `instance`
+            // row yet when no disposition ledger exists.
+            return Ok(());
+        }
+    };
+    let snap_db_ledger = build_ledger_from_db(&snap_pool, 0).await?;
+    snap_pool.close().await;
+
+    let Some(local) = local else {
+        if !snap_db_ledger.entries.is_empty() {
+            let missing = snap_db_ledger
+                .entries
+                .iter()
+                .map(|e| e.evaluation_record_id)
+                .collect();
+            return Err(LedgerError::StaleOrMissingLocalLedger {
+                missing_record_ids: missing,
+            }
+            .into());
+        }
         return Ok(());
     };
-    let snapshot_id = crate::backup::snapshot_installation(snapshot).await?;
+
     if local.installation_id != snapshot_id {
         return Err(LedgerError::InstallationMismatch {
             path: ledger_path,
@@ -465,6 +504,25 @@ pub async fn verify_local_snapshot_against_ledger(
         }
         .into());
     }
+
+    let local_ids: BTreeSet<i64> = local
+        .entries
+        .iter()
+        .map(|e| e.evaluation_record_id)
+        .collect();
+    let missing: Vec<i64> = snap_db_ledger
+        .entries
+        .iter()
+        .map(|e| e.evaluation_record_id)
+        .filter(|id| !local_ids.contains(id))
+        .collect();
+    if !missing.is_empty() {
+        return Err(LedgerError::StaleOrMissingLocalLedger {
+            missing_record_ids: missing,
+        }
+        .into());
+    }
+
     if !local.entries.is_empty() {
         let check = inspect_snapshot_against_ledger(snapshot, &local).await?;
         if check.contains_disposed_content() {

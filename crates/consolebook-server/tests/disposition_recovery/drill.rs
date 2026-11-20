@@ -307,7 +307,8 @@ async fn missing_stale_corrupt_and_unreachable_recovery_evidence_fail_closed() {
     assert!(!missing_share.exists(), "doctor must not create copy dir");
 
     // 3. Stale/missing local ledger when live DB has disposition_event rows
-    // fails closed in restore, catch_up, and doctor.
+    // fails closed in restore, backup, catch_up, and doctor — including when
+    // the local ledger is canonical JSON but omits a database disposition event.
     let saved_ledger = std::fs::read(fx.data_dir.disposition_ledger()).expect("save");
     std::fs::remove_file(fx.data_dir.disposition_ledger()).expect("remove local ledger");
 
@@ -316,6 +317,17 @@ async fn missing_stale_corrupt_and_unreachable_recovery_evidence_fail_closed() {
         .expect_err("missing local ledger with live DB dispositions must fail closed");
     assert!(format!("{err:#}").contains("missing or stale"), "{err:#}");
 
+    let backups_before = list_names(&fx.data_dir.backups());
+    let err = backup::run(&fx.data_dir, 14)
+        .await
+        .expect_err("backup::run must fail closed when local ledger is missing");
+    assert!(format!("{err:#}").contains("missing or stale"), "{err:#}");
+    assert_eq!(
+        list_names(&fx.data_dir.backups()),
+        backups_before,
+        "failed backup must remove the unverified snapshot and skip pruning"
+    );
+
     let err = backup_copy::catch_up(&fx.data_dir, &fx.copy_dir, 14)
         .await
         .expect_err("catch_up must fail closed on missing local ledger");
@@ -323,6 +335,25 @@ async fn missing_stale_corrupt_and_unreachable_recovery_evidence_fail_closed() {
 
     let findings = doctor::run(&fx.data_dir, &doctor::Options::default()).await;
     assert!(doctor::has_failure(&findings), "{findings:?}");
+
+    // Canonical but stale local ledger (empty entries while DB has 1 event)
+    // must ALSO fail closed across backup, restore, catch_up, and doctor.
+    let stale_ledger = DispositionLedger::new(&fx.installation_id, fx.disposed_at - 10, vec![]);
+    disposition_recovery::write_ledger_atomic(&fx.data_dir.disposition_ledger(), &stale_ledger)
+        .expect("write stale ledger");
+    let err = backup::run(&fx.data_dir, 14)
+        .await
+        .expect_err("backup::run must fail closed on canonical-but-stale local ledger");
+    assert!(format!("{err:#}").contains("missing or stale"), "{err:#}");
+    assert_eq!(list_names(&fx.data_dir.backups()), backups_before);
+    let err = restore::run(&fx.data_dir, &fx.post_disposition_snapshot)
+        .await
+        .expect_err("restore must fail closed on stale local ledger");
+    assert!(format!("{err:#}").contains("missing or stale"), "{err:#}");
+    let err = backup_copy::catch_up(&fx.data_dir, &fx.copy_dir, 14)
+        .await
+        .expect_err("catch_up must fail closed on stale local ledger");
+    assert!(format!("{err:#}").contains("missing or stale"), "{err:#}");
 
     // 4. Corrupt local ledger fails closed in restore, backup, catch_up, and doctor.
     std::fs::write(fx.data_dir.disposition_ledger(), b"{corrupt").expect("corrupt");
@@ -569,4 +600,86 @@ async fn externally_encrypted_copy_recovery_follows_adr_0027_and_enforces_dispos
             .len(),
         1
     );
+}
+
+#[tokio::test]
+async fn wal_only_live_disposition_evidence_is_observed_by_restore_and_catch_up() {
+    let fx = DrillInstallation::new().await;
+
+    // Open a live writer, checkpoint existing state into the main DB file, and
+    // commit a new disposition_event that lives ONLY in `-wal` (simulating an
+    // unclean shutdown before checkpoint/ledger update).
+    let writer = storage::open(&fx.data_dir.database())
+        .await
+        .expect("open live writer");
+    let mut conn = writer.acquire().await.expect("writer connection");
+    sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+        .execute(&mut *conn)
+        .await
+        .expect("checkpoint");
+
+    let run_id: i64 = sqlx::query_scalar("SELECT MAX(id) FROM disposition_run")
+        .fetch_one(&mut *conn)
+        .await
+        .expect("run id");
+    let (enrollment_id, policy_id): (i64, i64) =
+        sqlx::query_as("SELECT enrollment_id, record_policy_id FROM disposition_event LIMIT 1")
+            .fetch_one(&mut *conn)
+            .await
+            .expect("seed ids");
+
+    let wal_only_record_id = 7777_i64;
+    sqlx::query(
+        "INSERT INTO disposition_event \
+         (disposition_run_id, evaluation_record_id, enrollment_id, record_class, record_policy_id, metadata_policy_id, version_count, earliest_finalized_at, latest_finalized_at, hashes_retained, actor_user_id, authority_reference, reason_code, method, outcome, disposed_at) \
+         VALUES (?1, ?2, ?3, 'daily_report', ?4, NULL, 1, ?5, ?5, 0, ?6, 'INVENTED-WAL-ONLY-2026', 'scheduled_retention_elapsed', 'lawful_destruction', 'disposed', ?7)",
+    )
+    .bind(run_id)
+    .bind(wal_only_record_id)
+    .bind(enrollment_id)
+    .bind(policy_id)
+    .bind(fx.disposed_at - 100)
+    .bind(fx.admin_id)
+    .bind(fx.disposed_at)
+    .execute(&mut *conn)
+    .await
+    .expect("commit wal-only disposition event");
+
+    // Prove the new event is present ONLY in -wal, not in the main DB file bytes.
+    let main_db_bytes = std::fs::read(fx.data_dir.database()).expect("db bytes");
+    assert!(
+        !main_db_bytes
+            .windows(b"INVENTED-WAL-ONLY-2026".len())
+            .any(|w| w == b"INVENTED-WAL-ONLY-2026"),
+        "fixture must keep the new event exclusively in -wal"
+    );
+    let wal_path = fx.data_dir.root().join("consolebook.db-wal");
+    assert!(
+        std::fs::metadata(&wal_path).expect("wal").len() > 32,
+        "fixture needs committed WAL frames"
+    );
+
+    // Local ledger only knows the earlier record, NOT wal_only_record_id.
+    // Both restore and catch_up must read the WAL-aware live DB and fail closed
+    // with StaleOrMissingLocalLedger naming wal_only_record_id.
+    let err = restore::run(&fx.data_dir, &fx.post_disposition_snapshot)
+        .await
+        .expect_err("restore must observe WAL-only disposition evidence and fail closed");
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("missing or stale") && msg.contains(&wal_only_record_id.to_string()),
+        "{msg}"
+    );
+
+    let err = backup_copy::catch_up(&fx.data_dir, &fx.copy_dir, 14)
+        .await
+        .expect_err("catch_up must observe WAL-only disposition evidence and fail closed");
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("missing or stale") && msg.contains(&wal_only_record_id.to_string()),
+        "{msg}"
+    );
+
+    drop(conn);
+    writer.close().await;
 }
