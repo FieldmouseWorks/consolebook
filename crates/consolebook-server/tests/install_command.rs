@@ -75,3 +75,106 @@ fn the_installer_carries_the_line_the_release_stamps() {
     assert_eq!(lines, [r#"RELEASED_VERSION="""#]);
     assert!(script.contains(r#"version="$RELEASED_VERSION""#));
 }
+
+/// Hardening directives `install/consolebook.service` must carry under
+/// `[Service]` (#125). Keep `UMask=0027` aligned with ADR 0023's `0750`
+/// data/copy directories, and enforce defense-in-depth sandboxing below the
+/// 4.0 exposure ceiling on `systemd-analyze security`.
+const REQUIRED_UNIT_HARDENING: &[&str] = &[
+    "UMask=0027",
+    "NoNewPrivileges=true",
+    "CapabilityBoundingSet=",
+    "ProtectSystem=strict",
+    "ProtectHome=true",
+    "PrivateTmp=true",
+    "PrivateDevices=true",
+    "ProtectClock=true",
+    "ProtectHostname=true",
+    "ProtectKernelTunables=true",
+    "ProtectKernelModules=true",
+    "ProtectKernelLogs=true",
+    "ProtectControlGroups=true",
+    "ProtectProc=invisible",
+    "RestrictNamespaces=true",
+    "RestrictRealtime=true",
+    "RestrictSUIDSGID=true",
+    "LockPersonality=true",
+    "MemoryDenyWriteExecute=true",
+    "RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX",
+    "SystemCallArchitectures=native",
+    "SystemCallFilter=@system-service",
+    "SystemCallFilter=~@privileged @resources",
+];
+
+fn missing_service_hardening(unit: &str) -> Vec<&'static str> {
+    let mut in_service = false;
+    let mut directives = Vec::new();
+    for raw in unit.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            in_service = line == "[Service]";
+            continue;
+        }
+        if in_service {
+            directives.push(line);
+        }
+    }
+    REQUIRED_UNIT_HARDENING
+        .iter()
+        .copied()
+        .filter(|required| !directives.contains(required))
+        .collect()
+}
+
+#[test]
+fn the_systemd_unit_carries_its_hardening_directives() {
+    let unit = std::fs::read_to_string(repository().join("install/consolebook.service"))
+        .expect("consolebook.service");
+    let missing = missing_service_hardening(&unit);
+    assert!(
+        missing.is_empty(),
+        "install/consolebook.service is missing hardening directives: {missing:?}"
+    );
+
+    // Negative controls: removing or commenting out any required directive, or
+    // moving it outside [Service], must be caught by the guard.
+    for required in REQUIRED_UNIT_HARDENING {
+        let dropped: String = unit
+            .lines()
+            .filter(|line| line.trim() != *required)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(
+            missing_service_hardening(&dropped),
+            vec![*required],
+            "dropping `{required}` must fail the hardening check"
+        );
+
+        let commented: String = unit
+            .lines()
+            .map(|line| {
+                if line.trim() == *required {
+                    format!("# {line}")
+                } else {
+                    line.to_owned()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(
+            missing_service_hardening(&commented),
+            vec![*required],
+            "commenting out `{required}` must fail the hardening check"
+        );
+    }
+
+    let wrong_section = unit.replacen("ProtectClock=true", "", 1) + "\n[Unit]\nProtectClock=true\n";
+    assert_eq!(
+        missing_service_hardening(&wrong_section),
+        vec!["ProtectClock=true"],
+        "a directive outside [Service] must not satisfy the guard"
+    );
+}
