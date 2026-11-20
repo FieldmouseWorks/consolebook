@@ -330,12 +330,14 @@ pub async fn create(
     };
 
     let now = OffsetDateTime::now_utc().unix_timestamp();
-    let result = sqlx::query(
+    let record_id = allocate_record_id(&mut tx).await?;
+    sqlx::query(
         "INSERT INTO evaluation_record
-             (enrollment_id, program_version_id, evaluation_form_id,
+             (id, enrollment_id, program_version_id, evaluation_form_id,
               owner_user_id, created_at, created_by)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?4)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?5)",
     )
+    .bind(record_id)
     .bind(enrollment_id)
     .bind(version_id)
     .bind(form_id)
@@ -344,7 +346,6 @@ pub async fn create(
     .execute(&mut *tx)
     .await
     .context("creating record")?;
-    let record_id = result.last_insert_rowid();
     append_event(&mut tx, record_id, "created", actor_user_id, None, now).await?;
     sqlx::query(
         "INSERT INTO evaluation_session (evaluation_record_id, training_session_id)
@@ -409,6 +410,27 @@ async fn resolve_form(
         [only] => Ok(*only),
         _ => Err(DraftRefusal::FormRequired),
     })
+}
+
+/// Allocates the next `evaluation_record.id` strictly above every existing
+/// record, every `disposition_event`, and `evaluation_record_id_floor` so a
+/// newly created draft can never reuse a lawfully disposed record ID
+/// (ADR 0030; #213). Must be called inside `storage::write_tx`.
+pub(crate) async fn allocate_record_id(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+) -> Result<i64> {
+    sqlx::query_scalar(
+        "SELECT MAX(v) + 1 FROM (
+             SELECT COALESCE(MAX(id), 0) AS v FROM evaluation_record
+             UNION ALL
+             SELECT COALESCE(MAX(evaluation_record_id), 0) AS v FROM disposition_event
+             UNION ALL
+             SELECT COALESCE(MAX(last_reserved_id), 0) AS v FROM evaluation_record_id_floor
+         )",
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .context("allocating next evaluation_record id")
 }
 
 pub(crate) async fn append_event(

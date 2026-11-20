@@ -751,9 +751,9 @@ async fn the_export_carries_every_table_and_verifies() {
     }
     assert_eq!(names, expected);
 
-    // The ledger: 47 tables with their counts and hashes, and the five
+    // The ledger: 48 tables with their counts and hashes, and the five
     // exclusions.
-    assert_eq!(manifest.tables.len(), 47);
+    assert_eq!(manifest.tables.len(), 48);
     for (stated, table) in manifest.tables.iter().zip(&spec::TABLES) {
         assert_eq!(stated.name, table.name);
         assert_eq!(stated.rows, fx.count(table.name).await, "{}", table.name);
@@ -848,7 +848,7 @@ async fn the_export_carries_every_table_and_verifies() {
     assert!(report.verified(), "{:#?}", all_findings(&report));
     assert_eq!(report.kind, Some(ArchiveKind::InstallationExport));
     assert_eq!(report.units.len(), 3);
-    assert_eq!(report.tables.len(), 47);
+    assert_eq!(report.tables.len(), 48);
     for table in &report.tables {
         let stated = manifest
             .tables
@@ -953,7 +953,7 @@ async fn the_cli_prints_a_line_per_unit_and_table_document() {
         );
     }
     assert!(
-        stdout.contains("verified 3 of 3 units and 47 of 47 documents"),
+        stdout.contains("verified 3 of 3 units and 48 of 48 documents"),
         "{stdout}"
     );
     let _ = (p.spare_version_id, p.amended_record_id, p.summary_record_id);

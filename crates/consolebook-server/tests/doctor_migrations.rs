@@ -482,17 +482,15 @@ async fn a_gap_migration_with_a_changed_checksum_is_refused_without_changing_the
     let data = DataDir::new(tmp.path().join("data"));
     data.ensure_layout().expect("layout");
 
-    // Apply every migration except the second-to-last, leaving a genuine
-    // pending gap before an applied later migration whose checksum is then
-    // corrupted.
+    // Apply every migration and then remove the second-to-last record from
+    // `_sqlx_migrations`, leaving a genuine pending gap before an applied
+    // later migration whose checksum is then corrupted (works regardless of
+    // whether migration N references tables introduced in migration N-1).
     let all = &MIGRATOR.migrations;
     assert!(all.len() >= 3, "need a gap before the newest migration");
     let gap_index = all.len() - 2;
     let gap_version = all[gap_index].version;
     let newest = all[all.len() - 1].version;
-    let mut with_gap = all[..gap_index].to_vec();
-    with_gap.push(all[all.len() - 1].clone());
-    let migrator = sqlx::migrate::Migrator::with_migrations(with_gap);
     let pool = sqlx::SqlitePool::connect_with(
         sqlx::sqlite::SqliteConnectOptions::new()
             .filename(data.database())
@@ -501,7 +499,12 @@ async fn a_gap_migration_with_a_changed_checksum_is_refused_without_changing_the
     )
     .await
     .expect("fixture connection");
-    migrator.run(&pool).await.expect("migrations with gap");
+    MIGRATOR.run(&pool).await.expect("apply migrations");
+    sqlx::query("DELETE FROM _sqlx_migrations WHERE version = ?1")
+        .bind(gap_version)
+        .execute(&pool)
+        .await
+        .expect("introduce migration history gap");
     sqlx::query("INSERT INTO instance (id, installation_id, created_at_utc) VALUES (1, 'invented-gap-id', '2026-10-01T00:00:00Z')")
         .execute(&pool)
         .await

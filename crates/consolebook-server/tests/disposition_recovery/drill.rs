@@ -683,3 +683,170 @@ async fn wal_only_live_disposition_evidence_is_observed_by_restore_and_catch_up(
     drop(conn);
     writer.close().await;
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn restore_persists_recovery_ledger_before_promoting_database() {
+    use std::os::unix::fs::PermissionsExt;
+
+    struct RestoreDirMode(std::path::PathBuf);
+    impl Drop for RestoreDirMode {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+        }
+    }
+
+    let fx = DrillInstallation::new().await;
+    let clean_tmp = tempfile::tempdir().expect("clean host");
+    let clean_data = DataDir::new(clean_tmp.path().join("data"));
+    clean_data.ensure_layout().expect("layout");
+    let exported_ledger = clean_tmp.path().join("offline-ledger.json");
+    std::fs::copy(fx.data_dir.disposition_ledger(), &exported_ledger).expect("export ledger");
+
+    // Pre-create serve.lock as writable so ServeLock::acquire succeeds, then
+    // make data/instance/ read-only so creating the temporary ledger file fails
+    // right at the pre-promotion ledger persistence step.
+    let instance_dir = clean_data.instance();
+    std::fs::write(instance_dir.join("serve.lock"), b"").expect("pre-create lock");
+    let _guard = RestoreDirMode(instance_dir.clone());
+    std::fs::set_permissions(&instance_dir, std::fs::Permissions::from_mode(0o555))
+        .expect("chmod instance read-only");
+    assert!(
+        std::fs::File::create(instance_dir.join("probe")).is_err(),
+        "run permission tests as an unprivileged user"
+    );
+
+    let err = restore::run_with_options(
+        &clean_data,
+        &fx.pre_creation_clean_snapshot,
+        &RestoreOptions {
+            backup_copy_dir: None,
+            disposition_ledger: Some(&exported_ledger),
+        },
+    )
+    .await
+    .expect_err("restore must fail closed when local recovery ledger cannot be persisted");
+    assert!(
+        format!("{err:#}").contains("persisting disposition recovery ledger"),
+        "{err:#}"
+    );
+    assert!(
+        !clean_data.database().exists(),
+        "database must not be promoted before local recovery ledger is durable"
+    );
+}
+
+#[tokio::test]
+async fn restored_older_snapshot_never_reuses_ledger_listed_disposed_record_ids() {
+    let fx = DrillInstallation::new().await;
+    let clean_tmp = tempfile::tempdir().expect("clean host");
+    let clean_data = DataDir::new(clean_tmp.path().join("data"));
+    clean_data.ensure_layout().expect("layout");
+    let clean_share_fs = other_filesystem(clean_tmp.path());
+    let clean_share = clean_share_fs.path().join("offsite");
+    std::fs::create_dir_all(&clean_share).expect("share");
+
+    let exported_ledger = clean_tmp.path().join("offline-ledger.json");
+    std::fs::copy(fx.data_dir.disposition_ledger(), &exported_ledger).expect("export ledger");
+
+    // Restore the snapshot taken BEFORE disposed_record_id (id = 2) existed:
+    // it has only retained_record_id (id = 1) and zero disposition_event rows.
+    restore::run_with_options(
+        &clean_data,
+        &fx.pre_creation_clean_snapshot,
+        &RestoreOptions {
+            backup_copy_dir: None,
+            disposition_ledger: Some(&exported_ledger),
+        },
+    )
+    .await
+    .expect("restore pre-creation snapshot with explicit ledger");
+
+    let pool = storage::open_existing(&clean_data.database())
+        .await
+        .expect("open restored");
+
+    // Raw SQL attempting to reuse disposed_record_id (explicitly or via SQLite
+    // default rowid allocation) is rejected by the database trigger.
+    let (pv_id, owner_id): (i64, i64) = sqlx::query_as(
+        "SELECT program_version_id, owner_user_id FROM evaluation_record WHERE id = ?1",
+    )
+    .bind(fx.retained_record_id)
+    .fetch_one(&pool)
+    .await
+    .expect("retained record");
+    assert!(
+        sqlx::query(
+            "INSERT INTO evaluation_record (id, enrollment_id, program_version_id, evaluation_form_id, owner_user_id, created_at, created_by) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 1780000000, ?5)",
+        )
+        .bind(fx.disposed_record_id)
+        .bind(fx.enrollment_id)
+        .bind(pv_id)
+        .bind(fx.daily_form_id)
+        .bind(owner_id)
+        .execute(&pool)
+        .await
+        .is_err(),
+        "explicit reuse of ledger-listed disposed record id must be blocked by schema"
+    );
+    assert!(
+        sqlx::query(
+            "INSERT INTO evaluation_record (enrollment_id, program_version_id, evaluation_form_id, owner_user_id, created_at, created_by) \
+             VALUES (?1, ?2, ?3, ?4, 1780000000, ?4)",
+        )
+        .bind(fx.enrollment_id)
+        .bind(pv_id)
+        .bind(fx.daily_form_id)
+        .bind(owner_id)
+        .execute(&pool)
+        .await
+        .is_err(),
+        "implicit SQLite rowid reuse of ledger-listed disposed record id must be blocked by schema"
+    );
+
+    // Creating a new draft through the service allocates strictly above
+    // disposed_record_id so backups and off-server copies never collide with it.
+    let session_id = consolebook_server::training_sessions::create(
+        &pool,
+        fx.admin_id,
+        fx.enrollment_id,
+        &consolebook_server::training_sessions::SessionInput {
+            business_date: "2026-02-01".into(),
+            timezone: "UTC".into(),
+            local_start: "2026-02-01T08:00".into(),
+            local_end: Some("2026-02-01T16:00".into()),
+            disposition: Some(consolebook_server::training_sessions::Disposition::Completed),
+            phase_id: None,
+            trainer_user_ids: vec![fx.instructor_id],
+        },
+    )
+    .await
+    .expect("call")
+    .expect("session");
+    let new_record_id = consolebook_server::evaluation_drafts::create(
+        &pool,
+        fx.instructor_id,
+        session_id,
+        Some(fx.daily_form_id),
+    )
+    .await
+    .expect("call")
+    .expect("new draft");
+    assert!(
+        new_record_id > fx.disposed_record_id,
+        "new draft id {new_record_id} must exceed ledger-listed disposed id {}",
+        fx.disposed_record_id
+    );
+    pool.close().await;
+
+    // Local backups and off-server copies continue succeeding cleanly.
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    backup::run(&clean_data, 14)
+        .await
+        .expect("backup after creating new draft must succeed");
+    backup_copy::catch_up(&clean_data, &clean_share, 14)
+        .await
+        .expect("off-server catch-up after creating new draft must succeed")
+        .expect("copied clean snapshot");
+}

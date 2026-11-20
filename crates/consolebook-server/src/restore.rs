@@ -101,6 +101,15 @@ pub async fn run_with_options(
     let database = data_dir.database();
     let pre_restore_snapshot = set_aside_current_database(data_dir, &database).await?;
 
+    // Persist any collected recovery ledger BEFORE promoting the snapshot into
+    // place so a crash or I/O failure between copying the database and writing
+    // the ledger can never leave a clean host with a promoted database and no
+    // local resurrection protection (ADR 0030 §6).
+    if let Some(ledger) = &evidence.effective_ledger {
+        disposition_recovery::write_ledger_atomic(&data_dir.disposition_ledger(), ledger)
+            .context("persisting disposition recovery ledger before promoting restored database")?;
+    }
+
     // WAL sidecar files belong to the old database; a stale pair must not
     // be replayed into the restored one.
     for sidecar in ["-wal", "-shm"] {
@@ -180,6 +189,7 @@ async fn persist_restored_ledger(
     }
     let mut merged = disposition_recovery::merge_ledgers(installation_id, &to_merge)?;
     merged.updated_at = merged.updated_at.max(now);
+    disposition_recovery::advance_record_id_floor(pool, &merged).await?;
     let local_path = data_dir.disposition_ledger();
     disposition_recovery::write_ledger_atomic(&local_path, &merged)?;
     if let Some(copy_dir) = options.backup_copy_dir

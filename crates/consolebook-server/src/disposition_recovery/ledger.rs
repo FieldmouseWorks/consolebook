@@ -728,6 +728,31 @@ pub async fn inspect_snapshot_against_ledger(
     })
 }
 
+/// Monotonically advances `evaluation_record_id_floor.last_reserved_id` to at
+/// least the highest `evaluation_record_id` recorded in `ledger`, preventing
+/// new drafts created after restoring an older snapshot from ever reusing a
+/// ledger-listed disposed record ID (ADR 0030; #213).
+pub async fn advance_record_id_floor(pool: &SqlitePool, ledger: &DispositionLedger) -> Result<()> {
+    let Some(max_id) = ledger
+        .entries
+        .iter()
+        .map(|entry| entry.evaluation_record_id)
+        .max()
+    else {
+        return Ok(());
+    };
+    sqlx::query(
+        "UPDATE evaluation_record_id_floor \
+         SET last_reserved_id = MAX(last_reserved_id, ?1) \
+         WHERE id = 1",
+    )
+    .bind(max_id)
+    .execute(pool)
+    .await
+    .context("advancing evaluation_record_id_floor from recovery ledger")?;
+    Ok(())
+}
+
 fn is_sha256_hex(value: &str) -> bool {
     value.len() == 64
         && value

@@ -12,6 +12,8 @@ const GOLDEN_V1: &[u8] = include_bytes!("../fixtures/installation-export-v1.zip"
 const GOLDEN_V2: &[u8] = include_bytes!("../fixtures/installation-export-v2.zip");
 /// The committed version-3 archive (adds the four minimal disposition evidence tables).
 const GOLDEN_V3: &[u8] = include_bytes!("../fixtures/installation-export-v3.zip");
+/// The committed version-4 archive (adds `evaluation_record_id_floor`).
+const GOLDEN_V4: &[u8] = include_bytes!("../fixtures/installation-export-v4.zip");
 /// Set to `1` to let [`regenerate`] write a golden archive.
 const REGENERATE_ENV: &str = "CONSOLEBOOK_REGENERATE_GOLDEN";
 
@@ -177,6 +179,28 @@ fn the_golden_version_3_archive_verifies() {
             .iter()
             .all(|table| table.rows.is_some_and(|count| count > 0)),
         "every v3 carried table has at least one row"
+    );
+}
+
+/// Every build also verifies the committed version-4 archive beside versions 1, 2, and 3.
+#[test]
+fn the_golden_version_4_archive_verifies() {
+    let report = export_verify::verify_archive(GOLDEN_V4);
+    assert!(report.verified(), "{:#?}", all_findings(&report));
+    assert_eq!(report.kind, Some(ArchiveKind::InstallationExport));
+    let listed = entries(GOLDEN_V4);
+    let manifest = manifest_of(&listed);
+    assert_eq!(manifest.format, INSTALLATION_FORMAT);
+    assert_eq!(manifest.format_version, 4);
+    assert_eq!(report.units.len(), 3);
+    assert_eq!(manifest.excluded.len(), 5);
+    assert_eq!(report.tables.len(), 48);
+    assert!(
+        report
+            .tables
+            .iter()
+            .all(|table| table.rows.is_some_and(|count| count > 0)),
+        "every v4 carried table has at least one row"
     );
 }
 

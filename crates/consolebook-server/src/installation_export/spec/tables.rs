@@ -21,7 +21,7 @@ pub const V1_RETENTION_AUTHORITY_EVENT: Table = Table {
 };
 
 /// Every carried table, ascending by name.
-pub const TABLES: [Table; 47] = [
+pub const TABLES: [Table; 48] = [
     Table {
         name: "acknowledgment",
         key: ID,
@@ -298,6 +298,11 @@ pub const TABLES: [Table; 47] = [
             int("created_at"),
             int("created_by").null().to("user"),
         ],
+    },
+    Table {
+        name: "evaluation_record_id_floor",
+        key: ID,
+        columns: &[int("id"), int("last_reserved_id")],
     },
     Table {
         name: "evaluation_session",

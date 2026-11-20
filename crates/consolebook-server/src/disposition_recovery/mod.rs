@@ -28,9 +28,9 @@ use crate::storage;
 pub use ledger::{
     DISPOSITION_LEDGER_FILENAME, DISPOSITION_LEDGER_FORMAT, DISPOSITION_LEDGER_FORMAT_VERSION,
     DispositionLedger, DispositionLedgerEntry, LedgerError, SnapshotDispositionCheck,
-    build_ledger_from_db, encode_canonical, inspect_snapshot_against_ledger, merge_ledgers,
-    mirror_ledger_to_copy_dir, parse_and_verify, read_ledger_if_present, read_required_ledger,
-    sync_local_ledger_from_db, write_ledger_atomic,
+    advance_record_id_floor, build_ledger_from_db, encode_canonical,
+    inspect_snapshot_against_ledger, merge_ledgers, mirror_ledger_to_copy_dir, parse_and_verify,
+    read_ledger_if_present, read_required_ledger, sync_local_ledger_from_db, write_ledger_atomic,
 };
 pub use progress::{
     ControlledArtifactsInventory, CopyArtifactsInventory, CopyLedgerStatus, DispositionRunRecord,
