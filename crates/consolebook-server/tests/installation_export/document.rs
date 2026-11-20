@@ -268,6 +268,10 @@ const RECORDED_FINGERPRINTS: &[(i64, &str)] = &[
         2,
         "1fc181d68efe4cc5a38196808252cf2dcc84da70434f2ceba08bd3c3570d1b2a",
     ),
+    (
+        3,
+        "ca8b4e8e111383f2dcf977ac5c82331b288383bbf7314d7a1daab6cfc9b390fd",
+    ),
 ];
 
 #[test]
@@ -394,7 +398,7 @@ fn a_drifted_format_document_is_reported() {
         // An exclusion in the credentials bullet.
         ("and `setup_code` tables", "tables", "credentials:"),
         // A count.
-        ("43 carried tables", "44 carried tables", "counts:"),
+        ("47 carried tables", "48 carried tables", "counts:"),
     ];
     for (from, to, reported) in edits {
         assert!(

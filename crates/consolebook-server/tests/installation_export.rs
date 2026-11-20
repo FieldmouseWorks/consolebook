@@ -594,6 +594,45 @@ async fn populate() -> Populated {
     .expect("call")
     .expect("withdrawn");
 
+    // Populate the minimal disposition evidence tables (migration 0018) with
+    // one invented tombstone (opaque disposed record id 999) and boundary row.
+    let meta_policy_id = retention::create_policy(
+        &fx.pool,
+        fx.admin_id,
+        &PolicyInput {
+            record_class: RecordClass::DispositionEvent,
+            expected_current_id: None,
+            authority: "INVENTED-META-2026".into(),
+            retention_trigger: RetentionTrigger::DisposedAt,
+            retention_days: 365,
+            action: RetentionAction::Destroy,
+            reason: "Invented tombstone schedule.".into(),
+        },
+    )
+    .await
+    .expect("call")
+    .expect("meta policy");
+    let daily_policy_id: i64 = sqlx::query_scalar(
+        "SELECT id FROM retention_policy WHERE record_class = 'daily_report' ORDER BY id DESC LIMIT 1",
+    )
+    .fetch_one(&fx.pool)
+    .await
+    .expect("daily policy");
+    let hex_a = "a".repeat(64);
+    let hex_b = "b".repeat(64);
+    let run_id: i64 = sqlx::query(
+        "INSERT INTO disposition_run (actor_user_id, confirmation_digest, authority_reference, reason_code, method, state, started_at, completed_at) VALUES (?1, ?2, 'INVENTED-DISP-1', 'scheduled_retention_elapsed', 'lawful_destruction', 'completed', 1788289100, 1788289150)",
+    ).bind(fx.admin_id).bind(&hex_a).execute(&fx.pool).await.expect("run").last_insert_rowid();
+    let event_id: i64 = sqlx::query(
+        "INSERT INTO disposition_event (disposition_run_id, evaluation_record_id, enrollment_id, record_class, record_policy_id, metadata_policy_id, version_count, earliest_finalized_at, latest_finalized_at, hashes_retained, actor_user_id, authority_reference, reason_code, method, outcome, disposed_at) VALUES (?1, 999, ?2, 'daily_report', ?3, ?4, 1, 1788288000, 1788288000, 1, ?5, 'INVENTED-DISP-1', 'scheduled_retention_elapsed', 'lawful_destruction', 'disposed', 1788289100)",
+    ).bind(run_id).bind(enrollment_id).bind(daily_policy_id).bind(meta_policy_id).bind(fx.admin_id).execute(&fx.pool).await.expect("event").last_insert_rowid();
+    sqlx::query(
+        "INSERT INTO disposition_version_hash (disposition_event_id, version_number, record_schema, content_hash, chain_hash, predecessor_content_hash, finalized_at) VALUES (?1, 1, 2, ?2, ?3, NULL, 1788288000)",
+    ).bind(event_id).bind(&hex_a).bind(&hex_b).execute(&fx.pool).await.expect("version hash");
+    sqlx::query(
+        "INSERT INTO disposition_boundary_checkpoint (disposition_run_id, metadata_policy_id, authority_reference, reason_code, expired_event_count, boundary_through_disposed_at, recorded_by, recorded_at) VALUES (?1, ?2, 'INVENTED-META-2026', 'metadata_retention_elapsed', 1, 1788288500, ?3, 1788289150)",
+    ).bind(run_id).bind(meta_policy_id).bind(fx.admin_id).execute(&fx.pool).await.expect("checkpoint");
+
     Populated {
         fx,
         taylor_id,
@@ -712,9 +751,9 @@ async fn the_export_carries_every_table_and_verifies() {
     }
     assert_eq!(names, expected);
 
-    // The ledger: 43 tables with their counts and hashes, and the five
+    // The ledger: 47 tables with their counts and hashes, and the five
     // exclusions.
-    assert_eq!(manifest.tables.len(), 43);
+    assert_eq!(manifest.tables.len(), 47);
     for (stated, table) in manifest.tables.iter().zip(&spec::TABLES) {
         assert_eq!(stated.name, table.name);
         assert_eq!(stated.rows, fx.count(table.name).await, "{}", table.name);
@@ -809,7 +848,7 @@ async fn the_export_carries_every_table_and_verifies() {
     assert!(report.verified(), "{:#?}", all_findings(&report));
     assert_eq!(report.kind, Some(ArchiveKind::InstallationExport));
     assert_eq!(report.units.len(), 3);
-    assert_eq!(report.tables.len(), 43);
+    assert_eq!(report.tables.len(), 47);
     for table in &report.tables {
         let stated = manifest
             .tables
@@ -914,7 +953,7 @@ async fn the_cli_prints_a_line_per_unit_and_table_document() {
         );
     }
     assert!(
-        stdout.contains("verified 3 of 3 units and 43 of 43 documents"),
+        stdout.contains("verified 3 of 3 units and 47 of 47 documents"),
         "{stdout}"
     );
     let _ = (p.spare_version_id, p.amended_record_id, p.summary_record_id);

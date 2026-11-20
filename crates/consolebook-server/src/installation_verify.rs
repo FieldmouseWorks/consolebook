@@ -321,7 +321,7 @@ fn ledger_findings(manifest: &InstallationManifest) -> Vec<Finding> {
     }
     for entry in &manifest.tables {
         *occurrences.entry(&entry.name).or_default() += 1;
-        if spec::table(&entry.name).is_none() {
+        if spec::table_for_version(manifest.format_version, &entry.name).is_none() {
             findings.push(finding(InstallationFinding::LedgerUnknown {
                 list: "tables",
                 name: entry.name.clone(),
@@ -358,7 +358,7 @@ fn ledger_findings(manifest: &InstallationManifest) -> Vec<Finding> {
     }
     let carried: BTreeSet<&str> = manifest.tables.iter().map(|e| e.name.as_str()).collect();
     let excluded: BTreeSet<&str> = manifest.excluded.iter().map(|e| e.name.as_str()).collect();
-    for table in &spec::TABLES {
+    for table in spec::tables_for_version(manifest.format_version) {
         if !carried.contains(table.name) {
             findings.push(finding(InstallationFinding::LedgerMissing {
                 name: table.name.to_owned(),

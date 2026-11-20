@@ -244,11 +244,77 @@ const FLOOR_V2_ADDED: &[(&str, &str, &[&str])] = &[(
     &["manage_retention", "execute_disposition"],
 )];
 
+/// Additional vocabulary columns introduced in `format_version` 3 (migration 0018).
+const FLOOR_V3_ADDED: &[(&str, &str, &[&str])] = &[
+    (
+        "disposition_boundary_checkpoint",
+        "reason_code",
+        &["metadata_retention_elapsed"],
+    ),
+    (
+        "disposition_event",
+        "record_class",
+        &["daily_report", "weekly_summary", "phase_evaluation"],
+    ),
+    (
+        "disposition_event",
+        "reason_code",
+        &[
+            "scheduled_retention_elapsed",
+            "restore_ledger_reconciliation",
+        ],
+    ),
+    (
+        "disposition_event",
+        "method",
+        &["lawful_destruction", "restore_reconciliation"],
+    ),
+    ("disposition_event", "outcome", &["disposed"]),
+    (
+        "disposition_run",
+        "reason_code",
+        &[
+            "scheduled_retention_elapsed",
+            "restore_ledger_reconciliation",
+            "metadata_retention_elapsed",
+        ],
+    ),
+    (
+        "disposition_run",
+        "method",
+        &["lawful_destruction", "restore_reconciliation"],
+    ),
+    (
+        "disposition_run",
+        "state",
+        &[
+            "db_committed_vacuum_pending",
+            "copy_cleanup_pending",
+            "completed",
+        ],
+    ),
+    (
+        "disposition_run",
+        "last_error_code",
+        &[
+            "vacuum_failed",
+            "ledger_write_failed",
+            "clean_snapshot_failed",
+            "local_cleanup_failed",
+            "copy_dir_unreachable",
+            "copy_cleanup_failed",
+        ],
+    ),
+];
+
 #[test]
 fn vocabularies_keep_every_value_of_their_format_version() {
     let mut floor_columns: Vec<(&str, &str)> = FLOOR_V1.iter().map(|(t, c, _)| (*t, *c)).collect();
     if INSTALLATION_FORMAT_VERSION >= 2 {
         floor_columns.extend(FLOOR_V2_ADDED.iter().map(|(t, c, _)| (*t, *c)));
+    }
+    if INSTALLATION_FORMAT_VERSION >= 3 {
+        floor_columns.extend(FLOOR_V3_ADDED.iter().map(|(t, c, _)| (*t, *c)));
     }
     // Every vocabulary column of this version is in the floor.
     for table in &spec::TABLES {
@@ -269,6 +335,10 @@ fn vocabularies_keep_every_value_of_their_format_version() {
     );
     assert_eq!(
         floor_findings(FLOOR_V2_ADDED, &spec::TABLES),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        floor_findings(FLOOR_V3_ADDED, &spec::TABLES),
         Vec::<String>::new()
     );
 }

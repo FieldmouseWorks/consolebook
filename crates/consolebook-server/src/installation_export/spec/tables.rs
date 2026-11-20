@@ -21,7 +21,7 @@ pub const V1_RETENTION_AUTHORITY_EVENT: Table = Table {
 };
 
 /// Every carried table, ascending by name.
-pub const TABLES: [Table; 43] = [
+pub const TABLES: [Table; 47] = [
     Table {
         name: "acknowledgment",
         key: ID,
@@ -116,6 +116,92 @@ pub const TABLES: [Table; 43] = [
             int("actor_user_id").to("user"),
             int("to_user_id").null().to("user"),
             int("recorded_at"),
+        ],
+    },
+    Table {
+        name: "disposition_boundary_checkpoint",
+        key: ID,
+        columns: &[
+            int("id"),
+            int("disposition_run_id").to("disposition_run"),
+            int("metadata_policy_id").to("retention_policy"),
+            text("authority_reference"),
+            text("reason_code").one_of(&["metadata_retention_elapsed"]),
+            int("expired_event_count"),
+            int("boundary_through_disposed_at"),
+            int("recorded_by").to("user"),
+            int("recorded_at"),
+        ],
+    },
+    Table {
+        name: "disposition_event",
+        key: ID,
+        columns: &[
+            int("id"),
+            int("disposition_run_id").to("disposition_run"),
+            int("evaluation_record_id"),
+            int("enrollment_id").to("enrollment"),
+            text("record_class").one_of(&["daily_report", "weekly_summary", "phase_evaluation"]),
+            int("record_policy_id").to("retention_policy"),
+            int("metadata_policy_id").null().to("retention_policy"),
+            int("version_count"),
+            int("earliest_finalized_at"),
+            int("latest_finalized_at"),
+            flag("hashes_retained"),
+            int("actor_user_id").to("user"),
+            text("authority_reference"),
+            text("reason_code").one_of(&[
+                "scheduled_retention_elapsed",
+                "restore_ledger_reconciliation",
+            ]),
+            text("method").one_of(&["lawful_destruction", "restore_reconciliation"]),
+            text("outcome").one_of(&["disposed"]),
+            int("disposed_at"),
+        ],
+    },
+    Table {
+        name: "disposition_run",
+        key: ID,
+        columns: &[
+            int("id"),
+            int("actor_user_id").to("user"),
+            text("confirmation_digest").hex64(),
+            text("authority_reference"),
+            text("reason_code").one_of(&[
+                "scheduled_retention_elapsed",
+                "restore_ledger_reconciliation",
+                "metadata_retention_elapsed",
+            ]),
+            text("method").one_of(&["lawful_destruction", "restore_reconciliation"]),
+            text("state").one_of(&[
+                "db_committed_vacuum_pending",
+                "copy_cleanup_pending",
+                "completed",
+            ]),
+            int("started_at"),
+            int("completed_at").null(),
+            text("last_error_code").null().one_of(&[
+                "vacuum_failed",
+                "ledger_write_failed",
+                "clean_snapshot_failed",
+                "local_cleanup_failed",
+                "copy_dir_unreachable",
+                "copy_cleanup_failed",
+            ]),
+        ],
+    },
+    Table {
+        name: "disposition_version_hash",
+        key: ID,
+        columns: &[
+            int("id"),
+            int("disposition_event_id").to("disposition_event"),
+            int("version_number"),
+            int("record_schema"),
+            text("content_hash").hex64(),
+            text("chain_hash").hex64(),
+            text("predecessor_content_hash").null().hex64(),
+            int("finalized_at"),
         ],
     },
     Table {
