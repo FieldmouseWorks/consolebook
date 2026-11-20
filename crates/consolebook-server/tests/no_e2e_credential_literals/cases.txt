@@ -1,0 +1,161 @@
+Case corpus for tests/no_e2e_credential_literals.rs (#143).
+Each case begins with `=== <id> findings [Shape:subject:line,…]`,
+`=== <id> missed <header item>`, or `=== <id> robust`.
+
+=== binding-single-quote findings Binding:PASSWORD:1
+const PASSWORD = 'invented-1';
+
+=== binding-double-quote findings Binding:ADMIN_PASSWORD:1
+const ADMIN_PASSWORD = "invented-1";
+
+=== binding-static-template findings Binding:NEW_PASSPHRASE:1
+const NEW_PASSPHRASE = `invented-1`;
+
+=== binding-let-typed findings Binding:clientSecret:1
+let clientSecret: string = 'invented-1';
+
+=== binding-var-array findings Binding:passwords:1
+var passwords = ['a', 'b'];
+
+=== binding-multiline findings Binding:JORDAN_PASSWORD:2
+const JORDAN_PASSWORD =
+	'invented-1';
+
+=== binding-asi-stopped findings
+const PASSWORD = testPassword()
+const agency = 'Example County'
+
+=== binding-runtime-helper findings
+const PASSWORD = testPassword();
+const JORDAN_PASSWORD = freshTestPassword();
+const WRONG = wrongTestPassword();
+
+=== binding-empty-allowed findings
+const PASSWORD = '';
+const OTHER_SECRET = "";
+const EMPTY_TEMPLATE = ``;
+
+=== field-ident-key findings Field:password:3
+const payload = {
+	username: 'avery.admin',
+	password: 'invented-1'
+};
+
+=== field-quoted-key findings Field:new_password:2
+const payload = {
+	'new_password': 'invented-1'
+};
+
+=== field-double-quoted-key findings Field:clientSecret:2
+const payload = {
+	"clientSecret": `invented-1`
+};
+
+=== field-string-constructor findings Field:password:1
+const body = { password: String('invented-1') };
+
+=== field-runtime-value findings
+const payload = {
+	username: 'avery.admin',
+	password: testPassword()
+};
+
+=== field-ts-type-annotation findings
+async function resetAndLogin(page: Page, username: string, password: string) {
+	return { username, password };
+}
+
+=== embedded-json-single-quoted findings EmbeddedJson:password:1
+const body = '{"username":"avery.admin","password":"invented-1"}';
+
+=== embedded-json-escaped findings EmbeddedJson:passphrase:1
+const body = "{\"passphrase\":\"invented-1\"}";
+
+=== embedded-json-empty-allowed findings
+const body = '{"password":""}';
+
+=== fill-label-literal findings Fill:Administrator password:1
+await page.getByLabel('Administrator password').fill('invented-1');
+
+=== fill-label-with-options findings Fill:Password:1
+await page.getByLabel('Password', { exact: true }).fill('wrong-1');
+
+=== fill-placeholder-literal findings Fill:New password:1
+await page.getByPlaceholder('New password').fill(`invented-1`);
+
+=== fill-label-runtime-allowed findings
+await page.getByLabel('Administrator password').fill(testPassword());
+await page.getByLabel('Password', { exact: true }).fill(wrongTestPassword());
+
+=== fill-non-sensitive-label-allowed findings
+await page.getByLabel('Agency name').fill('Example County Communications');
+
+=== call-sensitive-callee findings Call:hashPassword:1
+hashPassword('invented-1');
+
+=== call-reset-and-login-literal findings Call:resetAndLogin:1
+await resetAndLogin(page, 'jordan.trainer', code, 'invented-1');
+
+=== call-reset-and-login-runtime-allowed findings
+await resetAndLogin(page, 'jordan.trainer', code, JORDAN_PASSWORD);
+
+=== call-signin-two-literals findings Call:signIn:1
+await signIn(context, 'jordan.trainer', code, 'invented-1');
+
+=== call-signin-one-literal-username-allowed findings
+await signIn(context, 'jordan.trainer', code, JORDAN_PASSWORD);
+
+=== call-initialize-runtime-allowed findings
+await initialize(server.url, setupCode);
+
+=== comments-and-regex-skipped findings
+// const PASSWORD = 'commented-out';
+/* const SECRET = "block-comment"; */
+const re = /['"]password['"]/;
+const label = 'Example County';
+
+=== interpolated-generator-clean findings
+let cachedPassword: string | undefined;
+function generateCredential(): string {
+	return `invented-${randomBytes(16).toString('hex')}`;
+}
+export function testPassword(): string {
+	cachedPassword ??= generateCredential();
+	return cachedPassword;
+}
+
+=== missed-non-sensitive-name missed non-sensitive names
+const pwd = 'invented-1';
+const ADMIN_PW = 'invented-2';
+
+=== missed-destructuring missed destructuring
+const [u, password] = ['avery.admin', 'invented-1'];
+
+=== missed-reassignment missed reassignment
+let password: string;
+password = 'invented-1';
+
+=== missed-index-assignment missed index assignment
+const body: Record<string, string> = {};
+body['password'] = 'invented-1';
+
+=== missed-double-escaped-json missed double-escaped JSON
+const body = '{\\"password\\":\\"invented-1\\"}';
+
+=== missed-brace-led-json missed brace-led JSON value
+const body = '{"password":"{pw}"}';
+
+=== missed-interpolated-template missed interpolated template expression
+const payload = { password: `${prefix}123` };
+
+=== missed-username-var-literal-password missed username variable beside a literal password
+await signIn(ctx, username, 'invented-1');
+
+=== robust-unterminated-string robust
+const PASSWORD = 'unterminated
+
+=== robust-unterminated-comment robust
+/* never closed const PASSWORD = 'x';
+
+=== robust-unterminated-template robust
+const x = `unterminated ${

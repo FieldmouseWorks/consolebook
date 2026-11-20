@@ -7,11 +7,11 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-import { expect, signOut, test } from './fixtures';
+import { expect, freshTestPassword, signOut, test, testPassword } from './fixtures';
 import { BINARY, execFileAsync } from './server';
 
-const ADMIN_PASSWORD = 'invented-passphrase-1';
-const TRAINER_PASSWORD = 'trainer-passphrase-2';
+const ADMIN_PASSWORD = testPassword();
+const TRAINER_PASSWORD = freshTestPassword();
 
 test('an administrator exports the whole installation; others are refused', async ({
 	page,

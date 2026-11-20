@@ -3,15 +3,15 @@
 // and trainee packets. Split into focused tests so each stays well inside
 // the 60s test budget even under CPU load (#199). All fixture data is invented.
 
-import { expect, signOut, test } from './fixtures';
+import { expect, freshTestPassword, signOut, test, testPassword } from './fixtures';
 import type { Browser, BrowserContext, Page } from '@playwright/test';
 import { BINARY, execFileAsync } from './server';
 
-const PASSWORD = 'invented-passphrase-1';
-const JORDAN_PASSWORD = 'trainer-passphrase-3';
-const ROWAN_PASSWORD = 'trainer-passphrase-4';
-const CASEY_PASSWORD = 'coordinator-passphrase-5';
-const TAYLOR_PASSWORD = 'trainee-passphrase-6';
+const PASSWORD = testPassword();
+const JORDAN_PASSWORD = freshTestPassword();
+const ROWAN_PASSWORD = freshTestPassword();
+const CASEY_PASSWORD = freshTestPassword();
+const TAYLOR_PASSWORD = freshTestPassword();
 
 const content = {
 	name: 'Example County CTO Program',

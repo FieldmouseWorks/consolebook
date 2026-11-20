@@ -4,10 +4,10 @@
 // reading their trainee through the scoped view. All fixture data is
 // invented.
 
-import { expect, signOut, test } from './fixtures';
+import { expect, freshTestPassword, signOut, test, testPassword } from './fixtures';
 
-const PASSWORD = 'invented-passphrase-1';
-const TRAINER_PASSWORD = 'trainer-passphrase-3';
+const PASSWORD = testPassword();
+const TRAINER_PASSWORD = freshTestPassword();
 
 
 /** Two phases with an advance edge and a remediation loop. */

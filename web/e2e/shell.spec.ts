@@ -2,10 +2,10 @@
 // issue reset code → reset password → sign back in → sign out.
 // All fixture data is invented.
 
-import { expect, signOut, test } from './fixtures';
+import { expect, freshTestPassword, signOut, test, testPassword, wrongTestPassword } from './fixtures';
 
-const PASSWORD = 'invented-passphrase-1';
-const NEW_PASSWORD = 'rotated-passphrase-2';
+const PASSWORD = testPassword();
+const NEW_PASSWORD = freshTestPassword();
 
 
 test('full shell lifecycle', async ({ page, setupCode }) => {
@@ -24,7 +24,7 @@ test('full shell lifecycle', async ({ page, setupCode }) => {
 	// Setup lands on sign-in; a wrong password is refused generically.
 	await expect(page).toHaveURL(/\/login$/);
 	await page.getByLabel('Username').fill('avery.admin');
-	await page.getByLabel('Password').fill('wrong-password-x');
+	await page.getByLabel('Password').fill(wrongTestPassword());
 	await page.getByRole('button', { name: 'Sign in' }).click();
 	await expect(page.getByRole('alert')).toContainText('incorrect');
 
