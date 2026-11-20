@@ -70,7 +70,7 @@ async fn confirmation_digest_rejects_expiry_wrong_actor_and_intervening_reverted
         .is_ok()
     );
 
-    // 1. Expired confirmation is refused.
+    // 1. Expired confirmation is refused, and forging a later expires_at cannot bypass expiry.
     assert_eq!(
         retention::verify_disposition_preview_at(
             &fx.pool,
@@ -84,6 +84,34 @@ async fn confirmation_digest_rejects_expiry_wrong_actor_and_intervening_reverted
         .await
         .expect("call"),
         Err(RetentionRefusal::ConfirmationExpired)
+    );
+    assert_eq!(
+        retention::verify_disposition_preview_at(
+            &fx.pool,
+            fx.executor_id,
+            &input,
+            &preview.confirmation_digest,
+            i64::MAX,
+            None,
+            preview.expires_at + 1,
+        )
+        .await
+        .expect("call"),
+        Err(RetentionRefusal::StaleConfirmation)
+    );
+    assert_eq!(
+        retention::verify_disposition_preview_at(
+            &fx.pool,
+            fx.executor_id,
+            &input,
+            &preview.confirmation_digest,
+            preview.expires_at + 100,
+            None,
+            now,
+        )
+        .await
+        .expect("call"),
+        Err(RetentionRefusal::StaleConfirmation)
     );
 
     // 2. Another authorized actor cannot reuse the first actor's digest.

@@ -250,7 +250,8 @@ pub async fn preview_disposition_at(
         Ok(tx) => tx,
         Err(refusal) => return Ok(Err(refusal)),
     };
-    let result = build_preview(&mut tx, actor, input, backups, evaluated_at).await?;
+    let expires_at = evaluated_at.saturating_add(PREVIEW_VALIDITY_SECONDS);
+    let result = build_preview(&mut tx, actor, input, backups, evaluated_at, expires_at).await?;
     match result {
         Ok(preview) => {
             tx.commit().await?;
@@ -301,10 +302,11 @@ pub async fn verify_disposition_preview_at(
     if evaluated_at > expires_at {
         return storage::refuse(tx, RetentionRefusal::ConfirmationExpired).await;
     }
-    let preview = match build_preview(&mut tx, actor, input, backups, evaluated_at).await? {
-        Ok(preview) => preview,
-        Err(refusal) => return storage::refuse(tx, refusal).await,
-    };
+    let preview =
+        match build_preview(&mut tx, actor, input, backups, evaluated_at, expires_at).await? {
+            Ok(preview) => preview,
+            Err(refusal) => return storage::refuse(tx, refusal).await,
+        };
     if preview.confirmation_digest != confirmation_digest {
         return storage::refuse(tx, RetentionRefusal::StaleConfirmation).await;
     }
@@ -318,6 +320,7 @@ pub async fn verify_disposition_preview_at(
 #[derive(Serialize)]
 struct ConfirmationBinding {
     domain: &'static str,
+    expires_at: String,
     actor_user_id: i64,
     actor_execute_disposition_event_id: Option<i64>,
     latest_authority_event_id: i64,
@@ -442,6 +445,7 @@ async fn evaluate_target(
 #[allow(clippy::too_many_arguments)]
 fn compute_confirmation_digest(
     actor: i64,
+    expires_at: i64,
     authority: &DispositionAuthoritySnapshot,
     latest_policy_id: i64,
     current_policies: &BTreeMap<String, queries::StoredPolicy>,
@@ -456,6 +460,7 @@ fn compute_confirmation_digest(
         hold_watermarks;
     let binding = ConfirmationBinding {
         domain: CONFIRMATION_DOMAIN,
+        expires_at: expires_at.to_string(),
         actor_user_id: actor,
         actor_execute_disposition_event_id: authority.actor_latest_event_id,
         latest_authority_event_id: authority.latest_authority_event_id,
@@ -524,6 +529,7 @@ async fn build_preview(
     input: &DispositionPreviewInput,
     backups: Option<&BackupSettings>,
     evaluated_at: i64,
+    expires_at: i64,
 ) -> Result<Result<DispositionPreview, RetentionRefusal>> {
     if input.record_ids.is_empty() {
         return Ok(Err(RetentionRefusal::Invalid(vec![
@@ -588,6 +594,7 @@ async fn build_preview(
     let controlled_copies = inspect_controlled_copies(backups);
     let confirmation_digest = compute_confirmation_digest(
         actor,
+        expires_at,
         &authority,
         latest_policy_id,
         &current_policies,
@@ -612,8 +619,6 @@ async fn build_preview(
             trigger_at: None,
             eligible_at: None,
         });
-
-    let expires_at = evaluated_at.saturating_add(PREVIEW_VALIDITY_SECONDS);
 
     Ok(Ok(DispositionPreview {
         evaluated_at,
