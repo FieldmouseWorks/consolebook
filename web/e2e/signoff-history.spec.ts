@@ -3,12 +3,12 @@
 // signoffs a program-version change left behind, and gains no write control
 // anywhere. All fixture data is invented.
 
-import { expect, signOut, test } from './fixtures';
+import { expect, freshTestPassword, signOut, test, testPassword } from './fixtures';
 import type { Page } from '@playwright/test';
 
-const PASSWORD = 'invented-passphrase-1';
-const TAYLOR_PASSWORD = 'trainee-passphrase-6';
-const RILEY_PASSWORD = 'trainee-passphrase-7';
+const PASSWORD = testPassword();
+const TAYLOR_PASSWORD = freshTestPassword();
+const RILEY_PASSWORD = freshTestPassword();
 
 const content = (label: string, prompt: string) => ({
 	name: 'Example County CTO Program',

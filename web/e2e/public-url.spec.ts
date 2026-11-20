@@ -1,7 +1,7 @@
 // Browser proof of ADR 0025: an installation reached by another address
 // than its published one says where to go. All fixture data is invented.
 
-import { expect, test } from './fixtures';
+import { expect, test, testPassword } from './fixtures';
 import { startServer } from './server';
 
 const PUBLIC_URL = 'https://consolebook.example.invalid';
@@ -15,7 +15,7 @@ async function initialize(url: string, setupCode: string) {
 			agency_name: 'Example County Communications',
 			username: 'avery.admin',
 			display_name: 'Avery Admin',
-			password: 'invented-passphrase-1'
+			password: testPassword()
 		})
 	});
 	expect(response.ok).toBe(true);

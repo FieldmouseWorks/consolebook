@@ -6,14 +6,14 @@
 // one invented draft. Every race is synchronized on a held HTTP request
 // rather than a sleep, so the sequence is deterministic.
 
-import { expect, signOut, test } from './fixtures';
+import { expect, freshTestPassword, signOut, test, testPassword } from './fixtures';
 import type { Browser, BrowserContext, Page } from '@playwright/test';
 
-const PASSWORD = 'invented-passphrase-1';
-const JORDAN_PASSWORD = 'trainer-passphrase-3';
+const PASSWORD = testPassword();
+const JORDAN_PASSWORD = freshTestPassword();
 const JORDAN = 'jordan.trainer';
 const CASEY = 'casey.coord';
-const CASEY_PASSWORD = 'coordinator-passphrase-4';
+const CASEY_PASSWORD = freshTestPassword();
 const MOST = 'Most acceptable performance.';
 const LEAST = 'Least acceptable performance.';
 

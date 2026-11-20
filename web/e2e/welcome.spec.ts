@@ -2,9 +2,9 @@
 // printable sign-in sheet, a refused row that keeps its text, and the
 // example program as an editable draft. All fixture data is invented.
 
-import { expect, test } from './fixtures';
+import { expect, test, testPassword } from './fixtures';
 
-const PASSWORD = 'invented-passphrase-1';
+const PASSWORD = testPassword();
 
 test('guided setup adds people and starts from the example program', async ({
 	page,

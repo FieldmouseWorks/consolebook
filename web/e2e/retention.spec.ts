@@ -1,5 +1,5 @@
 // Invented policy/hold administration, with explicit authority and no deletion.
-import { expect, test } from './fixtures';
+import { expect, test, testPassword } from './fixtures';
 
 test('administer retention authority, policy versions, and hold history', async ({ page, setupCode }) => {
     await page.goto('/');
@@ -7,11 +7,11 @@ test('administer retention authority, policy versions, and hold history', async 
     await page.getByLabel('Agency name').fill('Invented Retention County');
     await page.getByLabel('Administrator username').fill('avery.admin');
     await page.getByLabel('Administrator display name').fill('Avery Admin');
-    await page.getByLabel('Administrator password').fill('invented-passphrase-1');
+    await page.getByLabel('Administrator password').fill(testPassword());
     await page.getByRole('button', { name: 'Initialize installation' }).click();
     await expect(page).toHaveURL(/\/login$/);
     await page.getByLabel('Username', { exact: true }).fill('avery.admin');
-    await page.getByLabel('Password', { exact: true }).fill('invented-passphrase-1');
+    await page.getByLabel('Password', { exact: true }).fill(testPassword());
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await page.getByRole('link', { name: 'Retention', exact: true }).click();
     await expect(page.getByText('Explicit retention administration authority is required to view policies and holds.')).toBeVisible();

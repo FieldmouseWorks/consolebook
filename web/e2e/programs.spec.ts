@@ -3,9 +3,9 @@
 // frozen, branch a new draft from it, and compare the two versions.
 // All fixture data is invented.
 
-import { expect, test } from './fixtures';
+import { expect, test, testPassword } from './fixtures';
 
-const PASSWORD = 'invented-passphrase-1';
+const PASSWORD = testPassword();
 
 
 test('author, publish, and compare a program version', async ({ page, setupCode }) => {

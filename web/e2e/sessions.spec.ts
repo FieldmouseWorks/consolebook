@@ -3,10 +3,10 @@
 // closing with a disposition, and the trainer's own session list. All
 // fixture data is invented.
 
-import { expect, signOut, test } from './fixtures';
+import { expect, freshTestPassword, signOut, test, testPassword } from './fixtures';
 
-const PASSWORD = 'invented-passphrase-1';
-const TRAINER_PASSWORD = 'trainer-passphrase-3';
+const PASSWORD = testPassword();
+const TRAINER_PASSWORD = freshTestPassword();
 
 
 const content = {
