@@ -10,8 +10,8 @@ use anyhow::Result;
 use sqlx::SqlitePool;
 
 use crate::backup_copy::{self, CopyStatus};
-
 use crate::data_dir::DataDir;
+use crate::disposition_recovery::{self, CopyLedgerStatus, LocalLedgerStatus, RecoveryHealthState};
 use crate::storage;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -106,6 +106,7 @@ pub async fn run(data_dir: &DataDir, options: &Options<'_>) -> Vec<Finding> {
             check_integrity(&pool, &mut findings).await;
             check_identity(&pool, &mut findings).await;
             check_initialization(&pool, &mut findings).await;
+            check_disposition_recovery(&pool, data_dir, backup_copy_dir, &mut findings).await;
             pool.close().await;
         }
     }
@@ -362,4 +363,117 @@ fn check_backup_copy(data_dir: &DataDir, copy_dir: Option<&Path>, findings: &mut
             format!("current: {directory} has {count}, newest {newest}"),
         ),
     });
+}
+
+/// Read-only disposition recovery health (ADR 0030 §5–§6): surfaces incomplete
+/// disposition runs, missing/stale/corrupt local or copy recovery ledgers, and
+/// off-server mirror lag without modifying any file or database state.
+async fn check_disposition_recovery(
+    pool: &SqlitePool,
+    data_dir: &DataDir,
+    copy_dir: Option<&Path>,
+    findings: &mut Vec<Finding>,
+) {
+    const CHECK: &str = "disposition recovery";
+    let health = match disposition_recovery::inspect_recovery_health(pool, data_dir, copy_dir).await
+    {
+        Ok(health) => health,
+        Err(err) => {
+            findings.push(Finding::fail(CHECK, format!("{err:#}")));
+            return;
+        }
+    };
+    findings.push(format_recovery_finding(CHECK, &health));
+}
+
+fn format_recovery_finding(check: &str, health: &disposition_recovery::RecoveryHealth) -> Finding {
+    match health.state {
+        RecoveryHealthState::Clear => {
+            let detail = match (&health.local_ledger, &health.copy_ledger) {
+                (LocalLedgerStatus::Absent, _) => "no disposition runs recorded".to_owned(),
+                (
+                    LocalLedgerStatus::Present { entry_count, .. },
+                    CopyLedgerStatus::Current { directory, .. },
+                ) => format!(
+                    "clear: {entry_count} disposed record(s) in local ledger; mirrored to {directory}"
+                ),
+                (LocalLedgerStatus::Present { entry_count, .. }, _) => {
+                    format!("clear: {entry_count} disposed record(s) in local ledger")
+                }
+                _ => "clear".to_owned(),
+            };
+            Finding::ok(check, detail)
+        }
+        RecoveryHealthState::IncompleteDisposition => {
+            let runs: Vec<String> = health
+                .incomplete_runs
+                .iter()
+                .map(|run| match run.last_error_code {
+                    Some(code) => format!(
+                        "run {} ({}, error {})",
+                        run.id,
+                        run.state.as_str(),
+                        code.as_str()
+                    ),
+                    None => format!("run {} ({})", run.id, run.state.as_str()),
+                })
+                .collect();
+            Finding::fail(
+                check,
+                format!(
+                    "incomplete disposition run(s): {}; retry disposition recovery before treating disposition as complete",
+                    runs.join(", ")
+                ),
+            )
+        }
+        RecoveryHealthState::LedgerError => {
+            let detail = match (&health.local_ledger, &health.copy_ledger) {
+                (LocalLedgerStatus::Corrupt { problem }, _) => {
+                    format!("corrupt local recovery ledger: {problem}")
+                }
+                (_, CopyLedgerStatus::Corrupt { directory, problem }) => {
+                    format!("corrupt copy-directory recovery ledger in {directory}: {problem}")
+                }
+                _ => "corrupt disposition recovery ledger".to_owned(),
+            };
+            Finding::fail(check, detail)
+        }
+        RecoveryHealthState::LedgerStale => {
+            let missing = match health.local_ledger {
+                LocalLedgerStatus::Stale { missing_count } => missing_count,
+                _ => 0,
+            };
+            Finding::fail(
+                check,
+                format!(
+                    "local recovery ledger is missing or stale ({missing} disposed record(s) absent from data/instance/disposition-ledger.json)"
+                ),
+            )
+        }
+        RecoveryHealthState::CopyLedgerUnavailable => {
+            let detail = match &health.copy_ledger {
+                CopyLedgerStatus::Unreachable { directory, problem } => format!(
+                    "copy directory {directory} is unreachable; recovery ledger mirror cannot be checked: {problem}"
+                ),
+                _ => "copy directory unreachable for recovery ledger mirror".to_owned(),
+            };
+            Finding::warn(check, detail)
+        }
+        RecoveryHealthState::CopyLedgerBehind => {
+            let detail = match &health.copy_ledger {
+                CopyLedgerStatus::Missing { directory } => {
+                    format!("copy directory {directory} has no disposition-ledger.json mirror yet")
+                }
+                CopyLedgerStatus::Behind {
+                    directory,
+                    local_count,
+                    copy_count,
+                } => format!(
+                    "copy directory {directory} recovery ledger is behind ({copy_count} of {local_count} entries)"
+                ),
+                _ => "copy directory recovery ledger is behind".to_owned(),
+            };
+            Finding::warn(check, detail)
+        }
+    }
 }

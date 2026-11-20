@@ -24,6 +24,45 @@ export type BackupCopyStatus =
 	| { state: 'behind'; directory: string; count: number; newest: string | null }
 	| { state: 'current'; directory: string; count: number; newest: string };
 
+export type DispositionRecoveryState =
+	| 'clear'
+	| 'incomplete_disposition'
+	| 'ledger_error'
+	| 'ledger_stale'
+	| 'copy_ledger_unavailable'
+	| 'copy_ledger_behind';
+
+export interface IncompleteDispositionRun {
+	id: number;
+	state: 'db_committed_vacuum_pending' | 'copy_cleanup_pending' | 'completed';
+	started_at: number;
+	last_error_code: string | null;
+	event_count: number;
+}
+
+export type LocalLedgerStatus =
+	| { state: 'absent' }
+	| { state: 'present'; entry_count: number; updated_at: number }
+	| { state: 'stale'; missing_count: number }
+	| { state: 'corrupt'; problem: string };
+
+export type CopyLedgerStatus =
+	| { state: 'not_configured' }
+	| { state: 'not_required'; directory: string }
+	| { state: 'unreachable'; directory: string; problem: string }
+	| { state: 'missing'; directory: string }
+	| { state: 'behind'; directory: string; local_count: number; copy_count: number }
+	| { state: 'current'; directory: string; entry_count: number }
+	| { state: 'corrupt'; directory: string; problem: string };
+
+export interface DispositionRecoveryHealth {
+	state: DispositionRecoveryState;
+	incomplete_runs: IncompleteDispositionRun[];
+	local_ledger: LocalLedgerStatus;
+	copy_ledger: CopyLedgerStatus;
+	external_copies_note: string;
+}
+
 export interface BackupStatus {
 	interval_hours: number;
 	keep: number;
@@ -34,6 +73,7 @@ export interface BackupStatus {
 		newest_at: number | null;
 	};
 	copy: BackupCopyStatus;
+	disposition_recovery: DispositionRecoveryHealth;
 }
 
 export function getBackupStatus(): Promise<BackupStatus> {

@@ -72,6 +72,15 @@ async fn run_keeping(data_dir: &DataDir, keep: Option<usize>) -> Result<BackupRe
             return Err(err);
         }
     };
+    if let Err(err) =
+        crate::disposition_recovery::verify_local_snapshot_against_ledger(data_dir, &snapshot).await
+    {
+        let _ = std::fs::remove_file(&snapshot);
+        pool.close().await;
+        return Err(
+            err.context("snapshot failed disposition recovery verification and was removed")
+        );
+    }
     audit::record(&pool, EventKind::BackupCompleted, None, None).await?;
     pool.close().await;
     finish(data_dir, snapshot, keep)
@@ -317,6 +326,20 @@ pub async fn before_migrating(data_dir: &DataDir) -> Result<Option<PreMigrationB
     let pool = storage::open_existing(&data_dir.database()).await?;
     let snapshot = take_snapshot(&pool, data_dir, PRE_MIGRATION_PREFIX).await;
     pool.close().await;
+    let snapshot = match snapshot {
+        Ok(snapshot) => {
+            if let Err(err) = crate::disposition_recovery::verify_local_snapshot_against_ledger(
+                data_dir, &snapshot,
+            )
+            .await
+            {
+                let _ = std::fs::remove_file(&snapshot);
+                return Err(err.context("taking the pre-migration backup"));
+            }
+            Ok(snapshot)
+        }
+        Err(err) => Err(err),
+    };
     let report = snapshot
         .and_then(|snapshot| finish(data_dir, snapshot, None))
         .and_then(|mut report| {
@@ -407,7 +430,14 @@ pub async fn open_migrated(
              (to go back: stop the service, install the previous release, and restore this snapshot)"
         );
         if let Some(copy) = copy {
-            match crate::backup_copy::copy_snapshot(backup.snapshot(), copy.dir, copy.keep).await {
+            match crate::backup_copy::copy_snapshot_with_data_dir(
+                data_dir,
+                backup.snapshot(),
+                copy.dir,
+                copy.keep,
+            )
+            .await
+            {
                 Ok(report) => tracing::info!(
                     copy = %report.copy.display(),
                     sha256 = report.sha256,

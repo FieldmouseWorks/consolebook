@@ -101,10 +101,20 @@ enum Command {
     /// Replace the database with a validated snapshot (server must be stopped).
     ///
     /// The current database is set aside as a pre-restore snapshot in
-    /// backups/ before anything is replaced.
+    /// backups/ before anything is replaced. Consults disposition recovery
+    /// ledgers before promoting a snapshot so disposed records cannot silently
+    /// return (ADR 0030).
     Restore {
         /// Path to the snapshot to restore, usually in backups/.
         snapshot: PathBuf,
+        /// Configured backup copy directory to consult for a mirrored
+        /// disposition recovery ledger (ADR 0030).
+        #[arg(long, env = "CONSOLEBOOK_BACKUP_COPY_DIR")]
+        backup_copy_dir: Option<PathBuf>,
+        /// Explicit path to a disposition recovery ledger file, for
+        /// clean-installation recovery or offline recovery media.
+        #[arg(long)]
+        disposition_ledger: Option<PathBuf>,
     },
     /// Work with record exports (docs/formats/record-export.md).
     Export {
@@ -187,7 +197,19 @@ async fn main() -> ExitCode {
             keep,
             backup_copy_dir,
         } => run_backup(&cli.data_dir, keep, backup_copy_dir.as_deref()).await,
-        Command::Restore { snapshot } => run_restore(&cli.data_dir, &snapshot).await,
+        Command::Restore {
+            snapshot,
+            backup_copy_dir,
+            disposition_ledger,
+        } => {
+            run_restore(
+                &cli.data_dir,
+                &snapshot,
+                backup_copy_dir.as_deref(),
+                disposition_ledger.as_deref(),
+            )
+            .await
+        }
         Command::Export {
             action: ExportAction::Verify { archive },
         } => run_export_verify(&archive),
@@ -384,17 +406,28 @@ async fn run_backup(
     );
     println!("{}", report.snapshot.display());
     if let Some(copy_dir) = copy_dir {
-        let copy = backup_copy::copy_snapshot(&report.snapshot, copy_dir, keep).await?;
+        let copy =
+            backup_copy::copy_snapshot_with_data_dir(&data_dir, &report.snapshot, copy_dir, keep)
+                .await?;
         tracing::info!(copy = %copy.copy.display(), sha256 = copy.sha256, "backup copied and verified");
         println!("{}", copy.copy.display());
     }
     Ok(ExitCode::SUCCESS)
 }
 
-async fn run_restore(data_dir: &std::path::Path, snapshot: &std::path::Path) -> Result<ExitCode> {
+async fn run_restore(
+    data_dir: &std::path::Path,
+    snapshot: &std::path::Path,
+    backup_copy_dir: Option<&std::path::Path>,
+    disposition_ledger: Option<&std::path::Path>,
+) -> Result<ExitCode> {
     let data_dir = DataDir::new(data_dir);
     data_dir.ensure_layout()?;
-    let report = restore::run(&data_dir, snapshot).await?;
+    let options = restore::RestoreOptions {
+        backup_copy_dir,
+        disposition_ledger,
+    };
+    let report = restore::run_with_options(&data_dir, snapshot, &options).await?;
     if let Some(pre) = &report.pre_restore_snapshot {
         eprintln!("previous database set aside as {}", pre.display());
     }
@@ -403,6 +436,28 @@ async fn run_restore(data_dir: &std::path::Path, snapshot: &std::path::Path) -> 
         report.restored_from.display(),
         report.installation_id
     );
+    match &report.ledger_check {
+        consolebook_server::disposition_recovery::RestoreLedgerReport::Checked {
+            sources,
+            entries_checked,
+        } => {
+            eprintln!(
+                "disposition recovery ledger checked ({entries_checked} disposed record(s) across {} source(s))",
+                sources.len()
+            );
+        }
+        consolebook_server::disposition_recovery::RestoreLedgerReport::NoLedgerAvailable {
+            warning,
+        } => {
+            eprintln!("warning: {warning}");
+        }
+    }
+    if let Some(ledger) = &report.local_ledger {
+        eprintln!(
+            "disposition recovery ledger persisted at {}",
+            ledger.display()
+        );
+    }
     if let Some(backup) = &report.backup {
         eprintln!(
             "backed up the restored database as {}; it is the copy the service sends off the server next",
