@@ -267,18 +267,20 @@ pub async fn finalize(
     .fetch_one(&mut *tx)
     .await
     .context("reading presentation names")?;
-    notices::notify_user(
+    notices::notify_user_for_record(
         &mut *tx,
         owner,
+        record_id,
         NoticeKind::DraftFinalized,
         &format!("The evaluation for {trainee_name} was finalized."),
     )
     .await?;
     // Acknowledgment is the trainee's act (slice 2): the record they
     // are bound to now exists, so they are told it awaits them.
-    notices::notify_user(
+    notices::notify_user_for_record(
         &mut *tx,
         trainee_id,
+        record_id,
         NoticeKind::RecordAwaitsAcknowledgment,
         "A finalized evaluation record awaits your acknowledgment.",
     )

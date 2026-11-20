@@ -90,7 +90,8 @@ async fn a_check_list_that_differs_from_the_vocabulary_fails_coverage() {
             kind TEXT NOT NULL CHECK (kind IN ('backup_failed')),
             message TEXT NOT NULL,
             created_at INTEGER NOT NULL,
-            read_at INTEGER
+            read_at INTEGER,
+            evaluation_record_id INTEGER
         ) STRICT",
     ] {
         sqlx::query(sql).execute(&mut *conn).await.expect(sql);

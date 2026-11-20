@@ -148,9 +148,10 @@ pub async fn decide(
     .fetch_one(&mut *tx)
     .await
     .context("reading trainee name")?;
-    notices::notify_user(
+    notices::notify_user_for_record(
         &mut *tx,
         owner,
+        record_id,
         decision.notice(),
         &format!(
             "Your draft evaluation for {trainee} {}.",

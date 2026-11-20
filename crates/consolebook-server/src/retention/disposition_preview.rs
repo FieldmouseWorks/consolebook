@@ -523,7 +523,7 @@ fn compute_confirmation_digest(
     Ok(canonical::content_hash_hex(&canonical))
 }
 
-async fn build_preview(
+pub(super) async fn build_preview(
     conn: &mut SqliteConnection,
     actor: i64,
     input: &DispositionPreviewInput,

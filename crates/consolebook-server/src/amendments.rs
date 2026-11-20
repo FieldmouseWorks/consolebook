@@ -202,9 +202,10 @@ pub async fn open(
         Subject::Record(record_id),
     )
     .await?;
-    notices::notify_user(
+    notices::notify_user_for_record(
         &mut *tx,
         owner,
+        record_id,
         NoticeKind::AmendmentOpened,
         &format!("The finalized evaluation for {trainee_name} was reopened for amendment."),
     )

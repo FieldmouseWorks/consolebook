@@ -20,6 +20,46 @@ pub const V1_RETENTION_AUTHORITY_EVENT: Table = Table {
     ],
 };
 
+/// Version 1..=4 schema of `notice` (before migration 0020 added nullable
+/// `evaluation_record_id`), kept immutable so earlier archives keep verifying.
+pub const V1_TO_V4_NOTICE: Table = Table {
+    name: "notice",
+    key: ID,
+    columns: &[
+        int("id"),
+        int("user_id").to("user"),
+        text("kind").vocab(Vocabulary::NoticeKind),
+        text("message"),
+        int("created_at"),
+        int("read_at").null(),
+    ],
+};
+
+/// Version 1..=4 schema of `record_hold` (before migration 0020 decoupled
+/// `evaluation_record_id`'s foreign key), kept immutable for v1..=v4 archives.
+pub const V1_TO_V4_RECORD_HOLD: Table = Table {
+    name: "record_hold",
+    key: ID,
+    columns: &[
+        int("id"),
+        int("enrollment_id").null().to("enrollment"),
+        int("evaluation_record_id").null().to("evaluation_record"),
+        text("kind").one_of(&[
+            "litigation",
+            "anticipated_litigation",
+            "audit",
+            "investigation",
+            "public_records_request",
+            "other",
+        ]),
+        text("authority"),
+        text("reason"),
+        int("created_by").to("user"),
+        int("created_at"),
+        int("replaces_id").null().to("record_hold"),
+    ],
+};
+
 /// Every carried table, ascending by name.
 pub const TABLES: [Table; 48] = [
     Table {
@@ -388,6 +428,7 @@ pub const TABLES: [Table; 48] = [
             text("message"),
             int("created_at"),
             int("read_at").null(),
+            int("evaluation_record_id").null(),
         ],
     },
     Table {
@@ -497,7 +538,7 @@ pub const TABLES: [Table; 48] = [
         columns: &[
             int("id"),
             int("enrollment_id").null().to("enrollment"),
-            int("evaluation_record_id").null().to("evaluation_record"),
+            int("evaluation_record_id").null(),
             text("kind").one_of(&[
                 "litigation",
                 "anticipated_litigation",

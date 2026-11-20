@@ -95,7 +95,33 @@ macro_rules! impl_serialize_as_str {
     };
 }
 
+macro_rules! impl_deserialize_from_str {
+    ($($ty:ty),+ $(,)?) => {
+        $(
+            impl<'de> Deserialize<'de> for $ty {
+                fn deserialize<D: serde::Deserializer<'de>>(
+                    deserializer: D,
+                ) -> std::result::Result<Self, D::Error> {
+                    let s = String::deserialize(deserializer)?;
+                    Self::parse(&s).ok_or_else(|| {
+                        serde::de::Error::custom(format!("unknown {}: {s}", stringify!($ty)))
+                    })
+                }
+            }
+        )+
+    };
+}
+
 impl_serialize_as_str!(
+    DispositionRunState,
+    DispositionErrorCode,
+    DispositionMethod,
+    DispositionOutcome,
+    DispositionReasonCode,
+    DisposedRecordClass,
+);
+
+impl_deserialize_from_str!(
     DispositionRunState,
     DispositionErrorCode,
     DispositionMethod,
