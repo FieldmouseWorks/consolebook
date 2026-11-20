@@ -123,8 +123,11 @@ async fn a_database_holding_the_released_rows_opens_and_a_modified_one_does_not(
     let err = storage::open(&db)
         .await
         .expect_err("a modified migration row must refuse to start");
+    // Startup checks `storage::migration_history` before `SQLx`'s migrator
+    // runs (#142), so it refuses with `RefusedHistory::Changed`'s wording.
     assert!(
-        format!("{err:#}").contains("migration 16 was previously applied but has been modified"),
+        format!("{err:#}")
+            .contains("migration 16 was applied by a different build's version of it"),
         "{err:#}"
     );
 }

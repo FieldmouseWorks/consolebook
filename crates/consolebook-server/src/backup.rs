@@ -274,15 +274,27 @@ pub const PRE_MIGRATION_PREFIX: &str = "consolebook-premigration-";
 pub const PRE_MIGRATION_KEEP: usize = 3;
 
 /// Whether this executable would migrate the database. Reads only.
+/// Returns `false` when there is no database yet, nothing is pending, or the
+/// history would be refused by startup.
 async fn migration_pending(data_dir: &DataDir) -> Result<bool> {
-    let database = data_dir.database();
-    if !database.exists() {
+    let Some(history) = storage::inspect_existing_history(&data_dir.database()).await? else {
         return Ok(false);
+    };
+    Ok(!history.pending_upgrade().is_empty())
+}
+
+/// Checks an existing database's migration history read-only before startup
+/// acquires locks, takes a pre-migration snapshot, or migrates. Refuses any
+/// history [`storage::migration_history`] refuses; otherwise reports whether a
+/// migration upgrade is pending.
+async fn check_history_before_open(data_dir: &DataDir) -> Result<bool> {
+    let Some(history) = storage::inspect_existing_history(&data_dir.database()).await? else {
+        return Ok(false);
+    };
+    if let Some(refusal) = history.first_refusal() {
+        bail!("{refusal}");
     }
-    let pool = storage::open_diagnostic(&database).await?;
-    let pending = storage::pending_migrations(&pool).await;
-    pool.close().await;
-    Ok(!pending?.is_empty())
+    Ok(!history.pending_upgrade().is_empty())
 }
 
 /// Takes a validated snapshot before this executable migrates an existing
@@ -378,8 +390,9 @@ pub async fn open_migrated(
     held: Option<&ServeLock>,
     copy: Option<OffServerCopy<'_>>,
 ) -> Result<SqlitePool> {
+    let pending = check_history_before_open(data_dir).await?;
     let _exclusive = match held {
-        None if migration_pending(data_dir).await? => Some(ServeLock::acquire(data_dir).context(
+        None if pending => Some(ServeLock::acquire(data_dir).context(
             "this version migrates the database, which needs the installation to itself; \
              stop the running service, then run this command again",
         )?),
