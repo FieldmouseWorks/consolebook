@@ -1,6 +1,7 @@
 <script lang="ts">
 	import {
 		ApiError,
+		describeExportError,
 		downloadExport,
 		enrollmentPacketPath,
 		myEnrollments,
@@ -74,7 +75,7 @@
 		try {
 			packetDownloaded = await downloadExport(enrollmentPacketPath(enrollment.enrollment_id));
 		} catch (err) {
-			packetError = err instanceof ApiError ? err.message : 'the server could not be reached';
+			packetError = describeExportError(err);
 		} finally {
 			packetBusy = false;
 		}
