@@ -16,6 +16,8 @@ closed_vocabulary! {
     pub enum EventKind {
         RetentionAuthorityGranted => "retention_authority_granted",
         RetentionAuthorityRevoked => "retention_authority_revoked",
+        DispositionAuthorityGranted => "disposition_authority_granted",
+        DispositionAuthorityRevoked => "disposition_authority_revoked",
         RetentionPolicyCreated => "retention_policy_created",
         RecordHoldCreated => "record_hold_created",
         RecordHoldReplaced => "record_hold_replaced",

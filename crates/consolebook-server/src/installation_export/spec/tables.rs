@@ -5,6 +5,21 @@ use super::{Table, Vocabulary, flag, int, text};
 
 const ID: &[&str] = &["id"];
 
+/// Version-1 schema of `retention_authority_event` (before migration 0017 added
+/// `capability`), kept immutable so version-1 archives continue to verify.
+pub const V1_RETENTION_AUTHORITY_EVENT: Table = Table {
+    name: "retention_authority_event",
+    key: ID,
+    columns: &[
+        int("id"),
+        int("user_id").to("user"),
+        flag("granted"),
+        int("actor_user_id").to("user"),
+        text("reason"),
+        int("recorded_at"),
+    ],
+};
+
 /// Every carried table, ascending by name.
 pub const TABLES: [Table; 43] = [
     Table {
@@ -417,6 +432,7 @@ pub const TABLES: [Table; 43] = [
             int("actor_user_id").to("user"),
             text("reason"),
             int("recorded_at"),
+            text("capability").one_of(&["manage_retention", "execute_disposition"]),
         ],
     },
     Table {

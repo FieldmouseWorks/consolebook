@@ -20,6 +20,7 @@ vocabulary!(RecordClass { DailyReport => "daily_report", WeeklySummary => "weekl
 vocabulary!(RetentionTrigger { FinalizedAt => "finalized_at", EnrollmentClosedAt => "enrollment_closed_at", DisposedAt => "disposed_at" });
 vocabulary!(RetentionAction { Retain => "retain", Destroy => "destroy" });
 vocabulary!(HoldKind { Litigation => "litigation", AnticipatedLitigation => "anticipated_litigation", Audit => "audit", Investigation => "investigation", PublicRecordsRequest => "public_records_request", Other => "other" });
+vocabulary!(RetentionCapability { ManageRetention => "manage_retention", ExecuteDisposition => "execute_disposition" });
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -90,6 +91,7 @@ pub struct HoldRelease {
 pub struct AuthorityEvent {
     pub id: i64,
     pub user_id: i64,
+    pub capability: RetentionCapability,
     pub granted: bool,
     pub actor_user_id: i64,
     pub reason: String,
@@ -107,4 +109,7 @@ pub enum RetentionRefusal {
     HoldReleased,
     NoSuchUser,
     AuthorityUnchanged,
+    ConfirmationExpired,
+    StaleConfirmation,
+    DispositionNotEligible,
 }

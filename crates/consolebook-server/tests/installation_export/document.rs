@@ -242,7 +242,7 @@ fn exclusion_differences(doc: &str) -> Vec<String> {
 
     // The counts the ledger section states.
     let counts = format!(
-        "Version 1 has {} carried tables and\n{} exclusions",
+        "Version {INSTALLATION_FORMAT_VERSION} has {} carried tables and\n{} exclusions",
         spec::TABLES.len(),
         spec::EXCLUSIONS.len()
     );
@@ -259,10 +259,16 @@ fn exclusion_differences(doc: &str) -> Vec<String> {
 /// already exist and keep their meaning (ADR 0028). The fingerprint
 /// pins spec-held structure; vocabulary members grow within a version and
 /// are held by the vocabulary floor (`floor.rs`) instead.
-const RECORDED_FINGERPRINTS: &[(i64, &str)] = &[(
-    1,
-    "5d4b236558b3769d42629ecd6ed5e8608027fbce68e0aa09deb245cbbc36cde5",
-)];
+const RECORDED_FINGERPRINTS: &[(i64, &str)] = &[
+    (
+        1,
+        "5d4b236558b3769d42629ecd6ed5e8608027fbce68e0aa09deb245cbbc36cde5",
+    ),
+    (
+        2,
+        "1fc181d68efe4cc5a38196808252cf2dcc84da70434f2ceba08bd3c3570d1b2a",
+    ),
+];
 
 #[test]
 fn the_specification_is_pinned_to_its_format_version() {

@@ -1,11 +1,23 @@
-//! Versioned policies, attributed holds, and explicit administration authority.
-//! ADR 0020 defines this preparation stage; destruction is a separate workflow.
+//! Versioned policies, attributed holds, explicit administration authority,
+//! and read-only disposition preview (ADR 0020; ADR 0030; #211).
+//! No destruction operation is exposed here.
 mod authority;
+mod disposition_preview;
 mod holds;
 mod policies;
 mod types;
 
-pub use authority::{authority_history, set_authority};
+pub use authority::{
+    authority_history, disposition_authority_history, set_authority, set_disposition_authority,
+};
+pub use disposition_preview::{
+    ControlledCopyInventory, CopyDirectoryInventory, CopyFileEntry, DispositionActiveHold,
+    DispositionAuthoritySnapshot, DispositionBlocker, DispositionDependencyCounts,
+    DispositionPolicySummary, DispositionPreview, DispositionPreviewInput,
+    DispositionTargetPreview, DispositionVersionSummary, PREVIEW_VALIDITY_SECONDS,
+    RecoveryObligation, UncontrolledCopyCategory, preview_disposition, preview_disposition_at,
+    verify_disposition_preview, verify_disposition_preview_at,
+};
 pub use holds::{
     ScopeOption, ScopeOptions, active_holds_for_record, create_hold, list_holds, release_hold,
     replace_hold, scope_options,

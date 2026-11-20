@@ -24,6 +24,14 @@ pub fn routes() -> Router<AppState> {
             "/api/retention/authority",
             get(authority).post(set_authority),
         )
+        .route(
+            "/api/retention/disposition/authority",
+            get(disposition_authority).post(set_disposition_authority),
+        )
+        .route(
+            "/api/retention/disposition/preview",
+            post(disposition_preview),
+        )
 }
 
 impl From<RetentionRefusal> for ApiError {
@@ -66,6 +74,21 @@ impl From<RetentionRefusal> for ApiError {
                 StatusCode::CONFLICT,
                 "authority_unchanged",
                 "the user already has this authority state",
+            ),
+            RetentionRefusal::ConfirmationExpired => (
+                StatusCode::CONFLICT,
+                "confirmation_expired",
+                "the disposition preview expired; request a new preview",
+            ),
+            RetentionRefusal::StaleConfirmation => (
+                StatusCode::CONFLICT,
+                "stale_confirmation",
+                "authority, policy, hold, record, or copy state changed since preview",
+            ),
+            RetentionRefusal::DispositionNotEligible => (
+                StatusCode::CONFLICT,
+                "disposition_not_eligible",
+                "one or more selected records are blocked from disposition",
             ),
         };
         Self::new(status, code, message)
@@ -161,6 +184,41 @@ async fn set_authority(
     )
     .await??;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn disposition_authority(
+    State(s): State<AppState>,
+    u: CurrentUser,
+) -> Result<Json<Vec<retention::AuthorityEvent>>, ApiError> {
+    Ok(Json(
+        retention::disposition_authority_history(&s.pool, u.user.id).await??,
+    ))
+}
+
+async fn set_disposition_authority(
+    State(s): State<AppState>,
+    u: CurrentUser,
+    Json(input): Json<AuthorityInput>,
+) -> Result<StatusCode, ApiError> {
+    retention::set_disposition_authority(
+        &s.pool,
+        u.user.id,
+        input.user_id,
+        input.granted,
+        &input.reason,
+    )
+    .await??;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn disposition_preview(
+    State(s): State<AppState>,
+    u: CurrentUser,
+    Json(input): Json<retention::DispositionPreviewInput>,
+) -> Result<Json<retention::DispositionPreview>, ApiError> {
+    Ok(Json(
+        retention::preview_disposition(&s.pool, u.user.id, &input, s.backups.as_deref()).await??,
+    ))
 }
 
 async fn scopes(
