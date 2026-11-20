@@ -49,7 +49,7 @@ tables/{table}.json                        one document per carried table
   ],
   "exported_at": 1788289200,
   "format": "consolebook-installation-export",
-  "format_version": 2,
+  "format_version": 3,
   "installation_id": "…",
   "tables": [
     { "name": "acknowledgment", "path": "tables/acknowledgment.json", "rows": 12, "sha256": "…" },
@@ -62,7 +62,7 @@ tables/{table}.json                        one document per carried table
 | Member | Type | Meaning |
 | --- | --- | --- |
 | `format` | string | Always `consolebook-installation-export` |
-| `format_version` | integer | `2` (version `1` archives continue to verify under v1's schema); bumped by any change to the manifest, the table set, or any document's columns, types, or rules |
+| `format_version` | integer | `3` (versions `1` and `2` continue to verify under their own schemas); bumped by any change to the manifest, the table set, or any document's columns, types, or rules |
 | `installation_id` | string | The exporting installation's identity |
 | `exported_at` | integer | The export instant, UTC Unix seconds. It is identical in every unit manifest |
 | `units` | array | Every finalized version the installation holds, listed exactly as the record export lists units. It may be empty |
@@ -70,10 +70,13 @@ tables/{table}.json                        one document per carried table
 | `excluded` | array | Every table or column the format does not carry, ascending by `name`, each with its `reason` |
 
 The `tables` and `excluded` names together are the **ledger**. For a given
-format version the ledger is a closed set. Version 2 has 43 carried tables and
-5 exclusions (four tables and one column), listed below; version 1 carried the
-same ledger without `retention_authority_event.capability` (migration 0017;
-ADR 0030) and continues to verify under version 1's table columns. A name
+format version the ledger is a closed set. Version 3 has 47 carried tables and
+5 exclusions (four tables and one column), listed below; version 2 carried 43
+tables before migration 0018 added the four disposition evidence tables
+(`disposition_run`, `disposition_event`, `disposition_version_hash`,
+`disposition_boundary_checkpoint`), and version 1 carried those 43 tables
+without `retention_authority_event.capability` (migration 0017; ADR 0030). Both
+earlier versions continue to verify under their recorded table sets. A name
 outside the set, a name missing from it, or a name listed twice is a finding.
 The ledger makes "nothing silently omitted" a property the archive states and
 the verifier checks.
@@ -435,6 +438,50 @@ Each table's columns are listed in stored order, with these meanings:
 | `hold_release` | `released_at` | integer | no |  |
 | `hold_release` | `reason` | text | no |  |
 | `hold_release` | `replacement_id` | integer | yes | → `record_hold` |
+| `disposition_run` | `id` | integer | no | key |
+| `disposition_run` | `actor_user_id` | integer | no | → `user` |
+| `disposition_run` | `confirmation_digest` | text | no | 64 lowercase hex |
+| `disposition_run` | `authority_reference` | text | no |  |
+| `disposition_run` | `reason_code` | text | no | one of `scheduled_retention_elapsed`, `restore_ledger_reconciliation`, `metadata_retention_elapsed` |
+| `disposition_run` | `method` | text | no | one of `lawful_destruction`, `restore_reconciliation` |
+| `disposition_run` | `state` | text | no | one of `db_committed_vacuum_pending`, `copy_cleanup_pending`, `completed` |
+| `disposition_run` | `started_at` | integer | no |  |
+| `disposition_run` | `completed_at` | integer | yes |  |
+| `disposition_run` | `last_error_code` | text | yes | one of `vacuum_failed`, `ledger_write_failed`, `clean_snapshot_failed`, `local_cleanup_failed`, `copy_dir_unreachable`, `copy_cleanup_failed` |
+| `disposition_event` | `id` | integer | no | key |
+| `disposition_event` | `disposition_run_id` | integer | no | → `disposition_run` |
+| `disposition_event` | `evaluation_record_id` | integer | no |  |
+| `disposition_event` | `enrollment_id` | integer | no | → `enrollment` |
+| `disposition_event` | `record_class` | text | no | one of `daily_report`, `weekly_summary`, `phase_evaluation` |
+| `disposition_event` | `record_policy_id` | integer | no | → `retention_policy` |
+| `disposition_event` | `metadata_policy_id` | integer | yes | → `retention_policy` |
+| `disposition_event` | `version_count` | integer | no |  |
+| `disposition_event` | `earliest_finalized_at` | integer | no |  |
+| `disposition_event` | `latest_finalized_at` | integer | no |  |
+| `disposition_event` | `hashes_retained` | flag | no |  |
+| `disposition_event` | `actor_user_id` | integer | no | → `user` |
+| `disposition_event` | `authority_reference` | text | no |  |
+| `disposition_event` | `reason_code` | text | no | one of `scheduled_retention_elapsed`, `restore_ledger_reconciliation` |
+| `disposition_event` | `method` | text | no | one of `lawful_destruction`, `restore_reconciliation` |
+| `disposition_event` | `outcome` | text | no | one of `disposed` |
+| `disposition_event` | `disposed_at` | integer | no |  |
+| `disposition_version_hash` | `id` | integer | no | key |
+| `disposition_version_hash` | `disposition_event_id` | integer | no | → `disposition_event` |
+| `disposition_version_hash` | `version_number` | integer | no |  |
+| `disposition_version_hash` | `record_schema` | integer | no |  |
+| `disposition_version_hash` | `content_hash` | text | no | 64 lowercase hex |
+| `disposition_version_hash` | `chain_hash` | text | no | 64 lowercase hex |
+| `disposition_version_hash` | `predecessor_content_hash` | text | yes | 64 lowercase hex |
+| `disposition_version_hash` | `finalized_at` | integer | no |  |
+| `disposition_boundary_checkpoint` | `id` | integer | no | key |
+| `disposition_boundary_checkpoint` | `disposition_run_id` | integer | no | → `disposition_run` |
+| `disposition_boundary_checkpoint` | `metadata_policy_id` | integer | no | → `retention_policy` |
+| `disposition_boundary_checkpoint` | `authority_reference` | text | no |  |
+| `disposition_boundary_checkpoint` | `reason_code` | text | no | one of `metadata_retention_elapsed` |
+| `disposition_boundary_checkpoint` | `expired_event_count` | integer | no |  |
+| `disposition_boundary_checkpoint` | `boundary_through_disposed_at` | integer | no |  |
+| `disposition_boundary_checkpoint` | `recorded_by` | integer | no | → `user` |
+| `disposition_boundary_checkpoint` | `recorded_at` | integer | no |  |
 
 #### Notices and audit
 

@@ -290,19 +290,39 @@ pub const EXCLUSIONS: [Exclusion; 5] = [
 /// a finalized version's canonical bytes are its `record.json`.
 pub const UNIT_COLUMNS: [(&str, &str); 1] = [("evaluation_version", "canonical_bytes")];
 
+/// Tables introduced in `format_version` 3 (migration 0018).
+const V3_ADDED_TABLES: [&str; 4] = [
+    "disposition_boundary_checkpoint",
+    "disposition_event",
+    "disposition_run",
+    "disposition_version_hash",
+];
+
 /// The carried table named `name`.
 #[must_use]
 pub fn table(name: &str) -> Option<&'static Table> {
     TABLES.iter().find(|table| table.name == name)
 }
 
-/// The carried table named `name` as defined by `format_version` (1 or 2).
+/// The carried table named `name` as defined by `format_version` (1, 2, or 3).
 #[must_use]
 pub fn table_for_version(format_version: i64, name: &str) -> Option<&'static Table> {
+    if format_version < 3 && V3_ADDED_TABLES.contains(&name) {
+        return None;
+    }
     if format_version == 1 && name == "retention_authority_event" {
         return Some(&tables::V1_RETENTION_AUTHORITY_EVENT);
     }
     table(name)
+}
+
+/// Every carried table for `format_version` (1, 2, or 3), ascending by name.
+#[must_use]
+pub fn tables_for_version(format_version: i64) -> Vec<&'static Table> {
+    TABLES
+        .iter()
+        .filter_map(|t| table_for_version(format_version, t.name))
+        .collect()
 }
 
 /// The exclusion named `name` (a table, or `table.column`).
