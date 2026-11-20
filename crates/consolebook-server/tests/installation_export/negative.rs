@@ -527,14 +527,15 @@ async fn every_check_names_its_finding() {
     );
 
     // A format version this build does not know is refused by name.
+    let unknown_version = INSTALLATION_FORMAT_VERSION + 1;
     let edited = with_manifest(&listed, |manifest| {
-        manifest["format_version"] = Value::from(2);
+        manifest["format_version"] = Value::from(unknown_version);
     });
     assert_finds(
         &edited,
         &Finding::UnsupportedFormat {
             format: INSTALLATION_FORMAT.to_owned(),
-            format_version: 2,
+            format_version: unknown_version,
         },
         "format version",
     );

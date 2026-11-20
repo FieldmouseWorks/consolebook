@@ -25,6 +25,7 @@ const CAPABILITY_NAMES: Record<string, string> = {
 	manage_users: 'Manage users',
 	manage_programs: 'Manage programs',
 	manage_retention: 'Manage retention',
+	execute_disposition: 'Execute disposition',
 	assign_training: 'Assign training',
 	export_records: 'Export records',
 	author_evaluation: 'Write evaluations',

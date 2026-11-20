@@ -255,7 +255,7 @@ pub(crate) fn verify_installation(
     let mut documents: BTreeMap<&'static str, (TableReport, Option<Rows>)> = BTreeMap::new();
     for entry in &manifest.tables {
         listed.insert(entry.path.clone());
-        let Some(table) = spec::table(&entry.name) else {
+        let Some(table) = spec::table_for_version(manifest.format_version, &entry.name) else {
             continue;
         };
         if documents.contains_key(table.name) {
@@ -275,7 +275,8 @@ pub(crate) fn verify_installation(
     let index = rows::Index::of(&documents);
     for (name, (document, rows)) in &mut documents {
         let Some(rows) = rows else { continue };
-        let table = spec::table(name).expect("only specified tables are read");
+        let table = spec::table_for_version(manifest.format_version, name)
+            .expect("only specified tables are read");
         document
             .findings
             .extend(index.reference_findings(table, &document.path, rows));

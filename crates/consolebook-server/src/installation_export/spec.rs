@@ -296,6 +296,15 @@ pub fn table(name: &str) -> Option<&'static Table> {
     TABLES.iter().find(|table| table.name == name)
 }
 
+/// The carried table named `name` as defined by `format_version` (1 or 2).
+#[must_use]
+pub fn table_for_version(format_version: i64, name: &str) -> Option<&'static Table> {
+    if format_version == 1 && name == "retention_authority_event" {
+        return Some(&tables::V1_RETENTION_AUTHORITY_EVENT);
+    }
+    table(name)
+}
+
 /// The exclusion named `name` (a table, or `table.column`).
 #[must_use]
 pub fn exclusion(name: &str) -> Option<&'static Exclusion> {

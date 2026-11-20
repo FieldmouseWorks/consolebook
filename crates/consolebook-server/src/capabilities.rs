@@ -16,6 +16,7 @@ closed_vocabulary! {
     pub enum Capability {
         ManageUsers => "manage_users",
         ManageRetention => "manage_retention",
+        ExecuteDisposition => "execute_disposition",
         ManagePrograms => "manage_programs",
         AssignTraining => "assign_training",
         ExportRecords => "export_records",

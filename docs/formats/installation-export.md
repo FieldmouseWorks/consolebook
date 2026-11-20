@@ -49,7 +49,7 @@ tables/{table}.json                        one document per carried table
   ],
   "exported_at": 1788289200,
   "format": "consolebook-installation-export",
-  "format_version": 1,
+  "format_version": 2,
   "installation_id": "…",
   "tables": [
     { "name": "acknowledgment", "path": "tables/acknowledgment.json", "rows": 12, "sha256": "…" },
@@ -62,7 +62,7 @@ tables/{table}.json                        one document per carried table
 | Member | Type | Meaning |
 | --- | --- | --- |
 | `format` | string | Always `consolebook-installation-export` |
-| `format_version` | integer | `1`; bumped by any change to the manifest, the table set, or any document's columns, types, or rules |
+| `format_version` | integer | `2` (version `1` archives continue to verify under v1's schema); bumped by any change to the manifest, the table set, or any document's columns, types, or rules |
 | `installation_id` | string | The exporting installation's identity |
 | `exported_at` | integer | The export instant, UTC Unix seconds. It is identical in every unit manifest |
 | `units` | array | Every finalized version the installation holds, listed exactly as the record export lists units. It may be empty |
@@ -70,11 +70,13 @@ tables/{table}.json                        one document per carried table
 | `excluded` | array | Every table or column the format does not carry, ascending by `name`, each with its `reason` |
 
 The `tables` and `excluded` names together are the **ledger**. For a given
-format version the ledger is a closed set. Version 1 has 43 carried tables and
-5 exclusions (four tables and one column), listed below. A name outside the
-set, a name missing from it, or a name listed twice is a finding. The ledger
-makes "nothing silently omitted" a property the archive states and the
-verifier checks.
+format version the ledger is a closed set. Version 2 has 43 carried tables and
+5 exclusions (four tables and one column), listed below; version 1 carried the
+same ledger without `retention_authority_event.capability` (migration 0017;
+ADR 0030) and continues to verify under version 1's table columns. A name
+outside the set, a name missing from it, or a name listed twice is a finding.
+The ledger makes "nothing silently omitted" a property the archive states and
+the verifier checks.
 
 `reason` is one of:
 
@@ -174,6 +176,7 @@ Each table's columns are listed in stored order, with these meanings:
 | `retention_authority_event` | `actor_user_id` | integer | no | → `user` |
 | `retention_authority_event` | `reason` | text | no |  |
 | `retention_authority_event` | `recorded_at` | integer | no |  |
+| `retention_authority_event` | `capability` | text | no | one of `manage_retention`, `execute_disposition` |
 
 #### Program configuration
 
@@ -500,10 +503,10 @@ Columns marked "one of" carry the vocabulary the stored table's `CHECK`
 constraint names. Four columns draw from a vocabulary the owning module
 defines instead, because the table has no `CHECK`:
 
-- **capability** (`capabilities.rs`): `manage_retention`, `manage_users`,
-  `manage_programs`, `assign_training`, `export_records`, `author_evaluation`,
-  `review_evaluation`, `view_assigned_records`, `view_own_records`,
-  `acknowledge_own_record`.
+- **capability** (`capabilities.rs`): `manage_retention`, `execute_disposition`,
+  `manage_users`, `manage_programs`, `assign_training`, `export_records`,
+  `author_evaluation`, `review_evaluation`, `view_assigned_records`,
+  `view_own_records`, `acknowledge_own_record`.
 - **notice kind** (`notices.rs`): `backup_failed`, `backup_copy_failed`,
   `assignment_created`, `draft_ownership_received`,
   `draft_submitted_for_review`, `draft_approved`, `draft_changes_requested`,
@@ -511,7 +514,8 @@ defines instead, because the table has no `CHECK`:
   `acknowledgment_response`, `acknowledgment_refused`,
   `acknowledgment_attested`, `amendment_opened`.
 - **audit event kind** (`audit.rs`): `retention_authority_granted`,
-  `retention_authority_revoked`, `retention_policy_created`,
+  `retention_authority_revoked`, `disposition_authority_granted`,
+  `disposition_authority_revoked`, `retention_policy_created`,
   `record_hold_created`, `record_hold_replaced`, `record_hold_released`,
   `setup_completed`, `login_succeeded`, `login_failed`, `logout`,
   `reset_code_issued`, `reset_code_used`, `recovery_code_issued`,

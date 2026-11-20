@@ -22,7 +22,7 @@ pub use produce::{InstallationExport, export, export_at, export_to};
 pub const INSTALLATION_FORMAT: &str = "consolebook-installation-export";
 /// Bumped by any change to the manifest, the table set, or any
 /// document's columns, types, or rules.
-pub const INSTALLATION_FORMAT_VERSION: i64 = 1;
+pub const INSTALLATION_FORMAT_VERSION: i64 = 2;
 /// The directory holding the table documents.
 pub const TABLE_DIR: &str = "tables";
 

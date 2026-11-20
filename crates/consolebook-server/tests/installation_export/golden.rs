@@ -8,6 +8,8 @@ use super::*;
 
 /// The committed version-1 archive.
 const GOLDEN_V1: &[u8] = include_bytes!("../fixtures/installation-export-v1.zip");
+/// The committed version-2 archive (adds `retention_authority_event.capability`).
+const GOLDEN_V2: &[u8] = include_bytes!("../fixtures/installation-export-v2.zip");
 /// Set to `1` to let [`regenerate`] write a golden archive.
 const REGENERATE_ENV: &str = "CONSOLEBOOK_REGENERATE_GOLDEN";
 
@@ -126,6 +128,32 @@ fn the_golden_version_1_archive_verifies() {
         rows.iter().all(|(_, count)| *count > 0),
         "every table has a row"
     );
+}
+
+/// Every build also verifies the committed version-2 archive beside version 1.
+#[test]
+fn the_golden_version_2_archive_verifies() {
+    let report = export_verify::verify_archive(GOLDEN_V2);
+    assert!(report.verified(), "{:#?}", all_findings(&report));
+    assert_eq!(report.kind, Some(ArchiveKind::InstallationExport));
+    let listed = entries(GOLDEN_V2);
+    let manifest = manifest_of(&listed);
+    assert_eq!(manifest.format, INSTALLATION_FORMAT);
+    assert_eq!(manifest.format_version, 2);
+    let units: Vec<(i64, i64)> = manifest
+        .units
+        .iter()
+        .map(|unit| (unit.record_id, unit.version_number))
+        .collect();
+    assert_eq!(units, [(1, 1), (1, 2), (2, 1)]);
+    assert_eq!(report.units.len(), 3);
+    assert_eq!(manifest.excluded.len(), 5);
+    let rows: Vec<(&str, usize)> = report
+        .tables
+        .iter()
+        .map(|table| (table.table.as_str(), table.rows.expect("rows")))
+        .collect();
+    assert_eq!(rows, GOLDEN_ROWS);
 }
 
 /// The golden test reads the bytes: one document byte changed fails it.

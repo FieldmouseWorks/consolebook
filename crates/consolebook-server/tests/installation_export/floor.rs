@@ -237,16 +237,26 @@ fn floor_findings(floor: &[(&str, &str, &[&str])], tables: &[Table]) -> Vec<Stri
     findings
 }
 
+/// Additional vocabulary columns introduced in `format_version` 2.
+const FLOOR_V2_ADDED: &[(&str, &str, &[&str])] = &[(
+    "retention_authority_event",
+    "capability",
+    &["manage_retention", "execute_disposition"],
+)];
+
 #[test]
 fn vocabularies_keep_every_value_of_their_format_version() {
-    let floor_columns: Vec<(&str, &str)> = FLOOR_V1.iter().map(|(t, c, _)| (*t, *c)).collect();
+    let mut floor_columns: Vec<(&str, &str)> = FLOOR_V1.iter().map(|(t, c, _)| (*t, *c)).collect();
+    if INSTALLATION_FORMAT_VERSION >= 2 {
+        floor_columns.extend(FLOOR_V2_ADDED.iter().map(|(t, c, _)| (*t, *c)));
+    }
     // Every vocabulary column of this version is in the floor.
     for table in &spec::TABLES {
         for column in table.columns {
-            if column.vocabulary.is_some() && INSTALLATION_FORMAT_VERSION == 1 {
+            if column.vocabulary.is_some() {
                 assert!(
                     floor_columns.contains(&(table.name, column.name)),
-                    "{}.{} carries a vocabulary the v1 floor does not record",
+                    "{}.{} carries a vocabulary the v{INSTALLATION_FORMAT_VERSION} floor does not record",
                     table.name,
                     column.name
                 );
@@ -255,6 +265,10 @@ fn vocabularies_keep_every_value_of_their_format_version() {
     }
     assert_eq!(
         floor_findings(FLOOR_V1, &spec::TABLES),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        floor_findings(FLOOR_V2_ADDED, &spec::TABLES),
         Vec::<String>::new()
     );
 }
