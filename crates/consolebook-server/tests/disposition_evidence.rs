@@ -293,7 +293,39 @@ fn tampered_portable_fixtures_fail_with_typed_findings() {
         }
     )));
 
-    // 7. Out-of-order dispositions are rejected.
+    // 7. Retained version finalized_at bounds must agree with the tombstone's
+    // earliest_finalized_at and latest_finalized_at (including rejecting
+    // finalization after disposition).
+    let disposed_at = base["dispositions"][0]["disposed_at"]
+        .as_i64()
+        .expect("disposed_at");
+    for (version_idx, bad_finalized_at) in [
+        (1usize, disposed_at + 1),
+        (0usize, 1_770_000_010),
+        (1usize, 1_770_086_390),
+    ] {
+        let mut bad_time = base.clone();
+        bad_time["dispositions"][0]["versions"][version_idx]["finalized_at"] =
+            Value::from(bad_finalized_at);
+        let report = verify_bytes(&canonical_of(&bad_time));
+        assert!(
+            !report.consistent(),
+            "must reject version[{version_idx}].finalized_at={bad_finalized_at}"
+        );
+        assert!(report.findings.iter().any(|f| matches!(
+            f,
+            EvidenceFinding::HashLineageBroken {
+                evaluation_record_id: 101,
+                ..
+            }
+        )));
+    }
+    let mut after_disposition = sample_document();
+    after_disposition.dispositions[0].versions[1].finalized_at =
+        after_disposition.dispositions[0].disposed_at + 1;
+    assert!(disposition_evidence::produce(&after_disposition).is_err());
+
+    // 8. Out-of-order dispositions are rejected.
     let mut swapped = base.clone();
     let d0 = swapped["dispositions"][0].clone();
     let d1 = swapped["dispositions"][1].clone();
@@ -307,7 +339,7 @@ fn tampered_portable_fixtures_fail_with_typed_findings() {
             .any(|f| matches!(f, EvidenceFinding::OutOfOrder { .. }))
     );
 
-    // 8. Producer refuses to emit an invalid document.
+    // 9. Producer refuses to emit an invalid document.
     let mut invalid_doc = sample_document();
     invalid_doc.authenticity = "signed".into();
     assert!(disposition_evidence::produce(&invalid_doc).is_err());
@@ -578,7 +610,8 @@ async fn schema_invariants_enforce_independent_policies_immutability_and_monoton
     .expect("valid event")
     .last_insert_rowid();
 
-    // Version hash invariants: v1 accepts NULL predecessor, rejects non-null predecessor, rejects v2 > version_count.
+    // Version hash invariants: v1 accepts NULL predecessor, rejects non-null predecessor,
+    // rejects finalized_at outside tombstone bounds, and rejects v2 > version_count.
     assert!(
         sqlx::query(
             "INSERT INTO disposition_version_hash (disposition_event_id, version_number, record_schema, content_hash, chain_hash, predecessor_content_hash, finalized_at) VALUES (?1, 1, 2, ?2, ?3, ?4, 900)",
@@ -587,6 +620,17 @@ async fn schema_invariants_enforce_independent_policies_immutability_and_monoton
         .bind(&h1)
         .bind(&h2)
         .bind(&h3)
+        .execute(&pool)
+        .await
+        .is_err()
+    );
+    assert!(
+        sqlx::query(
+            "INSERT INTO disposition_version_hash (disposition_event_id, version_number, record_schema, content_hash, chain_hash, predecessor_content_hash, finalized_at) VALUES (?1, 1, 2, ?2, ?3, NULL, 1001)",
+        )
+        .bind(event_with_hashes)
+        .bind(&h1)
+        .bind(&h2)
         .execute(&pool)
         .await
         .is_err()

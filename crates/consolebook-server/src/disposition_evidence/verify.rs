@@ -466,7 +466,11 @@ fn check_entry_versions(entry: &PortableDispositionEntry, findings: &mut Vec<Evi
         return;
     }
     let mut prev_content_hash: Option<&str> = None;
+    let mut min_finalized_at = i64::MAX;
+    let mut max_finalized_at = i64::MIN;
     for (idx, version) in entry.versions.iter().enumerate() {
+        min_finalized_at = min_finalized_at.min(version.finalized_at);
+        max_finalized_at = max_finalized_at.max(version.finalized_at);
         let expected_num = i64::try_from(idx + 1).unwrap_or(i64::MAX);
         if version.version_number != expected_num {
             findings.push(EvidenceFinding::HashLineageBroken {
@@ -498,6 +502,18 @@ fn check_entry_versions(entry: &PortableDispositionEntry, findings: &mut Vec<Evi
             });
         }
         prev_content_hash = Some(version.content_hash.as_str());
+    }
+    if !entry.versions.is_empty()
+        && (min_finalized_at != entry.earliest_finalized_at
+            || max_finalized_at != entry.latest_finalized_at)
+    {
+        findings.push(EvidenceFinding::HashLineageBroken {
+            evaluation_record_id: entry.evaluation_record_id,
+            detail: format!(
+                "retained version finalized_at range ({min_finalized_at}..={max_finalized_at}) disagrees with tombstone ({}..={})",
+                entry.earliest_finalized_at, entry.latest_finalized_at
+            ),
+        });
     }
 }
 

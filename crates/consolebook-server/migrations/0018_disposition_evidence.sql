@@ -146,9 +146,10 @@ WHEN NOT EXISTS (
         WHERE e.id = NEW.disposition_event_id
           AND e.hashes_retained = 1
           AND NEW.version_number <= e.version_count
+          AND NEW.finalized_at BETWEEN e.earliest_finalized_at AND e.latest_finalized_at
     )
 BEGIN
-    SELECT RAISE(ABORT, 'version hash requires a hash-retaining disposition event within version_count');
+    SELECT RAISE(ABORT, 'version hash requires a hash-retaining disposition event within version_count and finalized_at bounds');
 END;
 
 CREATE TRIGGER disposition_version_hash_no_update

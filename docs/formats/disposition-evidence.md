@@ -67,7 +67,10 @@ agency authority reference, UTC timestamps, and optional version hashes:
 
 Each `versions[]` entry carries `version_number`, `record_schema`,
 `content_hash`, `chain_hash`, `predecessor_content_hash` (`null` for version 1,
-previous version's `content_hash` for versions `> 1`), and `finalized_at`.
+previous version's `content_hash` for versions `> 1`), and `finalized_at`. When
+`hashes_retained` is `true`, the minimum and maximum `finalized_at` across
+`versions[]` must equal `earliest_finalized_at` and `latest_finalized_at`,
+respectively.
 
 ### Verifier verdicts for disposition entries
 
