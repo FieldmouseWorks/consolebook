@@ -16,18 +16,33 @@ ExecStart=/usr/local/bin/consolebook serve
 Restart=on-failure
 RestartSec=5
 
-# The service may write only its own data directory.
+# The service may write only its own data directory (and configured copy
+# directory via paths.conf). UMask=0027 matches ADR 0023's 0750 directories
+# so members of the consolebook group can read backups if granted access,
+# while other users get no permissions.
 UMask=0027
 NoNewPrivileges=true
+CapabilityBoundingSet=
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 PrivateDevices=true
+ProtectClock=true
+ProtectHostname=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
+ProtectKernelLogs=true
 ProtectControlGroups=true
+ProtectProc=invisible
+RestrictNamespaces=true
+RestrictRealtime=true
 RestrictSUIDSGID=true
 LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
 # Optional here: install.sh adds the configured data and copy directories.
 ReadWritePaths=-/var/lib/consolebook
 
