@@ -3,8 +3,8 @@
 	// export_records capability. `busy` is the page's shared flag: either
 	// export disables every other page action while it runs, and they it.
 	import {
-		ApiError,
 		completeInstallationExportPath,
+		describeExportError,
 		downloadExport,
 		exportSummary,
 		installationExportPath,
@@ -34,8 +34,7 @@
 		try {
 			exported = await downloadExport(installationExportPath());
 		} catch (err) {
-			exportError =
-				err instanceof ApiError ? err.message : 'the server could not be reached';
+			exportError = describeExportError(err);
 		} finally {
 			busy = false;
 		}
@@ -54,8 +53,7 @@
 		try {
 			wholeExported = await downloadExport(completeInstallationExportPath());
 		} catch (err) {
-			wholeExportError =
-				err instanceof ApiError ? err.message : 'the server could not be reached';
+			wholeExportError = describeExportError(err);
 		} finally {
 			busy = false;
 		}

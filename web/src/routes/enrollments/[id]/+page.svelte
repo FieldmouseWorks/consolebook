@@ -9,6 +9,7 @@
 		createDraft,
 		createSession,
 		dailyForms,
+		describeExportError,
 		downloadExport,
 		endAssignment,
 		enrollmentExportPath,
@@ -67,7 +68,7 @@
 		try {
 			exported = await downloadExport(path);
 		} catch (err) {
-			exportError = err instanceof ApiError ? err.message : 'the server could not be reached';
+			exportError = describeExportError(err);
 		} finally {
 			busy = false;
 		}

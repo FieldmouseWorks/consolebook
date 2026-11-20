@@ -8,6 +8,7 @@
 		acknowledgeRecord,
 		amendRecord,
 		attestRecord,
+		describeExportError,
 		downloadExport,
 		finalizeDraft,
 		finalizedVersion,
@@ -179,7 +180,7 @@
 		try {
 			exported = await downloadExport(path);
 		} catch (err) {
-			exportError = err instanceof ApiError ? err.message : 'the server could not be reached';
+			exportError = describeExportError(err);
 		} finally {
 			busy = false;
 		}
