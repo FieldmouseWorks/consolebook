@@ -265,6 +265,51 @@ Consolebook refuses to overstate what software on one host can guarantee:
 - **No supplied schedules or legal authority:** Consolebook never supplies
   default retention periods, jurisdictional schedules, or legal determinations.
 
+### 9. Record export format version 2 (`#215`)
+
+The record export ([ADR 0014](0014-record-export-format.md),
+[format](../formats/record-export.md)) carries disposition in the archive
+itself, so a file verified alone says what it holds:
+
+- **Shape.** Archive-manifest `format_version` 2 adds `disposition_evidence`,
+  a reference (path and SHA-256) to `disposition/evidence.json`, a
+  [portable disposition evidence](../formats/disposition-evidence.md)
+  document for the requested scope, or `null` when the scope has neither
+  tombstones nor applicable boundary checkpoints. `units` lists retained
+  versions only; it may be empty only when the evidence accounts for the
+  scope. A record is never both a unit and a tombstone.
+- **Scopes.** Version and record scopes carry the requested record's
+  tombstone and no boundary checkpoints. Enrollment scopes carry that
+  enrollment's tombstones; enrollment and installation scopes carry every
+  boundary checkpoint, because a checkpoint records expired tombstones
+  without naming their enrollments.
+- **Verdicts.** Verification reports retained content, fully disposed
+  scopes, mixed scopes, and scopes closed by a policy boundary alone as
+  distinct outcomes, and never claims destroyed bytes were checked or that a
+  scope is legally complete.
+- **Read rule.** A tombstone is readable on the grounds that survive
+  disposition: enrollment-history readers, evaluation authors assigned to the
+  enrollment, and the trainee. That is never wider than the retained
+  record's read rule (ADR 0010), whose other grounds (session membership,
+  review history) are destroyed with the record. The installation scope
+  keeps `export_records`.
+- **Races.** Manifest and evidence are read in one transaction. A version
+  disposed after that and before its bytes are streamed fails the transfer:
+  the delivery ends without completing, and a failed archive is never
+  finalized into a readable container. A request after disposition gets the
+  coherent post-disposition archive.
+- **Compatibility.** Version-1 archives keep verifying under their own
+  rules, dispatched by version; any other version is refused by name. A
+  golden version-1 archive produced by the version-1 build is committed
+  with the tests.
+- **Unit manifests keep version 1.** This amends ADR 0014's cost that one
+  version is shared by both manifests: trainee packets and installation
+  exports carry the same unit manifest, so the unit manifest now has its own
+  version, bumped only when its own shape changes.
+- **Other export families.** Trainee packets (`#216`) and installation
+  exports (`#217`) reconcile separately; public destruction stays unexposed
+  until every family agrees.
+
 ## Consequences
 
 - `#211`–`#219` implement this contract sequentially across authority/preview,

@@ -184,6 +184,13 @@ dispatches version 1 and version 2 by name so previously produced version-1
 archives continue verifying without migration, and refuses any unknown version
 (such as `3`) as `UnsupportedFormat`.
 
+Golden archives are committed with the tests and verified on every build:
+`record-export-v1.zip`, produced by the version-1 build, and the version-2
+`record-export-v2-mixed.zip`, `-fully-disposed.zip` and `-boundary-only.zip`
+(`crates/consolebook-server/tests/fixtures/`). A committed golden is never
+regenerated; a change that makes one read differently is a new
+`format_version` ([ADR 0030 §9](../decisions/0030-lawful-disposition-scope-and-recovery.md)).
+
 ### `scope`
 
 `kind` is one of:
