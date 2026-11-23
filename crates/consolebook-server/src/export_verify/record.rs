@@ -49,10 +49,16 @@ pub enum ArchiveContentStatus {
     /// Archive carries verified retained units alongside lawfully disposed
     /// record evidence (whose content is unavailable for verification).
     MixedRetainedAndDisposed,
-    /// Archive carries zero retained content units; requested scope is fully
-    /// disposed and/or covered by intentional policy boundaries (never an
+    /// Archive carries zero retained content units and at least one lawfully
+    /// disposed record: the requested scope is fully disposed (never an
     /// ordinary empty or complete-content export).
     FullyDisposed,
+    /// Archive carries neither retained content units nor disposition
+    /// tombstones, only intentional policy boundary checkpoints: whatever the
+    /// scope held before the boundary is accounted for by policy-required
+    /// metadata closure alone, never claimed as disposed records and never
+    /// claimed as an empty scope.
+    PolicyBoundaryOnly,
     /// Archive carries verified retained units alongside intentional policy
     /// boundary checkpoints marking expired disposition metadata.
     RetainedWithPolicyBoundary,

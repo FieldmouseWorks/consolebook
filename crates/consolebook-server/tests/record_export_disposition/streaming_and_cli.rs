@@ -306,8 +306,16 @@ async fn real_server_http_stream_aborts_on_mid_transfer_disposition_and_serves_c
     assert!(headers_only.contains("transfer-encoding: chunked"));
 
     // Dispose the final record while the HTTP transfer is stalled mid-stream.
+    // The stall must stay inside the server's stall limit, or the transfer
+    // would end for the stall and this test would pass for the wrong reason.
+    let stalled_since = std::time::Instant::now();
     fx.dispose_records(vec![victim_id], evaluated_at, true)
         .await;
+    assert!(
+        stalled_since.elapsed() < consolebook_server::exports_http::EXPORT_STALL_LIMIT / 2,
+        "disposition took {:?}: too close to the export stall limit to prove the race",
+        stalled_since.elapsed()
+    );
 
     // Drain the rest of the socket: the server must abort the chunked transfer
     // cleanly without a terminal 0-length chunk, and any received bytes must
@@ -527,7 +535,12 @@ async fn cli_export_verify_reports_honest_verdicts_without_opening_an_installati
         stdout_tampered.contains("NOT VERIFIED"),
         "{stdout_tampered}"
     );
-    // Confirm the verifier never created a database or data directory.
-    assert!(!isolated.path().join("data").exists());
-    assert!(!isolated.path().join("consolebook.db").exists());
+    // Confirm the verifier created nothing: no database, no data directory,
+    // nothing but the three archives it was handed.
+    let mut left: Vec<_> = std::fs::read_dir(isolated.path())
+        .expect("read isolated dir")
+        .map(|entry| entry.expect("entry").file_name())
+        .collect();
+    left.sort();
+    assert_eq!(left, ["disposed.zip", "mixed.zip", "tampered.zip"]);
 }

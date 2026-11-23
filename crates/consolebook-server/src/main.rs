@@ -610,6 +610,13 @@ fn print_verify_summary(report: &export_verify::ArchiveReport) -> ExitCode {
                     disp.boundary_checkpoints.len()
                 );
             }
+            export_verify::ArchiveContentStatus::PolicyBoundaryOnly => {
+                let disp = report.disposition.as_ref().expect("disposition report");
+                println!(
+                    "consistent (policy boundary only): 0 retained units and 0 disposed records; {} intentional policy boundary checkpoint(s) account for expired disposition metadata; self-consistency only",
+                    disp.boundary_checkpoints.len()
+                );
+            }
             export_verify::ArchiveContentStatus::RetainedWithPolicyBoundary => {
                 let disp = report.disposition.as_ref().expect("disposition report");
                 println!(

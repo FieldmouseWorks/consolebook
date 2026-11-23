@@ -458,8 +458,10 @@ impl ArchiveReport {
         let has_units = !self.units.is_empty();
         let has_disposed = !disp.dispositions.is_empty();
         let has_boundaries = !disp.boundary_checkpoints.is_empty();
-        if !has_units {
+        if !has_units && has_disposed {
             ArchiveContentStatus::FullyDisposed
+        } else if !has_units {
+            ArchiveContentStatus::PolicyBoundaryOnly
         } else if has_disposed {
             ArchiveContentStatus::MixedRetainedAndDisposed
         } else if has_boundaries {

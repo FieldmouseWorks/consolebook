@@ -6,6 +6,7 @@
 #[path = "../support/mod.rs"]
 mod support;
 
+mod golden;
 mod golden_and_negative;
 mod streaming_and_cli;
 

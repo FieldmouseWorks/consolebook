@@ -253,8 +253,12 @@ Verdict honesty (ADR 0030 §7):
   `disposed_content_and_hashes_unavailable`) and intentional policy boundaries
   (`intentional_policy_boundary`).
 - A verified fully disposed archive reports zero retained units alongside its
-  disposition evidence or policy boundaries (`FullyDisposed`), never as an
-  ordinary empty export and never claiming destroyed bytes were verified.
+  disposition tombstones (`FullyDisposed`), never as an ordinary empty export
+  and never claiming destroyed bytes were verified.
+- A verified archive with zero retained units and zero tombstones reports its
+  intentional policy boundaries alone (`PolicyBoundaryOnly`): boundary
+  checkpoints are installation-wide, so it claims neither that the scope held
+  disposed records nor that it was empty.
 
 Unit checks, for every listed unit:
 

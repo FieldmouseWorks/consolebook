@@ -380,7 +380,7 @@ async fn metadata_boundary_checkpoints_verify_alongside_retained_and_on_fully_cl
     assert!(rep_only.verified(), "{rep_only:?}");
     assert_eq!(
         rep_only.content_status(),
-        ArchiveContentStatus::FullyDisposed
+        ArchiveContentStatus::PolicyBoundaryOnly
     );
     assert!(r1 > 0);
 }
