@@ -3,12 +3,16 @@
 # installer replays) stay in pr-gate.yml and release.yml. The shared workflow
 # and the Nix install action it uses are allowlisted, and like every `uses:`
 # here it is pinned to a commit (burrow main, 2026-10-24).
+#
+# A push to a conary/train/ branch is a merge-train candidate: main with the
+# PRs it would land on top. conaryd counts the gate only as an attestation of
+# the tree that lands, so the gate runs on each candidate and attests it.
 name: flake
 on:
   # A PR retargeted onto another branch runs from flake-retarget.yml.
   pull_request:
   push:
-    branches: [main]
+    branches: [main, "conary/train/**"]
 permissions:
   contents: read
 jobs:
