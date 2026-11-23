@@ -181,12 +181,12 @@ fn the_golden_mixed_archive_verifies() {
 fn the_golden_fully_disposed_archive_verifies() {
     let report = verified(GOLDEN_V2_FULLY_DISPOSED);
     assert_eq!(report.scope, Some(Scope::Record { record_id: 2 }));
-    assert!(report.units.is_empty());
+    assert_eq!(report.units, []);
     assert_eq!(report.content_status(), ArchiveContentStatus::FullyDisposed);
     let disposition = report.disposition.as_ref().expect("disposition report");
     assert_eq!(disposition.dispositions.len(), 1);
     assert_eq!(disposition.dispositions[0].version_count, 2);
-    assert!(disposition.boundary_checkpoints.is_empty());
+    assert_eq!(disposition.boundary_checkpoints, []);
 }
 
 /// An enrollment with nothing retained and no tombstone reports the
@@ -195,13 +195,13 @@ fn the_golden_fully_disposed_archive_verifies() {
 fn the_golden_boundary_only_archive_verifies() {
     let report = verified(GOLDEN_V2_BOUNDARY_ONLY);
     assert!(matches!(report.scope, Some(Scope::Enrollment { .. })));
-    assert!(report.units.is_empty());
+    assert_eq!(report.units, []);
     assert_eq!(
         report.content_status(),
         ArchiveContentStatus::PolicyBoundaryOnly
     );
     let disposition = report.disposition.as_ref().expect("disposition report");
-    assert!(disposition.dispositions.is_empty());
+    assert_eq!(disposition.dispositions, []);
     assert_eq!(disposition.boundary_checkpoints.len(), 1);
 }
 
