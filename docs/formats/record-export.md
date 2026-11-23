@@ -36,7 +36,8 @@ The container is a ZIP archive (APPNOTE 6.3):
   slashes and ASCII characters;
 - entry order is the archive manifest first, then units in ascending
   (`record_id`, `version_number`) order, `record.json` before
-  `manifest.json` within a unit;
+  `manifest.json` within a unit, then `disposition/evidence.json` when
+  disposition evidence or policy boundary checkpoints apply to the scope;
 - every entry's modification time is the export instant (DOS time, UTC
   as written, so seconds round down to even), and every entry carries
   Unix permissions `0644`;
@@ -49,6 +50,7 @@ Entry names:
 manifest.json                                   archive manifest
 records/{record_id}/v{version_number}/record.json    canonical record bytes
 records/{record_id}/v{version_number}/manifest.json  unit manifest
+disposition/evidence.json                       portable disposition evidence (optional, v2+)
 ```
 
 `{record_id}` and `{version_number}` are the decimal integers of the
@@ -94,7 +96,7 @@ identity and lineage on their own (ADR 0011).
 | Member | Type | Meaning |
 | --- | --- | --- |
 | `format` | string | Always `consolebook-record-unit` |
-| `format_version` | integer | `1`; bumped by any change to either manifest's shape |
+| `format_version` | integer | `1`; bumped by any change to the unit manifest's shape |
 | `installation_id` | string | The exporting installation's identity (`instance.installation_id`) |
 | `record_id` | integer | The record's instance-local identity (positive) |
 | `version_number` | integer | This version's number within the record (from 1) |
@@ -111,9 +113,13 @@ so that a unit directory stands on its own; the two must agree.
 
 ```json
 {
+  "disposition_evidence": {
+    "path": "disposition/evidence.json",
+    "sha256": "…64 lowercase hex…"
+  },
   "exported_at": 1756753200,
   "format": "consolebook-record-export",
-  "format_version": 1,
+  "format_version": 2,
   "installation_id": "…",
   "scope": { "kind": "record", "record_id": 12 },
   "units": [
@@ -142,31 +148,72 @@ so that a unit directory stands on its own; the two must agree.
 | Member | Type | Meaning |
 | --- | --- | --- |
 | `format` | string | Always `consolebook-record-export` |
-| `format_version` | integer | `1` |
+| `format_version` | integer | `2` (legacy `1` archives without `disposition_evidence` remain verified under explicit compatibility dispatch) |
 | `installation_id` | string | As in the unit manifest |
 | `exported_at` | integer | The export instant, UTC unix seconds |
 | `scope` | object | What the archive claims to contain (below) |
-| `units` | array | Every unit, ascending by (`record_id`, `version_number`), no duplicates |
+| `units` | array | Every retained unit, ascending by (`record_id`, `version_number`), no duplicates. May be empty in version 2 **only** when `disposition_evidence` accounts for a fully disposed or policy-boundary-closed scope — never for an ordinary empty export |
+| `disposition_evidence` | object or `null` | Version 2 only: `{ "path": "disposition/evidence.json", "sha256": "…" }` when any disposition tombstone or applicable policy boundary checkpoint exists for the scope, or `null` otherwise |
 
 `units[]` members are `path`, `record_id`, `version_number`,
 `record_schema`, `content_hash`, `chain_hash`, and
 `predecessor_content_hash`, with the unit-manifest meanings.
 
+### `disposition/evidence.json` (version 2)
+
+When `disposition_evidence` is non-null, `disposition/evidence.json` is a
+canonical [`consolebook-disposition-evidence` v1](disposition-evidence.md)
+document matching `manifest.installation_id` and `manifest.exported_at`:
+
+- `dispositions` carries minimal tombstones (and optional retained version
+  hashes, never destroyed record content) for lawfully disposed records in the
+  requested scope, strictly ascending by `evaluation_record_id`.
+- `boundary_checkpoints` carries policy-required metadata closures
+  (`disposition_boundary_checkpoint`) for `enrollment` and `installation`
+  scopes, strictly ascending by `checkpoint_id`; single-record and
+  single-version scopes carry no boundary checkpoints.
+- No `evaluation_record_id` may appear both in `units` and in `dispositions`.
+- An evidence document with both `dispositions` and `boundary_checkpoints`
+  empty is invalid; the manifest sets `disposition_evidence` to `null` instead.
+
+### Compatibility with format version 1
+
+Format version 1 (`format_version: 1`) carries no `disposition_evidence`
+member and requires `units` to be non-empty. `export_verify` explicitly
+dispatches version 1 and version 2 by name so previously produced version-1
+archives continue verifying without migration, and refuses any unknown version
+(such as `3`) as `UnsupportedFormat`.
+
+Golden archives are committed with the tests and verified on every build:
+`record-export-v1.zip`, produced by the version-1 build, and the version-2
+`record-export-v2-mixed.zip`, `-fully-disposed.zip` and `-boundary-only.zip`
+(`crates/consolebook-server/tests/fixtures/`). A committed golden is never
+regenerated; a change that makes one read differently is a new
+`format_version` ([ADR 0030 §9](../decisions/0030-lawful-disposition-scope-and-recovery.md)).
+
 ### `scope`
 
 `kind` is one of:
 
-- `version` — with `record_id` and `version_number`; exactly one unit.
-- `record` — with `record_id`; every retained version of that record.
-- `enrollment` — with `enrollment_id`; every finalized version of every
-  record of that enrollment.
-- `installation` — no further members; every finalized version the
-  installation holds.
+- `version` — with `record_id` and `version_number`; either one retained unit
+  matching that identity, or (in version 2) zero units plus a disposition
+  entry for `record_id` with `1 <= version_number <= version_count`.
+- `record` — with `record_id`; either every retained version of that record,
+  or (in version 2) zero units plus the disposition entry for `record_id`.
+- `enrollment` — with `enrollment_id`; every retained finalized version of
+  that enrollment's records, plus (in version 2) every disposition tombstone
+  for that enrollment and any installation policy boundary checkpoints.
+- `installation` — no further members; every retained finalized version the
+  installation holds, plus (in version 2) every disposition tombstone and
+  policy boundary checkpoint.
 
 The scope is the exporter's statement of intent. Verification checks
-the archive against itself — a `version` scope must be exactly its one
-unit, a `record` scope must hold only that record's versions — but it
-cannot know whether an installation held versions the archive omits.
+the archive against itself — a `version` scope must match its single unit or
+disposed version, a `record` scope must hold only that record's versions or
+tombstone, and an `enrollment` scope's disposed entries must name that
+enrollment — but file-only verification cannot know whether an installation
+held additional records the archive omits, nor can it prove legal completeness
+or verify destroyed bytes.
 
 ## Verification
 
@@ -183,19 +230,42 @@ Archive checks:
 1. the container is a readable ZIP archive whose central directory names
    each entry once — a name written twice is a finding, because
    extraction tools disagree on which copy they take;
-2. `manifest.json` exists, parses, and carries a known `format` and
-   `format_version`;
-3. `units` lists at least one unit, ascending by (`record_id`,
-   `version_number`) with no duplicate identity, and each `path` equals
-   the derived form;
-4. the listed units fit the declared scope as far as the archive can
-   tell: a `version` scope lists exactly one unit with that identity, a
-   `record` scope lists only units of that record; an `enrollment` or
-   `installation` scope states nothing the archive can confirm on its
-   own;
-5. every entry in the container is `manifest.json` or one of a listed
-   unit's two files — an unlisted entry is a finding; and
-6. both files of every listed unit exist.
+2. `manifest.json` exists, parses, is canonical JSON, and carries a known
+   `format` and `format_version` (`1` or `2`);
+3. `units` is strictly ascending by (`record_id`, `version_number`) with no
+   duplicate identity, and each `path` equals the derived form. In version 1
+   `units` must be non-empty; in version 2 `units` may be empty **only** when
+   `disposition_evidence` is present and valid for the scope;
+4. when version 2 carries `disposition_evidence`, its `path` is
+   `disposition/evidence.json`, its `sha256` matches the entry's bytes, the
+   entry passes all [`consolebook-disposition-evidence` v1](disposition-evidence.md)
+   checks (`authenticity: "self_consistency_only"`, allowlisted fields,
+   continuous hash lineage when `hashes_retained` is true), its
+   `installation_id` and `exported_at` agree with `manifest.json`, it is not
+   empty, and no `evaluation_record_id` appears in both `units` and
+   `dispositions`;
+5. the listed units and disposition entries fit the declared scope as far as
+   the archive can tell;
+6. every entry in the container is `manifest.json`, one of a listed unit's
+   two files, or (in version 2 when referenced) `disposition/evidence.json` —
+   an unlisted entry is a finding; and
+7. every listed file exists.
+
+Verdict honesty (ADR 0030 §7):
+
+- A verified retained-only archive reports verified units consistent with
+  their stated fingerprints.
+- A verified mixed archive reports retained units separately from lawfully
+  disposed records (`disposed_hash_continuity_only` or
+  `disposed_content_and_hashes_unavailable`) and intentional policy boundaries
+  (`intentional_policy_boundary`).
+- A verified fully disposed archive reports zero retained units alongside its
+  disposition tombstones (`FullyDisposed`), never as an ordinary empty export
+  and never claiming destroyed bytes were verified.
+- A verified archive with zero retained units and zero tombstones reports its
+  intentional policy boundaries alone (`PolicyBoundaryOnly`): boundary
+  checkpoints are installation-wide, so it claims neither that the scope held
+  disposed records nor that it was empty.
 
 Unit checks, for every listed unit:
 

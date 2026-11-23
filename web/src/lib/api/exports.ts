@@ -8,6 +8,8 @@ export interface ExportSummary {
 	installation_id: string;
 	record_count: number;
 	version_count: number;
+	disposed_record_count: number;
+	boundary_checkpoint_count: number;
 }
 
 export function exportSummary(): Promise<ExportSummary> {

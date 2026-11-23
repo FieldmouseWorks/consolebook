@@ -65,16 +65,33 @@
 	<h3>Finalized records</h3>
 	{#if summary === null}
 		<p class="quiet">Checking finalized records…</p>
-	{:else if summary.version_count === 0}
+	{:else if summary.version_count === 0 && summary.disposed_record_count === 0 && summary.boundary_checkpoint_count === 0}
 		<p class="quiet">No finalized records yet; there is no record export to make.</p>
 	{:else}
 		<p>
-			This installation holds {summary.version_count} finalized
-			{summary.version_count === 1 ? 'version' : 'versions'} across
-			{summary.record_count}
-			{summary.record_count === 1 ? 'record' : 'records'}. An export carries
-			every one as its stored canonical bytes beside a manifest and verifies
-			from the archive alone with <code>consolebook-server export verify</code>.
+			{#if summary.version_count > 0}
+				This installation holds {summary.version_count} finalized
+				{summary.version_count === 1 ? 'version' : 'versions'} across
+				{summary.record_count}
+				{summary.record_count === 1 ? 'record' : 'records'}.
+			{:else}
+				This installation holds no retained finalized record content; only lawful
+				disposition evidence remains in scope.
+			{/if}
+			{#if summary.disposed_record_count > 0 || summary.boundary_checkpoint_count > 0}
+				Disposition evidence covers {summary.disposed_record_count}
+				{summary.disposed_record_count === 1 ? 'disposed record' : 'disposed records'}
+				{#if summary.boundary_checkpoint_count > 0}
+					and {summary.boundary_checkpoint_count}
+					{summary.boundary_checkpoint_count === 1
+						? 'policy boundary checkpoint'
+						: 'policy boundary checkpoints'}
+				{/if}
+				(disposed content is unavailable for content verification).
+			{/if}
+			An export carries every retained version as its stored canonical bytes beside
+			a manifest and any disposition evidence, and verifies from the archive alone
+			with <code>consolebook-server export verify</code>.
 		</p>
 		<button type="button" class="secondary" disabled={busy} onclick={exportInstallation}>
 			Export every finalized record

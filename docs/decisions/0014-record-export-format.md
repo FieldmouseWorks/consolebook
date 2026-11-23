@@ -116,7 +116,9 @@ may export, and what verification claims (#45; Milestone 5 slice 1).
 - a new dependency (`zip`, without default features: stored entries
   only) enters the one executable;
 - the format version is shared by both manifests, so any manifest
-  change bumps it for every export;
+  change bumps it for every export (amended by
+  [ADR 0030 §9](0030-lawful-disposition-scope-and-recovery.md): the unit
+  manifest now keeps its own version);
 - an archive pins the predecessor by content hash only, so an
   exported successor without its predecessor verifies its own chain
   hash but cannot prove the predecessor's bytes — reported as *not in

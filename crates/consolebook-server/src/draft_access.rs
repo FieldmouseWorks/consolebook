@@ -160,6 +160,39 @@ pub(crate) async fn may_read(
     Ok(read_grant(pool, actor_user_id, record).await?.is_some())
 }
 
+/// Whether the actor may read disposition evidence for a lawfully disposed
+/// record belonging to `enrollment_id`. Preserves the finalized-record read
+/// boundary without granting any extra authority after content is purged:
+/// enrollment history readers, evaluation authors actively assigned to the
+/// enrollment, and the trainee themselves (`view_own_records`).
+pub(crate) async fn may_read_disposed_record(
+    pool: &SqlitePool,
+    actor_user_id: i64,
+    enrollment_id: i64,
+) -> Result<bool> {
+    if lifecycle::may_read(pool, actor_user_id, enrollment_id).await? {
+        return Ok(true);
+    }
+    if capabilities::user_has(pool, actor_user_id, Capability::AuthorEvaluation).await?
+        && assignments::is_assigned(pool, actor_user_id, enrollment_id).await?
+    {
+        return Ok(true);
+    }
+    if capabilities::user_has(pool, actor_user_id, Capability::ViewOwnRecords).await? {
+        let own: Option<i64> =
+            sqlx::query_scalar("SELECT 1 FROM enrollment WHERE id = ?1 AND user_id = ?2")
+                .bind(enrollment_id)
+                .bind(actor_user_id)
+                .fetch_optional(pool)
+                .await
+                .context("checking own enrollment for disposed record")?;
+        if own.is_some() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// Whether the actor may start (or offer to start) the session's draft:
 /// a coordinator, or an evaluation author who is a member of the session
 /// or assigned to its enrollment.

@@ -12,6 +12,9 @@
 //! `export_records`. Verification from the archive alone is
 //! `export_verify`'s, which reads the manifests defined here.
 
+mod container;
+mod disposition;
+
 use std::fmt;
 use std::io::{Cursor, Seek, Write};
 
@@ -20,11 +23,11 @@ use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqliteConnection, SqlitePool};
 use time::OffsetDateTime;
-use zip::CompressionMethod;
-use zip::write::{SimpleFileOptions, ZipWriter};
+
+pub(crate) use container::{ArchiveWriter, canonical_json, file_name, stamp};
+pub use disposition::{DISPOSITION_EVIDENCE_PATH, DispositionEvidenceRef};
 
 use crate::audit::{self, EventKind, Subject};
-use crate::canonical;
 use crate::capabilities::{self, Capability};
 use crate::evaluation_drafts;
 use crate::lifecycle;
@@ -34,8 +37,14 @@ use crate::storage;
 pub const ARCHIVE_FORMAT: &str = "consolebook-record-export";
 /// Unit-manifest discriminator; never changes.
 pub const UNIT_FORMAT: &str = "consolebook-record-unit";
-/// Shared by both manifests; bumped by any change to either shape.
-pub const FORMAT_VERSION: i64 = 1;
+/// Current archive-manifest format version (`2` adds `disposition_evidence`
+/// and fully-disposed / boundary-closed scope support; ADR 0030 §7; #215).
+pub const FORMAT_VERSION: i64 = 2;
+/// Legacy archive-manifest format version verified for compatibility.
+pub const LEGACY_FORMAT_VERSION: i64 = 1;
+/// Unit-manifest format version (shared unchanged across record exports,
+/// trainee packets, and installation exports).
+pub const UNIT_FORMAT_VERSION: i64 = 1;
 /// The archive manifest's entry name.
 pub const ARCHIVE_MANIFEST_PATH: &str = "manifest.json";
 /// The canonical record bytes within a unit directory.
@@ -104,10 +113,24 @@ pub struct UnitEntry {
     pub predecessor_content_hash: Option<String>,
 }
 
-/// The archive manifest (`manifest.json` at the root).
+/// The archive manifest (`manifest.json` at the root) for format version 2.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ArchiveManifest {
+    pub format: String,
+    pub format_version: i64,
+    pub installation_id: String,
+    pub exported_at: i64,
+    pub scope: Scope,
+    pub units: Vec<UnitEntry>,
+    pub disposition_evidence: Option<DispositionEvidenceRef>,
+}
+
+/// Legacy format-version 1 archive manifest (retained for compatibility
+/// verification under ADR 0030).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArchiveManifestV1 {
     pub format: String,
     pub format_version: i64,
     pub installation_id: String,
@@ -141,6 +164,8 @@ pub struct Export {
     pub bytes: Vec<u8>,
     pub exported_at: i64,
     pub unit_count: usize,
+    pub disposed_record_count: usize,
+    pub boundary_checkpoint_count: usize,
 }
 
 /// What a produced archive states about itself. The bytes are not here:
@@ -151,6 +176,8 @@ pub struct ArchiveProduced {
     pub file_name: String,
     pub exported_at: i64,
     pub unit_count: usize,
+    pub disposed_record_count: usize,
+    pub boundary_checkpoint_count: usize,
 }
 
 /// The unit directory for one version: `records/{record_id}/v{n}`.
@@ -257,7 +284,7 @@ pub async fn export_to<W: Write + Seek, F: FnOnce(ArchiveProduced)>(
         let mut tx = storage::write_tx(pool)
             .await
             .context("beginning audit write")?;
-        if !scope_has_units(&mut tx, scope).await? {
+        if !scope_has_exportable_state(&mut tx, scope).await? {
             // Nothing to export is never audited, and never exported empty.
             tx.rollback().await.context("rolling back empty export")?;
             return Ok((Err(nothing_to_export(scope)), sink));
@@ -268,25 +295,32 @@ pub async fn export_to<W: Write + Seek, F: FnOnce(ArchiveProduced)>(
     if cancelled() {
         return Err(client_left());
     }
-    // One short read transaction for the installation's identity and the
-    // unit list, so the manifest describes one committed state. It commits
-    // here, before the delivery starts: nothing the client does can hold it
-    // open.
-    let (installation_id, units) = {
+    // One short read transaction for the installation's identity, the
+    // retained unit list, and any disposition evidence / boundary checkpoints
+    // so manifest.json and disposition/evidence.json describe one coherent
+    // committed state. It commits here, before the delivery starts: nothing
+    // the client does can hold it open.
+    let (installation_id, units, disposition_doc) = {
         let mut tx = pool.begin().await.context("beginning export read")?;
         let installation_id = storage::installation_id(&mut *tx).await?;
         let units = collect_meta(&mut tx, scope, cancelled).await?;
+        let disposition_doc = disposition::collect_disposition_evidence(
+            &mut tx,
+            &installation_id,
+            exported_at,
+            scope,
+        )
+        .await?;
         tx.commit().await.context("ending export read")?;
-        (installation_id, units)
+        (installation_id, units, disposition_doc)
     };
-    if units.is_empty() {
-        // The scope held units when it was audited, and a finalized version
-        // is immutable and removed only by an authorized disposition, which
-        // this installation does not yet perform. Rather than export
-        // emptiness the audit does not describe, the export fails: the
-        // caller may retry, and the record stands for the attempt.
+    if units.is_empty() && disposition_doc.is_none() {
+        // The scope held exportable state when audited, but neither retained
+        // versions nor disposition evidence remain now. Rather than export
+        // emptiness the audit does not describe, fail visibly so the caller
+        // may retry.
         return Err(anyhow!(
-            "the audited scope no longer holds a finalized version to export"
+            "the audited scope no longer holds finalized versions or disposition evidence to export"
         ));
     }
     if cancelled() {
@@ -296,14 +330,29 @@ pub async fn export_to<W: Write + Seek, F: FnOnce(ArchiveProduced)>(
         file_name: file_name(scope, exported_at)?,
         exported_at,
         unit_count: units.len(),
+        disposed_record_count: disposition_doc
+            .as_ref()
+            .map_or(0, |d| d.disposed_record_count),
+        boundary_checkpoint_count: disposition_doc
+            .as_ref()
+            .map_or(0, |d| d.boundary_checkpoint_count),
     };
     // The scope is authorized, the export is recorded, and the rows are
     // read: the delivery may start now.
     ready(produced.clone());
-    let manifest = archive_manifest(&installation_id, exported_at, scope, &units);
+    let manifest = archive_manifest(
+        &installation_id,
+        exported_at,
+        scope,
+        &units,
+        disposition_doc.as_ref().map(|d| d.manifest_ref.clone()),
+    );
     let mut writer = ArchiveWriter::new(sink, exported_at)?;
     writer.add(ARCHIVE_MANIFEST_PATH, &canonical_json(&manifest)?)?;
     write_units_streaming(pool, &mut writer, &units, &installation_id, exported_at).await?;
+    if let Some(ev) = disposition_doc {
+        writer.add(&ev.manifest_ref.path, &ev.bytes)?;
+    }
     let sink = writer.into_sink()?;
     Ok((Ok(produced), sink))
 }
@@ -326,6 +375,15 @@ fn nothing_to_export(scope: Scope) -> ExportRefusal {
             ExportRefusal::NothingToExport
         }
     }
+}
+
+/// Whether `scope` holds at least one retained finalized version or
+/// applicable disposition evidence / policy boundary checkpoint.
+async fn scope_has_exportable_state(conn: &mut SqliteConnection, scope: Scope) -> Result<bool> {
+    if scope_has_units(conn, scope).await? {
+        return Ok(true);
+    }
+    disposition::scope_has_disposition_evidence(conn, scope).await
 }
 
 /// Whether the scope holds at least one finalized version, read in the
@@ -397,6 +455,8 @@ pub async fn export_at(
         bytes: bytes.into_inner(),
         exported_at: produced.exported_at,
         unit_count: produced.unit_count,
+        disposed_record_count: produced.disposed_record_count,
+        boundary_checkpoint_count: produced.boundary_checkpoint_count,
     }))
 }
 
@@ -407,10 +467,12 @@ pub struct ExportSummary {
     pub installation_id: String,
     pub record_count: i64,
     pub version_count: i64,
+    pub disposed_record_count: i64,
+    pub boundary_checkpoint_count: i64,
 }
 
-/// How many finalized records and versions an installation export
-/// would carry.
+/// How many finalized records, versions, disposed records, and policy
+/// boundary checkpoints an installation export would carry.
 pub async fn summary(
     pool: &SqlitePool,
     actor_user_id: i64,
@@ -424,10 +486,21 @@ pub async fn summary(
     .fetch_one(pool)
     .await
     .context("counting finalized versions")?;
+    let disposed_record_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM disposition_event")
+        .fetch_one(pool)
+        .await
+        .context("counting disposition events")?;
+    let boundary_checkpoint_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM disposition_boundary_checkpoint")
+            .fetch_one(pool)
+            .await
+            .context("counting disposition boundary checkpoints")?;
     Ok(Ok(ExportSummary {
         installation_id: storage::installation_id(pool).await?,
         record_count,
         version_count,
+        disposed_record_count,
+        boundary_checkpoint_count,
     }))
 }
 
@@ -486,18 +559,46 @@ async fn authorize(
     match scope {
         Scope::Version { record_id, .. } | Scope::Record { record_id } => {
             let mut conn = pool.acquire().await.context("acquiring connection")?;
-            let Some(record) = evaluation_drafts::load_record(&mut conn, record_id).await? else {
+            if let Some(record) = evaluation_drafts::load_record(&mut conn, record_id).await? {
+                drop(conn);
+                if !crate::draft_access::may_read(pool, actor_user_id, &record).await? {
+                    return Ok(Err(ExportRefusal::CapabilityRequired));
+                }
+                let trainee: i64 =
+                    sqlx::query_scalar("SELECT user_id FROM enrollment WHERE id = ?1")
+                        .bind(record.enrollment_id)
+                        .fetch_one(pool)
+                        .await
+                        .context("reading enrollment")?;
+                return Ok(Ok(Audited {
+                    subject: Some(Subject::Record(record_id)),
+                    trainee: Some(trainee),
+                }));
+            }
+            let disposed = disposition::lookup_disposed_record(&mut conn, record_id).await?;
+            drop(conn);
+            let Some(disposed) = disposed else {
                 return Ok(Err(ExportRefusal::NoSuchRecord));
             };
-            drop(conn);
-            if !crate::draft_access::may_read(pool, actor_user_id, &record).await? {
+            if !crate::draft_access::may_read_disposed_record(
+                pool,
+                actor_user_id,
+                disposed.enrollment_id,
+            )
+            .await?
+            {
                 return Ok(Err(ExportRefusal::CapabilityRequired));
             }
+            if let Scope::Version { version_number, .. } = scope
+                && (version_number < 1 || version_number > disposed.version_count)
+            {
+                return Ok(Err(ExportRefusal::NoSuchVersion));
+            }
             let trainee: i64 = sqlx::query_scalar("SELECT user_id FROM enrollment WHERE id = ?1")
-                .bind(record.enrollment_id)
+                .bind(disposed.enrollment_id)
                 .fetch_one(pool)
                 .await
-                .context("reading enrollment")?;
+                .context("reading enrollment for disposed record")?;
             Ok(Ok(Audited {
                 subject: Some(Subject::Record(record_id)),
                 trainee: Some(trainee),
@@ -751,7 +852,7 @@ pub(crate) async fn write_units_streaming<W: Write + Seek>(
         drop(bytes);
         let unit = UnitManifest {
             format: UNIT_FORMAT.to_owned(),
-            format_version: FORMAT_VERSION,
+            format_version: UNIT_FORMAT_VERSION,
             installation_id: installation_id.to_owned(),
             exported_at,
             record_id: entry.record_id,
@@ -775,6 +876,7 @@ pub(crate) fn archive_manifest(
     exported_at: i64,
     scope: Scope,
     units: &[UnitEntry],
+    disposition_evidence: Option<DispositionEvidenceRef>,
 ) -> ArchiveManifest {
     ArchiveManifest {
         format: ARCHIVE_FORMAT.to_owned(),
@@ -783,132 +885,6 @@ pub(crate) fn archive_manifest(
         exported_at,
         scope,
         units: units.to_vec(),
+        disposition_evidence,
     }
-}
-
-/// The container writer every export shares: stored entries, the export
-/// instant as each entry's modification time, `0644`, entries in the
-/// order they are added. The sink need only be seekable; a streamed
-/// export passes [`crate::export_stream::EntryBuffer`], which holds one
-/// local header at a time and yields the same bytes (#47).
-pub(crate) struct ArchiveWriter<W: Write + Seek> {
-    writer: ZipWriter<W>,
-    options: SimpleFileOptions,
-}
-
-impl ArchiveWriter<Cursor<Vec<u8>>> {
-    /// The in-memory writer the packet and the compatibility tests use.
-    pub(crate) fn in_memory(exported_at: i64) -> Result<Self> {
-        Self::new(Cursor::new(Vec::new()), exported_at)
-    }
-
-    pub(crate) fn finish(self) -> Result<Vec<u8>> {
-        let cursor = self
-            .writer
-            .finish()
-            .context("finishing the export archive")?;
-        Ok(cursor.into_inner())
-    }
-}
-
-impl<W: Write + Seek> ArchiveWriter<W> {
-    pub(crate) fn new(sink: W, exported_at: i64) -> Result<Self> {
-        Ok(Self {
-            writer: ZipWriter::new(sink),
-            options: SimpleFileOptions::default()
-                .compression_method(CompressionMethod::Stored)
-                .last_modified_time(dos_time(exported_at)?)
-                .unix_permissions(0o644),
-        })
-    }
-
-    /// Finishes the container, returning the sink it wrote into.
-    pub(crate) fn into_sink(self) -> Result<W> {
-        self.writer.finish().context("finishing the export archive")
-    }
-
-    pub(crate) fn add(&mut self, name: &str, bytes: &[u8]) -> Result<()> {
-        self.writer
-            .start_file(name, self.options)
-            .with_context(|| format!("starting archive entry {name}"))?;
-        self.writer
-            .write_all(bytes)
-            .with_context(|| format!("writing archive entry {name}"))?;
-        Ok(())
-    }
-
-    /// Adds every unit — `record.json` then `manifest.json` — consuming
-    /// the rows so each version's bytes are released once written.
-    pub(crate) fn add_units(
-        &mut self,
-        installation_id: &str,
-        exported_at: i64,
-        rows: Vec<VersionRow>,
-        units: &[UnitEntry],
-    ) -> Result<()> {
-        for (row, entry) in rows.into_iter().zip(units) {
-            self.add(&format!("{}/{RECORD_FILE}", entry.path), &row.bytes)?;
-            let unit = UnitManifest {
-                format: UNIT_FORMAT.to_owned(),
-                format_version: FORMAT_VERSION,
-                installation_id: installation_id.to_owned(),
-                exported_at,
-                record_id: entry.record_id,
-                version_number: entry.version_number,
-                record_schema: entry.record_schema,
-                content_hash: entry.content_hash.clone(),
-                chain_hash: entry.chain_hash.clone(),
-                predecessor_content_hash: entry.predecessor_content_hash.clone(),
-            };
-            self.add(
-                &format!("{}/{UNIT_MANIFEST_FILE}", entry.path),
-                &canonical_json(&unit)?,
-            )?;
-        }
-        Ok(())
-    }
-}
-
-/// Manifests are canonical JSON under the record format's subset, so
-/// the archive is deterministic and a manifest is itself checkable.
-pub(crate) fn canonical_json<T: Serialize>(value: &T) -> Result<Vec<u8>> {
-    let value = serde_json::to_value(value).context("serializing manifest")?;
-    canonical::canonical_bytes(&value)
-}
-
-fn dos_time(exported_at: i64) -> Result<zip::DateTime> {
-    let at = OffsetDateTime::from_unix_timestamp(exported_at).context("export instant")?;
-    zip::DateTime::from_date_and_time(
-        u16::try_from(at.year()).context("export year")?,
-        u8::from(at.month()),
-        at.day(),
-        at.hour(),
-        at.minute(),
-        at.second(),
-    )
-    .map_err(|_| anyhow!("export instant {exported_at} is outside the ZIP date range"))
-}
-
-/// The download-name stamp for an export instant: `YYYYMMDDTHHMMSSZ`.
-pub(crate) fn stamp(exported_at: i64) -> Result<String> {
-    OffsetDateTime::from_unix_timestamp(exported_at)
-        .context("export instant")?
-        .format(&time::macros::format_description!(
-            "[year][month][day]T[hour][minute][second]Z"
-        ))
-        .context("formatting export instant")
-}
-
-fn file_name(scope: Scope, exported_at: i64) -> Result<String> {
-    let stamp = stamp(exported_at)?;
-    let scope_part = match scope {
-        Scope::Version {
-            record_id,
-            version_number,
-        } => format!("record-{record_id}-v{version_number}"),
-        Scope::Record { record_id } => format!("record-{record_id}"),
-        Scope::Enrollment { enrollment_id } => format!("enrollment-{enrollment_id}"),
-        Scope::Installation => "installation".to_owned(),
-    };
-    Ok(format!("consolebook-{scope_part}-{stamp}.zip"))
 }

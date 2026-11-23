@@ -159,6 +159,8 @@ pub async fn export_to<W: Write + Seek, F: FnOnce(ArchiveProduced)>(
         file_name: file_name(exported_at)?,
         exported_at,
         unit_count: units.len(),
+        disposed_record_count: 0,
+        boundary_checkpoint_count: 0,
     };
     ready(produced.clone());
     let manifest = manifest(&installation_id, exported_at, units, &documents);

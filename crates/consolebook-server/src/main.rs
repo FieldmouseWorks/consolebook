@@ -519,6 +519,48 @@ fn run_export_verify(archive: &std::path::Path) -> Result<ExitCode> {
             println!("      {finding}");
         }
     }
+    if let Some(disp) = &report.disposition {
+        print_disposition_report(disp);
+    }
+    Ok(print_verify_summary(&report))
+}
+
+fn print_disposition_report(disp: &export_verify::DispositionReport) {
+    let mark = if disp.verified() { "ok  " } else { "FAIL" };
+    println!(
+        "{mark}  {:<36} disposition evidence ({} disposed, {} boundary checkpoint(s); self-consistency only)",
+        disp.path,
+        disp.dispositions.len(),
+        disp.boundary_checkpoints.len()
+    );
+    for entry in &disp.dispositions {
+        let verdict = match entry.verdict {
+            consolebook_server::disposition_evidence::verify::DisposedEntryVerdict::DisposedHashContinuityOnly => {
+                "lawfully disposed (hash lineage continuity only; content unavailable for verification)"
+            }
+            consolebook_server::disposition_evidence::verify::DisposedEntryVerdict::DisposedContentAndHashesUnavailable => {
+                "lawfully disposed (content and version hashes unavailable)"
+            }
+        };
+        println!(
+            "      disposed record {} ({} version(s)): {verdict}",
+            entry.evaluation_record_id, entry.version_count
+        );
+    }
+    for checkpoint in &disp.boundary_checkpoints {
+        println!(
+            "      policy boundary checkpoint {} ({} expired tombstone(s) through {}): intentional policy boundary",
+            checkpoint.checkpoint_id,
+            checkpoint.expired_event_count,
+            checkpoint.boundary_through_disposed_at
+        );
+    }
+    for finding in &disp.findings {
+        println!("      {finding}");
+    }
+}
+
+fn print_verify_summary(report: &export_verify::ArchiveReport) -> ExitCode {
     let consistent = report.units.iter().filter(|unit| unit.verified()).count();
     let documents = if report.documents.is_empty() && report.tables.is_empty() {
         String::new()
@@ -544,17 +586,54 @@ fn run_export_verify(archive: &std::path::Path) -> Result<ExitCode> {
         _ => "export",
     };
     if report.verified() {
-        println!(
-            "verified {consistent} of {} units{documents}: the {what} is consistent with its stated fingerprints",
-            report.units.len()
-        );
-        Ok(ExitCode::SUCCESS)
+        match report.content_status() {
+            export_verify::ArchiveContentStatus::RetainedContentOnly => {
+                println!(
+                    "verified {consistent} of {} units{documents}: the {what} is consistent with its stated fingerprints",
+                    report.units.len()
+                );
+            }
+            export_verify::ArchiveContentStatus::MixedRetainedAndDisposed => {
+                let disp = report.disposition.as_ref().expect("disposition report");
+                println!(
+                    "verified {consistent} of {} retained units{documents}; {} lawfully disposed record(s) (content unavailable for verification) and {} policy boundary checkpoint(s): self-consistency only",
+                    report.units.len(),
+                    disp.dispositions.len(),
+                    disp.boundary_checkpoints.len()
+                );
+            }
+            export_verify::ArchiveContentStatus::FullyDisposed => {
+                let disp = report.disposition.as_ref().expect("disposition report");
+                println!(
+                    "consistent (fully disposed scope): 0 retained units; {} lawfully disposed record(s) (content unavailable for verification) and {} intentional policy boundary checkpoint(s); self-consistency only",
+                    disp.dispositions.len(),
+                    disp.boundary_checkpoints.len()
+                );
+            }
+            export_verify::ArchiveContentStatus::PolicyBoundaryOnly => {
+                let disp = report.disposition.as_ref().expect("disposition report");
+                println!(
+                    "consistent (policy boundary only): 0 retained units and 0 disposed records; {} intentional policy boundary checkpoint(s) account for expired disposition metadata; self-consistency only",
+                    disp.boundary_checkpoints.len()
+                );
+            }
+            export_verify::ArchiveContentStatus::RetainedWithPolicyBoundary => {
+                let disp = report.disposition.as_ref().expect("disposition report");
+                println!(
+                    "verified {consistent} of {} retained units{documents} with {} intentional policy boundary checkpoint(s): self-consistency only",
+                    report.units.len(),
+                    disp.boundary_checkpoints.len()
+                );
+            }
+            export_verify::ArchiveContentStatus::Failed => unreachable!(),
+        }
+        ExitCode::SUCCESS
     } else {
         println!(
             "NOT VERIFIED: {consistent} of {} units consistent{documents}, {} archive finding(s)",
             report.units.len(),
             report.findings.len()
         );
-        Ok(ExitCode::FAILURE)
+        ExitCode::FAILURE
     }
 }
