@@ -19,7 +19,7 @@ use consolebook_server::programs::{
 };
 use consolebook_server::record_export::{
     self, ARCHIVE_FORMAT, ARCHIVE_MANIFEST_PATH, ArchiveManifest, ExportRefusal, FORMAT_VERSION,
-    Scope, UNIT_FORMAT, UnitManifest,
+    Scope, UNIT_FORMAT, UNIT_FORMAT_VERSION, UnitManifest,
 };
 use consolebook_server::training_sessions::{self, Disposition, SessionInput};
 use consolebook_server::{
@@ -596,7 +596,7 @@ async fn exports_carry_stored_bytes_verbatim_and_verify() {
         serde_json::from_slice(entry(&listed, &format!("{unit_dir}/manifest.json")))
             .expect("unit manifest");
     assert_eq!(unit_manifest.format, UNIT_FORMAT);
-    assert_eq!(unit_manifest.format_version, FORMAT_VERSION);
+    assert_eq!(unit_manifest.format_version, UNIT_FORMAT_VERSION);
     assert_eq!(unit_manifest.installation_id, installation_id);
     assert_eq!(unit_manifest.exported_at, EXPORTED_AT);
     assert_eq!(unit_manifest.record_id, s.record_id);
@@ -854,7 +854,7 @@ async fn verification_names_every_finding() {
     // An unknown format version is refused by name, not guessed at.
     let future = repack(&with_entry(&listed, ARCHIVE_MANIFEST_PATH, |bytes| {
         Some(edit_json(bytes, |manifest| {
-            manifest["format_version"] = serde_json::Value::from(2);
+            manifest["format_version"] = serde_json::Value::from(FORMAT_VERSION + 1);
         }))
     }));
     let report = export_verify::verify_archive(&future);
@@ -862,7 +862,7 @@ async fn verification_names_every_finding() {
     assert!(
         report.findings.contains(&Finding::UnsupportedFormat {
             format: ARCHIVE_FORMAT.to_owned(),
-            format_version: 2
+            format_version: FORMAT_VERSION + 1
         }),
         "{report:?}"
     );

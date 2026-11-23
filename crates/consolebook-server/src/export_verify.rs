@@ -12,9 +12,13 @@
 //! export's in `installation_verify`; this module owns the findings, the
 //! reports, the format dispatch, and the unit checks every format shares.
 
+mod record;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::io::Cursor;
+
+pub use record::{ArchiveContentStatus, DispositionReport};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -26,8 +30,9 @@ use crate::installation_export::{INSTALLATION_FORMAT, INSTALLATION_FORMAT_VERSIO
 use crate::installation_verify::InstallationFinding;
 use crate::record_envelope;
 use crate::record_export::{
-    ARCHIVE_FORMAT, ARCHIVE_MANIFEST_PATH, ArchiveManifest, FORMAT_VERSION, RECORD_FILE, Scope,
-    UNIT_FORMAT, UNIT_MANIFEST_FILE, UnitEntry, UnitManifest, canonical_json, unit_path,
+    ARCHIVE_FORMAT, ARCHIVE_MANIFEST_PATH, FORMAT_VERSION, LEGACY_FORMAT_VERSION, RECORD_FILE,
+    Scope, UNIT_FORMAT, UNIT_FORMAT_VERSION, UNIT_MANIFEST_FILE, UnitEntry, UnitManifest,
+    canonical_json, unit_path,
 };
 use crate::trainee_packet::{DocumentKind, PACKET_FORMAT, PACKET_FORMAT_VERSION};
 use crate::zip_container::{Archive, central_directory_names, read_entry};
@@ -183,6 +188,11 @@ pub enum Finding {
     Installation {
         finding: InstallationFinding,
     },
+    /// One record appears both as a retained unit and as a lawfully disposed
+    /// tombstone in the same archive.
+    DispositionRecordConflict {
+        record_id: i64,
+    },
 }
 
 impl fmt::Display for Finding {
@@ -300,6 +310,10 @@ impl fmt::Display for Finding {
             Self::PredecessorMismatch => {
                 f.write_str("the predecessor in this archive has a different content hash")
             }
+            Self::DispositionRecordConflict { record_id } => write!(
+                f,
+                "record {record_id} appears both as a retained unit and as a disposed tombstone"
+            ),
         }
     }
 }
@@ -412,6 +426,8 @@ pub struct ArchiveReport {
     pub documents: Vec<DocumentReport>,
     /// An installation export's table documents.
     pub tables: Vec<TableReport>,
+    /// Embedded portable disposition evidence report, when present.
+    pub disposition: Option<DispositionReport>,
     pub findings: Vec<Finding>,
 }
 
@@ -422,6 +438,35 @@ impl ArchiveReport {
             && self.units.iter().all(UnitReport::verified)
             && self.documents.iter().all(DocumentReport::verified)
             && self.tables.iter().all(TableReport::verified)
+            && self
+                .disposition
+                .as_ref()
+                .is_none_or(DispositionReport::verified)
+    }
+
+    /// Honest content-coverage classification distinguishing retained content,
+    /// mixed retained/disposed scopes, fully disposed scopes, and intentional
+    /// policy boundaries (ADR 0030 §7).
+    #[must_use]
+    pub fn content_status(&self) -> ArchiveContentStatus {
+        if !self.verified() {
+            return ArchiveContentStatus::Failed;
+        }
+        let Some(disp) = &self.disposition else {
+            return ArchiveContentStatus::RetainedContentOnly;
+        };
+        let has_units = !self.units.is_empty();
+        let has_disposed = !disp.dispositions.is_empty();
+        let has_boundaries = !disp.boundary_checkpoints.is_empty();
+        if !has_units {
+            ArchiveContentStatus::FullyDisposed
+        } else if has_disposed {
+            ArchiveContentStatus::MixedRetainedAndDisposed
+        } else if has_boundaries {
+            ArchiveContentStatus::RetainedWithPolicyBoundary
+        } else {
+            ArchiveContentStatus::RetainedContentOnly
+        }
     }
 
     /// The export instant as RFC 3339, for presentation.
@@ -449,6 +494,7 @@ pub fn verify_archive(bytes: &[u8]) -> ArchiveReport {
         units: Vec::new(),
         documents: Vec::new(),
         tables: Vec::new(),
+        disposition: None,
         findings: Vec::new(),
     };
     let mut archive = match zip::ZipArchive::new(Cursor::new(bytes)) {
@@ -502,8 +548,11 @@ pub fn verify_archive(bytes: &[u8]) -> ArchiveReport {
         }
     };
     match (probe.format.as_str(), probe.format_version) {
+        (ARCHIVE_FORMAT, LEGACY_FORMAT_VERSION) => {
+            record::verify_record_export_v1(&mut archive, &names, &manifest_bytes, &mut report);
+        }
         (ARCHIVE_FORMAT, FORMAT_VERSION) => {
-            verify_export(&mut archive, &names, &manifest_bytes, &mut report);
+            record::verify_record_export_v2(&mut archive, &names, &manifest_bytes, &mut report);
         }
         (PACKET_FORMAT, PACKET_FORMAT_VERSION) => {
             crate::packet_verify::verify_packet(&mut archive, &names, &manifest_bytes, &mut report);
@@ -529,44 +578,6 @@ pub fn verify_archive(bytes: &[u8]) -> ArchiveReport {
 struct FormatProbe {
     format: String,
     format_version: i64,
-}
-
-fn verify_export(
-    archive: &mut Archive<'_>,
-    names: &[String],
-    manifest_bytes: &[u8],
-    report: &mut ArchiveReport,
-) {
-    report.kind = Some(ArchiveKind::RecordExport);
-    let manifest: ArchiveManifest = match serde_json::from_slice(manifest_bytes) {
-        Ok(manifest) => manifest,
-        Err(err) => {
-            report.findings.push(Finding::ArchiveManifestUnreadable {
-                detail: err.to_string(),
-            });
-            return;
-        }
-    };
-    if canonical_json(&manifest).ok().as_deref() != Some(manifest_bytes) {
-        report.findings.push(Finding::ManifestNotCanonical {
-            path: ARCHIVE_MANIFEST_PATH.to_owned(),
-        });
-    }
-    report.installation_id = Some(manifest.installation_id.clone());
-    report.exported_at = Some(manifest.exported_at);
-    report.scope = Some(manifest.scope);
-    report.findings.extend(scope_findings(&manifest));
-    let mut listed: BTreeSet<String> = BTreeSet::new();
-    listed.insert(ARCHIVE_MANIFEST_PATH.to_owned());
-    verify_units(
-        archive,
-        &manifest.installation_id,
-        manifest.exported_at,
-        &manifest.units,
-        &mut listed,
-        report,
-    );
-    unlisted_entries(names, &listed, report);
 }
 
 /// The unit checks shared by every format: order, derived paths, and
@@ -640,7 +651,7 @@ fn verify_unit(
     match read_entry(archive, &manifest_path) {
         Ok(Some(bytes)) => match serde_json::from_slice::<UnitManifest>(&bytes) {
             Ok(unit) => {
-                if unit.format != UNIT_FORMAT || unit.format_version != FORMAT_VERSION {
+                if unit.format != UNIT_FORMAT || unit.format_version != UNIT_FORMAT_VERSION {
                     findings.push(Finding::UnsupportedFormat {
                         format: unit.format.clone(),
                         format_version: unit.format_version,
@@ -815,48 +826,6 @@ fn verify_unit(
         predecessor,
         findings,
     }
-}
-
-/// The declared scope checked as far as the archive itself allows: no
-/// scope is empty, a version scope is exactly its one unit, and a
-/// record scope holds only that record's versions. Enrollment and
-/// installation scopes state nothing the bytes can confirm.
-fn scope_findings(manifest: &ArchiveManifest) -> Vec<Finding> {
-    let mut findings = Vec::new();
-    if manifest.units.is_empty() {
-        findings.push(Finding::NoUnits);
-    }
-    match manifest.scope {
-        Scope::Version {
-            record_id,
-            version_number,
-        } => {
-            if manifest.units.len() != 1 {
-                findings.push(Finding::ScopeCardinality {
-                    expected: 1,
-                    listed: manifest.units.len(),
-                });
-            }
-            for entry in &manifest.units {
-                if (entry.record_id, entry.version_number) != (record_id, version_number) {
-                    findings.push(Finding::UnitOutsideScope {
-                        path: entry.path.clone(),
-                    });
-                }
-            }
-        }
-        Scope::Record { record_id } => {
-            for entry in &manifest.units {
-                if entry.record_id != record_id {
-                    findings.push(Finding::UnitOutsideScope {
-                        path: entry.path.clone(),
-                    });
-                }
-            }
-        }
-        Scope::Enrollment { .. } | Scope::Installation => {}
-    }
-    findings
 }
 
 /// The reader keeps one entry per name; only the central directory
