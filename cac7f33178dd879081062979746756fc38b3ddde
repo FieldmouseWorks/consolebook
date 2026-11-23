@@ -1,0 +1,150 @@
+{
+  "conary": "note v1",
+  "change": "7hqpa6k1ha52ssbpe7s3j56phh",
+  "repo": {
+    "owner": "FieldmouseWorks",
+    "name": "consolebook"
+  },
+  "pr": 249,
+  "url": "https://github.com/FieldmouseWorks/consolebook/pull/249",
+  "summary": "deps: update url to 2.5.9 for RUSTSEC-2026-0592",
+  "task": null,
+  "author": {
+    "kind": "bot",
+    "login": "fieldmouseworks-workers[bot]",
+    "session": null
+  },
+  "class": "R0",
+  "landing": {
+    "revision": "f2ac56fe5c546ed993ecba3a8b582ad9655a96b1586a08d35f5ec34b380e549c",
+    "before": "4f84203b54c4371bbb35ccb3a9c4015349afed81",
+    "after": "cac7f33178dd879081062979746756fc38b3ddde",
+    "by": {
+      "kind": "status",
+      "login": "fieldmouseworks-steward[bot]"
+    },
+    "at": 1795407078161
+  },
+  "evidence": [
+    {
+      "kind": "ci",
+      "check": "check / commits",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/45108667389/job/137475739528"
+    },
+    {
+      "kind": "ci",
+      "check": "check / lane into main",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/45108667389/job/137475739034"
+    },
+    {
+      "kind": "ci",
+      "check": "check / negative",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/45108667389/job/137475738770"
+    },
+    {
+      "kind": "ci",
+      "check": "house",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/45108667081/job/137475737356"
+    },
+    {
+      "kind": "ci",
+      "check": "Analyze (actions)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/45108664645/job/137475733199"
+    },
+    {
+      "kind": "ci",
+      "check": "house/title (#249)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/45108667081"
+    },
+    {
+      "kind": "ci",
+      "check": "house/rust-first (#249)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/45108667081"
+    },
+    {
+      "kind": "ci",
+      "check": "house/timers (#249)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/45108667081"
+    },
+    {
+      "kind": "ci",
+      "check": "house/file-size (#249)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/45108667081"
+    },
+    {
+      "kind": "ci",
+      "check": "house/guide-size (#249)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/45108667081"
+    },
+    {
+      "kind": "ci",
+      "check": "house/model-names (#249)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/45108667081"
+    },
+    {
+      "kind": "ci",
+      "check": "house/branch (#249)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/45108667081"
+    },
+    {
+      "kind": "ci",
+      "check": "CodeQL",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/runs/137475888843"
+    },
+    {
+      "kind": "ci",
+      "check": "build-aarch64",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/45108667141/job/137475737916"
+    },
+    {
+      "kind": "ci",
+      "check": "fmt-clippy-test",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/45108667156/job/137475737770"
+    },
+    {
+      "kind": "ci",
+      "check": "build-x86_64",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/45108667141/job/137475737707"
+    },
+    {
+      "kind": "ci",
+      "check": "Analyze (javascript-typescript)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/45108664645/job/137475733178"
+    },
+    {
+      "kind": "ci",
+      "check": "Analyze (rust)",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/45108664645/job/137475733103"
+    },
+    {
+      "kind": "ci",
+      "check": "check / check",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/actions/runs/45108667389/job/137475773347"
+    },
+    {
+      "kind": "review",
+      "check": "codex",
+      "result": "pass",
+      "source": "https://github.com/FieldmouseWorks/consolebook/pull/249#issuecomment-7091295845 at 2026-11-23T04:08:45Z"
+    }
+  ]
+}
