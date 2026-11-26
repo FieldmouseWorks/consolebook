@@ -15,4 +15,8 @@ jobs:
       pull-requests: read
       statuses: write
     steps:
-      - uses: FieldmouseWorks/burrow/.github/actions/house@932bcadfda10afdb8a527804575bcd6c8a0e0c5b # main
+      - uses: FieldmouseWorks/burrow/.github/actions/house@4e2a4d8fecf20ee66b14fbdabd1aec207d10fd71 # main
+        with:
+          file-size-allow: |
+            web/src/routes/drafts/[id]/+page.svelte # pre-existing large Svelte page component
+            web/src/routes/enrollments/[id]/+page.svelte # pre-existing large Svelte page component
